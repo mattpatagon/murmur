@@ -61,7 +61,7 @@ jobs:
           set -euo pipefail
           database_url="$(gcloud secrets versions access latest \
             --project "$PROJECT_ID" \
-            --secret MURMUR_DATABASE_URL)"
+            --secret MURMUR_CI_DATABASE_URL)"
           echo "::add-mask::$database_url"
           bunx supabase db push --db-url "$database_url" --include-all --yes
           MURMUR_TEST_DATABASE_URL="$database_url" bun run test:cloud

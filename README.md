@@ -132,6 +132,9 @@ openssl rand -hex 32 | \
 
 The deployment workflow applies the database migrations described under
 [Supabase Postgres](#supabase-postgres) before deploying each server revision.
+GitHub-hosted runners use the IPv4 Supabase session-pooler connection stored in
+`MURMUR_CI_DATABASE_URL`; the Cloud Run service keeps its direct connection in
+`MURMUR_DATABASE_URL`.
 For a manual fallback, grant the Cloud Run runtime service account access to
 both secrets and deploy from the repository root:
 

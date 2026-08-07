@@ -9,6 +9,8 @@
 - Merge method: squash
 - Project type: MCP API service
 - Post-deploy health check: https://api.usemurmur.dev/health
+- CI migrations/tests use the IPv4 Supabase session-pooler secret
+  `MURMUR_CI_DATABASE_URL`; Cloud Run uses `MURMUR_DATABASE_URL`.
 
 ### Custom deploy hooks
 
