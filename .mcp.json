@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "murmur": {
+      "type": "http",
+      "url": "https://api.usemurmur.dev/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MURMUR_API_TOKEN}",
+        "X-Murmur-Client": "claude",
+        "X-Murmur-Repository": "mattpatagon/murmur"
+      }
+    }
+  }
+}

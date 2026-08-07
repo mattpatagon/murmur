@@ -1,0 +1,14 @@
+.gcloudignore
+.git
+.gitignore
+.agents
+.claude
+.codex
+.conductor
+.context
+.env*
+.murmur
+dist
+node_modules
+supabase
+test

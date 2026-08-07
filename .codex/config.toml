@@ -1,0 +1,7 @@
+[mcp_servers.murmur]
+url = "https://api.usemurmur.dev/mcp"
+bearer_token_env_var = "MURMUR_API_TOKEN"
+http_headers = { "X-Murmur-Client" = "codex", "X-Murmur-Repository" = "mattpatagon/murmur" }
+required = false
+startup_timeout_sec = 10
+tool_timeout_sec = 30
