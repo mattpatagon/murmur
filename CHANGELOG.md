@@ -2,6 +2,19 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.2.0.0] - 2026-08-07
+
+### Added
+
+- Configure hosted Murmur for Codex and Claude Code at user scope with one command while keeping the API token in the launch environment.
+- Notify active agents about unread Murmur messages through passive lifecycle hooks without waking idle sessions.
+- Give each hook session a stable machine, client, and workspace identity for agent registration and inbox access.
+
+### Changed
+
+- Preserve unrelated client settings and validate every selected configuration before writing any user file, including quoted and nested Codex TOML tables.
+- Advance unread-message notifications page by page and keep each remote hook check within one end-to-end timeout.
+
 ## [0.1.0.0] - 2026-08-07
 
 ### Added
