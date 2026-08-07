@@ -58,6 +58,7 @@ export type HookOutput = {
 type CheckInbox = (
   identity: AgentIdentity,
   options: {
+    readonly afterSequence: number;
     readonly token: string;
     readonly timeoutMs: number;
     readonly url: string;
@@ -282,10 +283,21 @@ async function postJsonRpc(options: {
   return { body: await responseBody(response), response };
 }
 
+function remainingTimeoutMs(deadline: number): number {
+  return Math.max(1, deadline - Date.now());
+}
+
 export async function checkRemoteInbox(
   identity: AgentIdentity,
-  options: { readonly token: string; readonly timeoutMs: number; readonly url: string },
+  options: {
+    readonly afterSequence?: number | undefined;
+    readonly token: string;
+    readonly timeoutMs: number;
+    readonly url: string;
+  },
 ): Promise<InboxSummary> {
+  const afterSequence: number = options.afterSequence ?? 0;
+  const deadline: number = Date.now() + options.timeoutMs;
   const initialize: JsonRpcExchange = await postJsonRpc({
     body: {
       jsonrpc: "2.0",
@@ -298,7 +310,7 @@ export async function checkRemoteInbox(
       },
     },
     headers: requestHeaders(identity, options.token, null),
-    timeoutMs: options.timeoutMs,
+    timeoutMs: remainingTimeoutMs(deadline),
     url: options.url,
   });
   rpcResult(initialize.body);
@@ -309,7 +321,7 @@ export async function checkRemoteInbox(
     await postJsonRpc({
       body: { jsonrpc: "2.0", method: "notifications/initialized", params: {} },
       headers,
-      timeoutMs: options.timeoutMs,
+      timeoutMs: remainingTimeoutMs(deadline),
       url: options.url,
     });
     const registration: JsonRpcExchange = await postJsonRpc({
@@ -331,7 +343,7 @@ export async function checkRemoteInbox(
         },
       },
       headers,
-      timeoutMs: options.timeoutMs,
+      timeoutMs: remainingTimeoutMs(deadline),
       url: options.url,
     });
     rpcResult(registration.body);
@@ -343,7 +355,7 @@ export async function checkRemoteInbox(
         params: {
           name: "get_messages",
           arguments: {
-            after_sequence: 0,
+            after_sequence: afterSequence,
             agent_id: identity.agentId,
             limit: 100,
             unread_only: true,
@@ -351,14 +363,15 @@ export async function checkRemoteInbox(
         },
       },
       headers,
-      timeoutMs: options.timeoutMs,
+      timeoutMs: remainingTimeoutMs(deadline),
       url: options.url,
     });
     const toolResult: unknown = rpcResult(inboxResponse.body);
     if (!isRecord(toolResult)) throw new Error("Murmur returned an invalid tool result");
     const inbox: InboxOutput = InboxOutputSchema.parse(toolResult["structuredContent"]);
+    const lastMessage: InboxOutput["messages"][number] | undefined = inbox.messages.at(-1);
     return {
-      inboxVersion: inbox.inbox_version,
+      inboxVersion: lastMessage === undefined ? afterSequence : lastMessage.sequence,
       messageCount: inbox.messages.length,
       senderIds: [
         ...new Set(
@@ -372,7 +385,7 @@ export async function checkRemoteInbox(
     await fetch(options.url, {
       headers,
       method: "DELETE",
-      signal: AbortSignal.timeout(options.timeoutMs),
+      signal: AbortSignal.timeout(remainingTimeoutMs(deadline)),
     }).catch((): void => undefined);
   }
 }
@@ -416,6 +429,7 @@ export async function handleHook(
     options.timeoutMs ??
     numericEnvironmentValue(environment["MURMUR_HOOK_TIMEOUT_MS"], DEFAULT_TIMEOUT_MS);
   const summary: InboxSummary = await (options.checkInbox ?? checkRemoteInbox)(identity, {
+    afterSequence: eventName === "SessionStart" ? 0 : cache.lastNotifiedInboxVersion,
     token,
     timeoutMs,
     url: options.url ?? environment["MURMUR_MCP_URL"] ?? DEFAULT_MURMUR_URL,

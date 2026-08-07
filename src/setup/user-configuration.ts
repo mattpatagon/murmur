@@ -25,6 +25,13 @@ type TomlSection = {
   readonly start: number;
 };
 
+type MurmurTomlSectionKind = "nested" | "root";
+
+type PendingWrite = {
+  readonly content: string;
+  readonly path: string;
+};
+
 export type UserConfigurationPaths = {
   readonly claudeMcp: string;
   readonly claudeSettings: string;
@@ -56,10 +63,6 @@ function writeFileAtomic(path: string, content: string): void {
   chmodSync(path, existingMode);
 }
 
-function writeJsonRecord(path: string, value: JsonRecord): void {
-  writeFileAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
-}
-
 function tomlSections(content: string): readonly TomlSection[] {
   const headerPattern: RegExp = /^[ \t]*\[([^\]\r\n]+)\][ \t]*(?:#.*)?$/gmu;
   const headers: Array<Omit<TomlSection, "end">> = [];
@@ -76,6 +79,29 @@ function tomlSections(content: string): readonly TomlSection[] {
       end: nextHeader === undefined ? content.length : nextHeader.start,
     };
   });
+}
+
+const TOML_SECTION_MARKER: string = "__murmur_section_marker__";
+
+function containsTomlSectionMarker(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (value[TOML_SECTION_MARKER] === true) return true;
+  return Object.values(value).some((nested: unknown): boolean => containsTomlSectionMarker(nested));
+}
+
+function murmurTomlSectionKind(name: string): MurmurTomlSectionKind | null {
+  try {
+    const parsed: unknown = Bun.TOML.parse(`[${name}]\n${TOML_SECTION_MARKER} = true\n`);
+    if (!isRecord(parsed)) return null;
+    const servers: unknown = parsed["mcp_servers"];
+    if (!isRecord(servers)) return null;
+    const murmur: unknown = servers["murmur"];
+    if (!isRecord(murmur)) return null;
+    if (murmur[TOML_SECTION_MARKER] === true) return "root";
+    return containsTomlSectionMarker(murmur) ? "nested" : null;
+  } catch (_error: unknown) {
+    return null;
+  }
 }
 
 function parseSimpleTomlString(sectionBody: string, key: string): string | null {
@@ -103,8 +129,7 @@ function codexServerBlock(url: string): string {
 
 function removeMurmurTomlSections(content: string): string {
   const matchingSections: readonly TomlSection[] = tomlSections(content).filter(
-    (section: TomlSection): boolean =>
-      section.name === "mcp_servers.murmur" || section.name.startsWith("mcp_servers.murmur."),
+    (section: TomlSection): boolean => murmurTomlSectionKind(section.name) !== null,
   );
   let result: string = content;
   for (const section of [...matchingSections].reverse()) {
@@ -176,7 +201,7 @@ function addCodexClientHeader(content: string, section: TomlSection): string {
 export function configureCodexMcp(current: string, url: string, replace: boolean = false): string {
   const sections: readonly TomlSection[] = tomlSections(current);
   const section: TomlSection | undefined = sections.find(
-    (candidate: TomlSection): boolean => candidate.name === "mcp_servers.murmur",
+    (candidate: TomlSection): boolean => murmurTomlSectionKind(candidate.name) === "root",
   );
   if (section === undefined) {
     const prefix: string = current.trimEnd();
@@ -196,10 +221,23 @@ export function configureCodexMcp(current: string, url: string, replace: boolean
     return `${withoutMurmur === "" ? "" : `${withoutMurmur}\n\n`}${codexServerBlock(url)}\n`;
   }
 
+  const hasNestedMurmurSections: boolean = sections.some(
+    (candidate: TomlSection): boolean => murmurTomlSectionKind(candidate.name) === "nested",
+  );
+  if (hasNestedMurmurSections) {
+    if (!replace) {
+      throw new Error(
+        "Codex uses nested Murmur configuration that cannot be updated safely. Inspect it or rerun with --replace.",
+      );
+    }
+    const withoutMurmur: string = removeMurmurTomlSections(current);
+    return `${withoutMurmur === "" ? "" : `${withoutMurmur}\n\n`}${codexServerBlock(url)}\n`;
+  }
+
   try {
     const portableContent: string = removeStaticCodexContextHeaders(current, section);
     const portableSection: TomlSection | undefined = tomlSections(portableContent).find(
-      (candidate: TomlSection): boolean => candidate.name === "mcp_servers.murmur",
+      (candidate: TomlSection): boolean => murmurTomlSectionKind(candidate.name) === "root",
     );
     if (portableSection === undefined) throw new Error("Codex Murmur configuration disappeared");
     return addCodexClientHeader(portableContent, portableSection);
@@ -334,7 +372,7 @@ export function installUserConfiguration(options: {
   const paths: UserConfigurationPaths = options.paths ?? defaultUserConfigurationPaths();
   const replace: boolean = options.replace ?? false;
   const url: string = options.url ?? DEFAULT_MURMUR_URL;
-  const changedPaths: string[] = [];
+  const pendingWrites: PendingWrite[] = [];
 
   if (options.clients.includes("codex")) {
     const currentConfig: string = existsSync(paths.codexConfig)
@@ -342,14 +380,15 @@ export function installUserConfiguration(options: {
       : "";
     const nextConfig: string = configureCodexMcp(currentConfig, url, replace);
     if (nextConfig !== currentConfig) {
-      writeFileAtomic(paths.codexConfig, nextConfig);
-      changedPaths.push(paths.codexConfig);
+      pendingWrites.push({ content: nextConfig, path: paths.codexConfig });
     }
     const currentHooks: JsonRecord = readJsonRecord(paths.codexHooks);
     const nextHooks: JsonRecord = configureHooks(currentHooks, "codex", options.hookExecutable);
     if (JSON.stringify(nextHooks) !== JSON.stringify(currentHooks)) {
-      writeJsonRecord(paths.codexHooks, nextHooks);
-      changedPaths.push(paths.codexHooks);
+      pendingWrites.push({
+        content: `${JSON.stringify(nextHooks, null, 2)}\n`,
+        path: paths.codexHooks,
+      });
     }
   }
 
@@ -357,8 +396,10 @@ export function installUserConfiguration(options: {
     const currentMcp: JsonRecord = readJsonRecord(paths.claudeMcp);
     const nextMcp: JsonRecord = configureClaudeMcp(currentMcp, url, replace);
     if (JSON.stringify(nextMcp) !== JSON.stringify(currentMcp)) {
-      writeJsonRecord(paths.claudeMcp, nextMcp);
-      changedPaths.push(paths.claudeMcp);
+      pendingWrites.push({
+        content: `${JSON.stringify(nextMcp, null, 2)}\n`,
+        path: paths.claudeMcp,
+      });
     }
     const currentSettings: JsonRecord = readJsonRecord(paths.claudeSettings);
     const nextSettings: JsonRecord = configureHooks(
@@ -367,10 +408,13 @@ export function installUserConfiguration(options: {
       options.hookExecutable,
     );
     if (JSON.stringify(nextSettings) !== JSON.stringify(currentSettings)) {
-      writeJsonRecord(paths.claudeSettings, nextSettings);
-      changedPaths.push(paths.claudeSettings);
+      pendingWrites.push({
+        content: `${JSON.stringify(nextSettings, null, 2)}\n`,
+        path: paths.claudeSettings,
+      });
     }
   }
 
-  return changedPaths;
+  for (const pending of pendingWrites) writeFileAtomic(pending.path, pending.content);
+  return pendingWrites.map((pending: PendingWrite): string => pending.path);
 }
