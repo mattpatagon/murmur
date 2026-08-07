@@ -8,7 +8,7 @@ All notable changes to Murmur are documented in this file.
 
 - Configure hosted Murmur for Codex and Claude Code at user scope with one command while keeping the API token in the launch environment.
 - Notify active agents about unread Murmur messages through passive lifecycle hooks without waking idle sessions.
-- Give each hook session a stable machine, client, and workspace identity for agent registration and inbox access.
+- Keep agent inboxes distinct across machines, clients, and workspaces with stable hook identities.
 
 ### Changed
 

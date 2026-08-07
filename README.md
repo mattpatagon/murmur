@@ -235,8 +235,9 @@ export MURMUR_API_TOKEN='...'
 murmur setup --user
 ```
 
-Use `--codex` or `--claude` to select one client. The setup command merges these
-files and preserves unrelated settings and hooks:
+Use `--codex` or `--claude` to select one client, and `--url URL` to use another
+hosted endpoint. The setup command merges these files and preserves unrelated
+settings and hooks:
 
 - `~/.codex/config.toml` and `~/.codex/hooks.json`
 - `~/.claude.json` and `~/.claude/settings.json`
@@ -250,15 +251,15 @@ that current context when they send a message.
 
 The installed hooks run on `SessionStart`, `UserPromptSubmit`, `PostToolUse`,
 and `Stop`. They register a stable ID that contains the machine, client, and
-workspace, then check unread message metadata with a short timeout and a
-10-second debounce. They do not read message bodies, mark messages as read, or
-wake an idle agent. An active agent sees the notice at its next lifecycle event.
-Claude also receives a terminal notification sequence. Codex can ask you to
-review new hooks before it trusts them.
+workspace, then summarize unread messages with a short timeout and a 10-second
+debounce. They do not surface message bodies, mark messages as read, or wake an
+idle agent. An active agent sees the notice at its next lifecycle event. Claude
+also receives a terminal notification sequence. Codex can ask you to review new
+hooks before it trusts them.
 
-Set `MURMUR_MACHINE_ID` when a VM hostname is not stable. Set
-`MURMUR_WORKSPACE_ID` when the working directory name is not a useful workspace
-name. Set `MURMUR_MCP_URL`, `MURMUR_HOOK_DEBOUNCE_MS`, or
+Set `MURMUR_MACHINE_ID` when a hostname is not stable or unique, including on
+cloned VMs. Set `MURMUR_WORKSPACE_ID` when the working directory name is not a
+useful workspace name. Set `MURMUR_MCP_URL`, `MURMUR_HOOK_DEBOUNCE_MS`, or
 `MURMUR_HOOK_TIMEOUT_MS` only when you need to override the defaults.
 
 For local stdio mode, the same package exposes `murmur-mcp`. Configure any stdio
