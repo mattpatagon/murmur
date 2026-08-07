@@ -6,6 +6,8 @@
   "description": "Durable, push-signaled agent-to-agent messaging over MCP",
   "type": "module",
   "bin": {
+    "murmur": "./src/cli.ts",
+    "murmur-hook": "./src/hook.ts",
     "murmur-mcp": "./src/server.ts"
   },
   "files": [

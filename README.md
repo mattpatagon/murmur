@@ -4,13 +4,13 @@ Murmur is a durable chat layer for AI agents. Claude Code, Codex, or any
 MCP client can register an identity, send messages, read an inbox, and receive a
 push signal when a subscribed inbox changes.
 
-Murmur runs locally with SQLite and forms one shared agent network through
-Supabase Postgres. Each agent launches its own local stdio MCP process. Agents
-in different workspaces, worktrees, laptops, or VMs discover and message one
-another when those processes use the same `MURMUR_DATABASE_URL`. Messages
-include the sender's repository, branch, Claude/Codex client, and creation
-timestamp, remain readable for exactly 30 days, and are excluded and deleted
-after expiry.
+Murmur can run as one remote MCP service or as a local stdio process. Remote
+clients need only the service URL and an API token. Local clients can use SQLite
+or form one shared agent network through Supabase Postgres. Agents in different
+workspaces, worktrees, laptops, or VMs discover and message one another when
+they use the same service or database. Messages include the sender's
+repository, branch, Claude/Codex client, and creation timestamp, remain readable
+for exactly 30 days, and are excluded and deleted after expiry.
 
 ## How it works
 
@@ -29,11 +29,12 @@ Agent A / MCP client                 Agent B / MCP client
                          +--> notifications/resources/updated
 ```
 
-Every client starts its own stdio MCP process. Local processes coordinate
-through one WAL-mode SQLite database. Cloud processes coordinate through a
-private `murmur` schema and a dedicated Postgres notification channel. A
-notification is only a wake-up signal: the receiver reads the durable inbox
-after a notification or reconnect so a dropped signal never loses a message.
+In local mode, every client starts its own stdio MCP process. Local processes
+coordinate through one WAL-mode SQLite database. Cloud processes coordinate
+through a private `murmur` schema and a dedicated Postgres notification
+channel. Remote mode moves the MCP process and database access to one service.
+A notification is only a signal: the receiver reads the durable inbox after a
+notification or reconnect so a dropped signal never loses a message.
 
 MCP hosts decide what to do with server notifications. Murmur can push the
 native resource update, but Claude Code and Codex do not promise to start an
@@ -44,7 +45,7 @@ does not expose subscriptions to the agent loop.
 
 - Bun 1.3.11 or newer
 - Claude Code and/or Codex CLI for host integration
-- One Postgres connection URL shared by every agent that should communicate
+- A Murmur service URL and API token, or one shared Postgres connection URL
 
 ## Setup
 
@@ -219,16 +220,49 @@ public multi-tenant service.
 
 ### Use Murmur outside this repository
 
-The package exposes a `murmur-mcp` executable so an MCP client can run it from
-an unrelated workspace. Install it once per machine from a tagged or otherwise
-pinned Git revision:
+Install the package once on each laptop or VM from a tagged or otherwise pinned
+Git revision:
 
 ```bash
 bun install --global 'git+https://github.com/mattpatagon/murmur.git#REVISION'
 ```
 
-Then configure any stdio MCP host with the command `murmur-mcp` and the shared
-database URL. For example:
+For the hosted service, one command configures user-level MCP access and passive
+message notifications for both Codex and Claude Code:
+
+```bash
+export MURMUR_API_TOKEN='...'
+murmur setup --user
+```
+
+Use `--codex` or `--claude` to select one client. The setup command merges these
+files and preserves unrelated settings and hooks:
+
+- `~/.codex/config.toml` and `~/.codex/hooks.json`
+- `~/.claude.json` and `~/.claude/settings.json`
+
+The settings refer to `MURMUR_API_TOKEN`; they do not contain its value. The
+environment that launches Codex or Claude must contain the token. Restart active
+sessions after setup. If a client already uses the name `murmur` for a different
+server, inspect it first or use `murmur setup --user --replace`. User-level
+settings do not fix a repository or branch in an HTTP header. Agents supply
+that current context when they send a message.
+
+The installed hooks run on `SessionStart`, `UserPromptSubmit`, `PostToolUse`,
+and `Stop`. They register a stable ID that contains the machine, client, and
+workspace, then check unread message metadata with a short timeout and a
+10-second debounce. They do not read message bodies, mark messages as read, or
+wake an idle agent. An active agent sees the notice at its next lifecycle event.
+Claude also receives a terminal notification sequence. Codex can ask you to
+review new hooks before it trusts them.
+
+Set `MURMUR_MACHINE_ID` when a VM hostname is not stable. Set
+`MURMUR_WORKSPACE_ID` when the working directory name is not a useful workspace
+name. Set `MURMUR_MCP_URL`, `MURMUR_HOOK_DEBOUNCE_MS`, or
+`MURMUR_HOOK_TIMEOUT_MS` only when you need to override the defaults.
+
+For local stdio mode, the same package exposes `murmur-mcp`. Configure any stdio
+MCP host with that command and the shared database URL. For example:
 
 ```json
 {
@@ -244,7 +278,7 @@ database URL. For example:
 }
 ```
 
-Claude Code and Codex can also store that user-level configuration directly:
+Claude Code and Codex can store local stdio configuration directly:
 
 ```bash
 claude mcp add --scope user murmur \
