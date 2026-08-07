@@ -10,6 +10,7 @@ import {
   JsonObjectSchema,
   MessageContent,
   MessageId,
+  MachineName,
   RepositoryName,
   Sequence,
   ThreadId,
@@ -17,10 +18,12 @@ import {
 } from "./value-objects.js";
 
 export const RETENTION_DAYS: number = 30;
+export const ACTIVE_AGENT_WINDOW_MINUTES: number = 60;
 
 const AgentIdTextSchema: z.ZodString = z.string().min(1).max(200);
 const DisplayNameTextSchema: z.ZodString = z.string().min(1).max(200);
 const MessageIdTextSchema: z.ZodString = z.string().uuid();
+const BroadcastIdTextSchema: z.ZodString = z.string().uuid();
 const ThreadIdTextSchema: z.ZodString = z.string().min(1).max(200);
 const MessageContentTextSchema: z.ZodString = z.string().min(1).max(100_000);
 const RepositoryNameTextSchema: z.ZodString = z
@@ -33,6 +36,12 @@ const AgentClientTextSchema: z.ZodEnum<{
   claude: "claude";
   codex: "codex";
 }> = z.enum(["claude", "codex"]);
+const MachineNameTextSchema: z.ZodString = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u);
 const InstantTextSchema: z.ZodISODateTime = z.iso.datetime({ offset: true });
 const SequenceNumberSchema: z.ZodNumber = z.number().int().nonnegative().safe();
 
@@ -55,6 +64,11 @@ export type MessageDto = {
   readonly sender_id: string;
   readonly sequence: number;
   readonly thread_id: string;
+};
+
+export type BroadcastAudienceDto = {
+  readonly machine?: string | undefined;
+  readonly repository?: string | undefined;
 };
 
 export type MessageContextDto = {
@@ -138,6 +152,15 @@ export type SendMessageInput = {
   readonly thread_id?: string | undefined;
 };
 
+export type BroadcastMessageInput = {
+  readonly audience?: BroadcastAudienceDto | undefined;
+  readonly content: string;
+  readonly context?: MessageContextDto | undefined;
+  readonly idempotency_key?: string | undefined;
+  readonly sender_id: string;
+  readonly thread_id?: string | undefined;
+};
+
 export type GetMessagesInput = {
   readonly after_sequence: number;
   readonly agent_id: string;
@@ -170,6 +193,20 @@ export const SendMessageInputSchema: z.ZodType<SendMessageInput> = z.strictObjec
   context: MessageContextDtoSchema.optional(),
   idempotency_key: z.string().min(1).max(200).optional(),
   recipient_id: AgentIdTextSchema,
+  sender_id: AgentIdTextSchema,
+  thread_id: ThreadIdTextSchema.optional(),
+});
+
+export const BroadcastAudienceDtoSchema: z.ZodType<BroadcastAudienceDto> = z.strictObject({
+  machine: MachineNameTextSchema.optional(),
+  repository: RepositoryNameTextSchema.optional(),
+});
+
+export const BroadcastMessageInputSchema: z.ZodType<BroadcastMessageInput> = z.strictObject({
+  audience: BroadcastAudienceDtoSchema.default({}),
+  content: MessageContentTextSchema,
+  context: MessageContextDtoSchema.optional(),
+  idempotency_key: z.string().min(1).max(200).optional(),
   sender_id: AgentIdTextSchema,
   thread_id: ThreadIdTextSchema.optional(),
 });
@@ -210,6 +247,18 @@ export type SendMessageOutput = Record<string, unknown> & {
   readonly status: string;
 };
 
+export type BroadcastMessageOutput = Record<string, unknown> & {
+  readonly audience: BroadcastAudienceDto;
+  readonly broadcast_id: string;
+  readonly created_at: string;
+  readonly duplicate: boolean;
+  readonly expires_at: string;
+  readonly recipient_count: number;
+  readonly retention_days: number;
+  readonly status: string;
+  readonly thread_id: string;
+};
+
 export type InboxOutput = Record<string, unknown> & {
   readonly agent_id: string;
   readonly inbox_version: number;
@@ -242,6 +291,18 @@ export const SendMessageOutputSchema: z.ZodType<SendMessageOutput> = z.strictObj
   message: MessageDtoSchema,
   retention_days: z.number().int().positive(),
   status: z.string(),
+});
+
+export const BroadcastMessageOutputSchema: z.ZodType<BroadcastMessageOutput> = z.strictObject({
+  audience: BroadcastAudienceDtoSchema,
+  broadcast_id: BroadcastIdTextSchema,
+  created_at: InstantTextSchema,
+  duplicate: z.boolean(),
+  expires_at: InstantTextSchema,
+  recipient_count: z.number().int().nonnegative(),
+  retention_days: z.number().int().positive(),
+  status: z.string(),
+  thread_id: ThreadIdTextSchema,
 });
 
 export const InboxOutputSchema: z.ZodType<InboxOutput> = z.strictObject({
@@ -287,6 +348,20 @@ export function parseMessageIds(inputs: readonly string[]): MessageId[] {
 
 export function parseContent(input: string): MessageContent {
   return MessageContent.parse(input);
+}
+
+export function broadcastAudienceFromInput(input: BroadcastAudienceDto | undefined): {
+  readonly machineName: MachineName | null;
+  readonly repositoryName: RepositoryName | null;
+} {
+  return {
+    machineName:
+      input === undefined || input.machine === undefined ? null : MachineName.parse(input.machine),
+    repositoryName:
+      input === undefined || input.repository === undefined
+        ? null
+        : RepositoryName.parse(input.repository),
+  };
 }
 
 export function repositoryNameFromInput(

@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 
-import { RETENTION_DAYS } from "../src/domain/contracts.js";
+import { ACTIVE_AGENT_WINDOW_MINUTES, RETENTION_DAYS } from "../src/domain/contracts.js";
 import type {
+  BroadcastMessageCommand,
+  BroadcastMessageResult,
   MarkMessagesReadResult,
   Message,
   SendMessageCommand,
@@ -22,6 +24,7 @@ import {
   Instant,
   MessageContent,
   MessageId,
+  MachineName,
   RepositoryName,
   Sequence,
 } from "../src/domain/value-objects.js";
@@ -83,12 +86,26 @@ function baseMessageCommand(): SendMessageCommand {
   };
 }
 
+function baseBroadcastCommand(): BroadcastMessageCommand {
+  return {
+    audience: { machineName: null, repositoryName: null },
+    branchName: BranchName.parse("feature/broadcasts"),
+    client: AgentClient.parse("codex"),
+    content: MessageContent.parse("Attention all active agents"),
+    idempotencyKey: IdempotencyKey.parse("broadcast-1"),
+    repositoryName: RepositoryName.parse("mattpatagon/murmur"),
+    senderId: AgentId.parse("alice"),
+    threadId: null,
+  };
+}
+
 test("stores, reads, and marks an inbox message", (): void => {
   withFixture((fixture: StoreFixture): void => {
     const sent: SendMessageResult = fixture.store.sendMessage(baseMessageCommand());
     expect(sent.duplicate).toBe(false);
     expect(sent.message.senderId.value).toBe("alice");
     expect(sent.message.recipientId.value).toBe("bob");
+    expect(sent.message.broadcastId).toBeNull();
     if (sent.message.branchName === null) throw new Error("Expected branch context");
     expect(sent.message.branchName.value).toBe("feature/agent-context");
     if (sent.message.client === null) throw new Error("Expected client context");
@@ -175,6 +192,192 @@ test("deduplicates retries and rejects idempotency-key reuse", (): void => {
   });
 });
 
+test("broadcasts globally or to repository and machine intersections", (): void => {
+  withFixture((fixture: StoreFixture): void => {
+    fixture.store.registerAgent({
+      agentId: AgentId.parse("bob"),
+      displayName: DisplayName.parse("Bob"),
+      metadata: { machine: "mac-1", repository: "mattpatagon/murmur" },
+    });
+    fixture.store.registerAgent({
+      agentId: AgentId.parse("carol"),
+      displayName: DisplayName.parse("Carol"),
+      metadata: { machine: "mac-1", repository: "other/project" },
+    });
+    fixture.store.registerAgent({
+      agentId: AgentId.parse("dave"),
+      displayName: DisplayName.parse("Dave"),
+      metadata: { machine: "linux-1", repository: "mattpatagon/murmur" },
+    });
+
+    const global: BroadcastMessageResult = fixture.store.broadcastMessage(baseBroadcastCommand());
+    expect(global.recipientCount).toBe(3);
+
+    const repository: BroadcastMessageResult = fixture.store.broadcastMessage({
+      ...baseBroadcastCommand(),
+      audience: {
+        machineName: null,
+        repositoryName: RepositoryName.parse("mattpatagon/murmur"),
+      },
+      idempotencyKey: IdempotencyKey.parse("broadcast-repository"),
+    });
+    expect(repository.recipientCount).toBe(2);
+
+    const machine: BroadcastMessageResult = fixture.store.broadcastMessage({
+      ...baseBroadcastCommand(),
+      audience: { machineName: MachineName.parse("mac-1"), repositoryName: null },
+      idempotencyKey: IdempotencyKey.parse("broadcast-machine"),
+    });
+    expect(machine.recipientCount).toBe(2);
+
+    const intersection: BroadcastMessageResult = fixture.store.broadcastMessage({
+      ...baseBroadcastCommand(),
+      audience: {
+        machineName: MachineName.parse("mac-1"),
+        repositoryName: RepositoryName.parse("mattpatagon/murmur"),
+      },
+      idempotencyKey: IdempotencyKey.parse("broadcast-intersection"),
+    });
+    expect(intersection.recipientCount).toBe(1);
+
+    const bobMessages: readonly Message[] = fixture.store.getMessages({
+      afterSequence: Sequence.zero(),
+      agentId: AgentId.parse("bob"),
+      limit: 100,
+      threadId: null,
+      unreadOnly: false,
+    });
+    expect(bobMessages).toHaveLength(4);
+    expect(
+      bobMessages.every(
+        (message: Message): boolean =>
+          message.broadcastId !== null && message.senderId.value === "alice",
+      ),
+    ).toBe(true);
+    const firstBobMessage: Message | undefined = bobMessages[0];
+    if (firstBobMessage === undefined || firstBobMessage.broadcastId === null) {
+      throw new Error("Expected Bob's first broadcast message");
+    }
+    expect(firstBobMessage.broadcastId.value).toBe(global.broadcastId.value);
+    const bobGlobalMessage: Message | undefined = bobMessages.find(
+      (message: Message): boolean =>
+        message.broadcastId !== null && message.broadcastId.value === global.broadcastId.value,
+    );
+    if (bobGlobalMessage === undefined) throw new Error("Expected Bob's global broadcast");
+    expect(
+      fixture.store.markMessagesRead({
+        agentId: AgentId.parse("bob"),
+        messageIds: [bobGlobalMessage.messageId],
+      }).updated,
+    ).toBe(1);
+    const carolUnread: readonly Message[] = fixture.store.getMessages({
+      afterSequence: Sequence.zero(),
+      agentId: AgentId.parse("carol"),
+      limit: 100,
+      threadId: null,
+      unreadOnly: true,
+    });
+    expect(
+      carolUnread.some(
+        (message: Message): boolean =>
+          message.broadcastId !== null && message.broadcastId.value === global.broadcastId.value,
+      ),
+    ).toBe(true);
+
+    const empty: BroadcastMessageResult = fixture.store.broadcastMessage({
+      ...baseBroadcastCommand(),
+      audience: { machineName: MachineName.parse("missing-machine"), repositoryName: null },
+      idempotencyKey: IdempotencyKey.parse("broadcast-empty"),
+    });
+    expect(empty.recipientCount).toBe(0);
+  });
+});
+
+test("broadcast retries preserve their recipient snapshot and reject changed requests", (): void => {
+  withFixture((fixture: StoreFixture): void => {
+    const command: BroadcastMessageCommand = baseBroadcastCommand();
+    const first: BroadcastMessageResult = fixture.store.broadcastMessage(command);
+    expect(first.recipientCount).toBe(1);
+
+    fixture.store.registerAgent({
+      agentId: AgentId.parse("carol"),
+      displayName: DisplayName.parse("Carol"),
+      metadata: {},
+    });
+    const retry: BroadcastMessageResult = fixture.store.broadcastMessage(command);
+    expect(retry.duplicate).toBe(true);
+    expect(retry.broadcastId.value).toBe(first.broadcastId.value);
+    expect(retry.recipientCount).toBe(1);
+    const carolMessages: readonly Message[] = fixture.store.getMessages({
+      afterSequence: Sequence.zero(),
+      agentId: AgentId.parse("carol"),
+      limit: 100,
+      threadId: null,
+      unreadOnly: false,
+    });
+    expect(
+      carolMessages.some(
+        (message: Message): boolean =>
+          message.broadcastId !== null && message.broadcastId.value === first.broadcastId.value,
+      ),
+    ).toBe(false);
+    expect(
+      (): BroadcastMessageResult =>
+        fixture.store.broadcastMessage({
+          ...command,
+          content: MessageContent.parse("changed broadcast"),
+        }),
+    ).toThrow("already used for a different message");
+    expect(
+      (): BroadcastMessageResult =>
+        fixture.store.broadcastMessage({
+          ...command,
+          audience: { machineName: MachineName.parse("mac-1"), repositoryName: null },
+        }),
+    ).toThrow("already used for a different message");
+  });
+});
+
+test(`broadcasts only to agents active in the last ${ACTIVE_AGENT_WINDOW_MINUTES} minutes`, (): void => {
+  withFixture((fixture: StoreFixture): void => {
+    fixture.store.registerAgent({
+      agentId: AgentId.parse("carol"),
+      displayName: DisplayName.parse("Carol"),
+      metadata: {},
+    });
+    fixture.clock.set(Instant.parse("2026-08-04T13:00:00.001Z"));
+    fixture.store.registerAgent({
+      agentId: AgentId.parse("alice"),
+      displayName: DisplayName.parse("Alice"),
+      metadata: {},
+    });
+    fixture.store.registerAgent({
+      agentId: AgentId.parse("bob"),
+      displayName: DisplayName.parse("Bob"),
+      metadata: {},
+    });
+    fixture.store.registerAgent({
+      agentId: AgentId.parse("dave"),
+      displayName: DisplayName.parse("Dave"),
+      metadata: {},
+    });
+
+    const result: BroadcastMessageResult = fixture.store.broadcastMessage({
+      ...baseBroadcastCommand(),
+      idempotencyKey: IdempotencyKey.parse("active-window"),
+    });
+    expect(result.recipientCount).toBe(2);
+    const carolMessages: readonly Message[] = fixture.store.getMessages({
+      afterSequence: Sequence.zero(),
+      agentId: AgentId.parse("carol"),
+      limit: 100,
+      threadId: null,
+      unreadOnly: false,
+    });
+    expect(carolMessages).toHaveLength(0);
+  });
+});
+
 test(`persists messages for ${RETENTION_DAYS} days, then expires them`, (): void => {
   withFixture((fixture: StoreFixture): void => {
     const sent: SendMessageResult = fixture.store.sendMessage(baseMessageCommand());
@@ -204,6 +407,25 @@ test("requires both agents to register", (): void => {
     expect((): SendMessageResult => fixture.store.sendMessage(command)).toThrow(
       "Unknown agent 'carol'",
     );
+  });
+});
+
+test("requires a registered broadcast sender and complete sender context", (): void => {
+  withFixture((fixture: StoreFixture): void => {
+    expect(
+      (): BroadcastMessageResult =>
+        fixture.store.broadcastMessage({
+          ...baseBroadcastCommand(),
+          senderId: AgentId.parse("mallory"),
+        }),
+    ).toThrow("Unknown agent 'mallory'");
+    expect(
+      (): BroadcastMessageResult =>
+        fixture.store.broadcastMessage({
+          ...baseBroadcastCommand(),
+          repositoryName: null,
+        }),
+    ).toThrow("Broadcast message context must include repository, branch, and client");
   });
 });
 
@@ -361,10 +583,83 @@ test("upgrades a SQLite v2 message while preserving repository context", (): voi
   }
 });
 
+test("upgrades a SQLite v3 database for broadcast delivery", (): void => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-store-v3-"));
+  const databasePath: string = join(directory, "messages.db");
+  const legacyDatabase: Database = new Database(databasePath, { create: true });
+  legacyDatabase.exec(`
+    CREATE TABLE agents (
+      agent_id TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL
+    );
+    CREATE TABLE messages (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id TEXT NOT NULL UNIQUE,
+      thread_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL REFERENCES agents(agent_id),
+      recipient_id TEXT NOT NULL REFERENCES agents(agent_id),
+      content TEXT NOT NULL,
+      repository_name TEXT,
+      branch_name TEXT,
+      client_name TEXT,
+      idempotency_key TEXT,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      read_at TEXT,
+      UNIQUE(sender_id, idempotency_key)
+    );
+    INSERT INTO agents(agent_id, display_name, metadata_json, created_at, last_seen_at)
+      VALUES
+        (
+          'alice', 'Alice', '{}',
+          '2026-08-04T12:00:00.000Z', '2026-08-04T12:00:00.000Z'
+        ),
+        (
+          'bob', 'Bob', '{"machine":"mac-1","repository":"mattpatagon/murmur"}',
+          '2026-08-04T12:00:00.000Z', '2026-08-04T12:00:00.000Z'
+        );
+    PRAGMA user_version = 3;
+  `);
+  legacyDatabase.close();
+
+  const clock: MutableClock = new MutableClock(Instant.parse("2026-08-04T12:00:00.000Z"));
+  const store: SqliteMessageStore = new SqliteMessageStore(databasePath, clock);
+  try {
+    const result: BroadcastMessageResult = store.broadcastMessage({
+      ...baseBroadcastCommand(),
+      audience: {
+        machineName: MachineName.parse("mac-1"),
+        repositoryName: RepositoryName.parse("mattpatagon/murmur"),
+      },
+      idempotencyKey: IdempotencyKey.parse("migrated-broadcast"),
+    });
+    expect(result.recipientCount).toBe(1);
+    const messages: readonly Message[] = store.getMessages({
+      afterSequence: Sequence.zero(),
+      agentId: AgentId.parse("bob"),
+      limit: 100,
+      threadId: null,
+      unreadOnly: false,
+    });
+    const message: Message | undefined = messages[0];
+    if (message === undefined || message.broadcastId === null) {
+      throw new Error("Expected the migrated broadcast message");
+    }
+    expect(message.broadcastId.value).toBe(result.broadcastId.value);
+  } finally {
+    store.close();
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
 test("rejects malformed domain identifiers before storage", (): void => {
   expect((): AgentClient => AgentClient.parse("cursor")).toThrow();
   expect((): AgentId => AgentId.parse("space is not allowed")).toThrow();
   expect((): BranchName => BranchName.parse("")).toThrow();
   expect((): MessageId => MessageId.parse("not-a-uuid")).toThrow();
+  expect((): MachineName => MachineName.parse("bad machine")).toThrow();
   expect((): RepositoryName => RepositoryName.parse("missing-slash")).toThrow();
 });

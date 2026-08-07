@@ -16,15 +16,18 @@ import {
   CallToolResultSchema,
   ResourceUpdatedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import postgres, { type Sql, type TransactionSql } from "postgres";
 import type { z } from "zod";
 
 import {
+  BroadcastMessageOutputSchema,
   InboxOutputSchema,
   ListAgentsOutputSchema,
   MarkMessagesReadOutputSchema,
   RegisterAgentOutputSchema,
   SendMessageOutputSchema,
   WaitForMessagesOutputSchema,
+  type BroadcastMessageOutput,
   type InboxOutput,
   type ListAgentsOutput,
   type MarkMessagesReadOutput,
@@ -32,6 +35,7 @@ import {
   type SendMessageOutput,
   type WaitForMessagesOutput,
 } from "../src/domain/contracts.js";
+import { POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED } from "../src/storage/postgres-message-store.js";
 
 const cloudDatabaseUrl: string | undefined = process.env["MURMUR_TEST_DATABASE_URL"];
 const dockerImage: string | undefined = process.env["MURMUR_TEST_DOCKER_IMAGE"];
@@ -44,6 +48,30 @@ type ClientHarness = {
   readonly client: Client;
   readonly transport: StdioClientTransport;
 };
+
+type AdvisoryWaiterCountRow = {
+  readonly count: number | string;
+};
+
+type DeferredSignal = {
+  readonly promise: Promise<void>;
+  readonly resolve: () => void;
+};
+
+function deferredSignal(): DeferredSignal {
+  let resolver: (() => void) | null = null;
+  const promise: Promise<void> = new Promise((resolvePromise: () => void): void => {
+    resolver = resolvePromise;
+  });
+  return {
+    promise,
+    resolve: (): void => {
+      const currentResolver: (() => void) | null = resolver;
+      if (currentResolver === null) throw new Error("Deferred signal was not initialized");
+      currentResolver();
+    },
+  };
+}
 
 function runCommand(
   command: string,
@@ -202,6 +230,41 @@ async function notificationTimeout(): Promise<never> {
   throw new Error("Cloud push notification timed out");
 }
 
+async function waitForMessageCommitLockWaiters(
+  database: Sql,
+  recipientId: string,
+  expected: number,
+): Promise<void> {
+  let attempt: number = 0;
+  while (attempt < 200) {
+    const rows: AdvisoryWaiterCountRow[] = await database<AdvisoryWaiterCountRow[]>`
+      SELECT COUNT(*) AS count
+      FROM pg_catalog.pg_locks
+      WHERE locktype = 'advisory'
+        AND classid = (
+          pg_catalog.hashtextextended(
+            ${recipientId},
+            ${POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED}::bigint
+          ) >> 32 & 4294967295::bigint
+        )::oid
+        AND objid = (
+          pg_catalog.hashtextextended(
+            ${recipientId},
+            ${POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED}::bigint
+          ) & 4294967295::bigint
+        )::oid
+        AND objsubid = 1
+        AND NOT granted
+    `;
+    const row: AdvisoryWaiterCountRow | undefined = rows[0];
+    if (row === undefined) throw new Error("Postgres did not return an advisory lock count");
+    if (Number(row.count) >= expected) return;
+    await Bun.sleep(10);
+    attempt += 1;
+  }
+  throw new Error(`Timed out waiting for ${String(expected)} message commit lock waiters`);
+}
+
 test.skipIf(cloudDatabaseUrl === undefined)(
   "agents installed in isolated machine roots communicate through one Postgres URL",
   async (): Promise<void> => {
@@ -210,6 +273,7 @@ test.skipIf(cloudDatabaseUrl === undefined)(
     const uniqueSuffix: string = randomUUID().replaceAll("-", "").slice(0, 12);
     const senderId: string = `cloud-sender-${uniqueSuffix}`;
     const receiverId: string = `cloud-receiver-${uniqueSuffix}`;
+    const machineName: string = `cloud-machine-${uniqueSuffix}`;
     const portabilityRoot: string = mkdtempSync(join(tmpdir(), "murmur-portability-"));
     try {
       const packageArchive: string = packMurmur(join(portabilityRoot, "package"));
@@ -239,13 +303,21 @@ test.skipIf(cloudDatabaseUrl === undefined)(
           const senderRegistration: RegisterAgentOutput = await callValidated(
             sender.client,
             "register_agent",
-            { agent_id: senderId, display_name: "Portable Sender" },
+            {
+              agent_id: senderId,
+              display_name: "Portable Sender",
+              metadata: { machine: machineName },
+            },
             RegisterAgentOutputSchema,
           );
           const receiverRegistration: RegisterAgentOutput = await callValidated(
             receiver.client,
             "register_agent",
-            { agent_id: receiverId, display_name: "Portable Receiver" },
+            {
+              agent_id: receiverId,
+              display_name: "Portable Receiver",
+              metadata: { machine: machineName },
+            },
             RegisterAgentOutputSchema,
           );
           expect(senderRegistration.agent.agent_id).toBe(senderId);
@@ -335,6 +407,147 @@ test.skipIf(cloudDatabaseUrl === undefined)(
           expect(receivedMessage.context.client).toBe(clientName);
           expect(receivedMessage.created_at).toBe(sent.message.created_at);
 
+          const broadcastNotification: Promise<ResourceUpdatedNotification> = new Promise(
+            (resolvePromise: (value: ResourceUpdatedNotification) => void): void => {
+              receiver.client.setNotificationHandler(
+                ResourceUpdatedNotificationSchema,
+                resolvePromise,
+              );
+            },
+          );
+          const broadcastArguments: Record<string, unknown> = {
+            audience: { machine: machineName, repository: repositoryName },
+            content: "broadcast through shared Postgres",
+            idempotency_key: `cloud-e2e-broadcast-${uniqueSuffix}`,
+            sender_id: senderId,
+          };
+          const broadcast: BroadcastMessageOutput = await callValidated(
+            sender.client,
+            "broadcast_message",
+            broadcastArguments,
+            BroadcastMessageOutputSchema,
+          );
+          expect(broadcast.recipient_count).toBe(1);
+          const broadcastPush: ResourceUpdatedNotification = await Promise.race([
+            broadcastNotification,
+            notificationTimeout(),
+          ]);
+          expect(broadcastPush.params.uri).toBe(receiverInboxUri);
+          const broadcastRetry: BroadcastMessageOutput = await callValidated(
+            sender.client,
+            "broadcast_message",
+            broadcastArguments,
+            BroadcastMessageOutputSchema,
+          );
+          expect(broadcastRetry.duplicate).toBe(true);
+          expect(broadcastRetry.broadcast_id).toBe(broadcast.broadcast_id);
+          expect(broadcastRetry.recipient_count).toBe(1);
+          const inboxWithBroadcast: InboxOutput = await callValidated(
+            receiver.client,
+            "get_messages",
+            {
+              after_sequence: sent.message.sequence,
+              agent_id: receiverId,
+              limit: 100,
+              unread_only: false,
+            },
+            InboxOutputSchema,
+          );
+          const receivedBroadcast: InboxOutput["messages"][number] | undefined =
+            inboxWithBroadcast.messages.find(
+              (message: InboxOutput["messages"][number]): boolean =>
+                message.thread_id === broadcast.thread_id,
+            );
+          if (receivedBroadcast === undefined) {
+            throw new Error("Expected the cloud broadcast message");
+          }
+          expect(receivedBroadcast.content).toBe("broadcast through shared Postgres");
+          expect(Object.hasOwn(receivedBroadcast, "broadcast_id")).toBe(false);
+
+          const coordinationDatabase: Sql = postgres(databaseUrl, {
+            connect_timeout: 10,
+            max: 2,
+            ssl: "require",
+          });
+          const lockHeld: DeferredSignal = deferredSignal();
+          const commitLockReleased: DeferredSignal = deferredSignal();
+          const lockHolder: Promise<unknown> = coordinationDatabase.begin(
+            async (transaction: TransactionSql): Promise<void> => {
+              await transaction`
+                SELECT pg_catalog.pg_advisory_xact_lock(
+                  pg_catalog.hashtextextended(
+                    ${receiverId},
+                    ${POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED}::bigint
+                  )
+                )
+              `;
+              lockHeld.resolve();
+              await commitLockReleased.promise;
+            },
+          );
+          try {
+            await lockHeld.promise;
+            let orderedNotificationCount: number = 0;
+            const orderedNotifications: DeferredSignal = deferredSignal();
+            receiver.client.setNotificationHandler(ResourceUpdatedNotificationSchema, (): void => {
+              orderedNotificationCount += 1;
+              if (orderedNotificationCount === 2) orderedNotifications.resolve();
+            });
+            const orderedBroadcastPromise: Promise<BroadcastMessageOutput> = callValidated(
+              sender.client,
+              "broadcast_message",
+              {
+                audience: { machine: machineName, repository: repositoryName },
+                content: "ordered broadcast",
+                idempotency_key: `cloud-e2e-ordered-broadcast-${uniqueSuffix}`,
+                sender_id: senderId,
+              },
+              BroadcastMessageOutputSchema,
+            );
+            await waitForMessageCommitLockWaiters(coordinationDatabase, receiverId, 1);
+            const orderedDirectPromise: Promise<SendMessageOutput> = callValidated(
+              sender.client,
+              "send_message",
+              {
+                content: "ordered direct message",
+                idempotency_key: `cloud-e2e-ordered-direct-${uniqueSuffix}`,
+                recipient_id: receiverId,
+                sender_id: senderId,
+              },
+              SendMessageOutputSchema,
+            );
+            await waitForMessageCommitLockWaiters(coordinationDatabase, receiverId, 2);
+            commitLockReleased.resolve();
+            const [orderedBroadcast, orderedDirect]: [BroadcastMessageOutput, SendMessageOutput] =
+              await Promise.all([orderedBroadcastPromise, orderedDirectPromise]);
+            expect(orderedBroadcast.recipient_count).toBe(1);
+            await Promise.race([orderedNotifications.promise, notificationTimeout()]);
+            const orderedInbox: InboxOutput = await callValidated(
+              receiver.client,
+              "get_messages",
+              {
+                after_sequence: receivedBroadcast.sequence,
+                agent_id: receiverId,
+                limit: 100,
+                unread_only: false,
+              },
+              InboxOutputSchema,
+            );
+            expect(
+              orderedInbox.messages.map(
+                (message: InboxOutput["messages"][number]): string => message.content,
+              ),
+            ).toEqual(["ordered broadcast", "ordered direct message"]);
+            const lastOrderedMessage: InboxOutput["messages"][number] | undefined =
+              orderedInbox.messages.at(-1);
+            if (lastOrderedMessage === undefined) throw new Error("Expected ordered messages");
+            expect(lastOrderedMessage.message_id).toBe(orderedDirect.message.message_id);
+          } finally {
+            commitLockReleased.resolve();
+            await Promise.allSettled([lockHolder]);
+            await coordinationDatabase.end({ timeout: 1 });
+          }
+
           const waitForReply: Promise<WaitForMessagesOutput> = callValidated(
             sender.client,
             "wait_for_messages",
@@ -372,7 +585,10 @@ test.skipIf(cloudDatabaseUrl === undefined)(
           const receiverMarked: MarkMessagesReadOutput = await callValidated(
             receiver.client,
             "mark_messages_read",
-            { agent_id: receiverId, message_ids: [sent.message.message_id] },
+            {
+              agent_id: receiverId,
+              message_ids: [sent.message.message_id, receivedBroadcast.message_id],
+            },
             MarkMessagesReadOutputSchema,
           );
           const senderMarked: MarkMessagesReadOutput = await callValidated(
@@ -381,7 +597,7 @@ test.skipIf(cloudDatabaseUrl === undefined)(
             { agent_id: senderId, message_ids: [reply.message.message_id] },
             MarkMessagesReadOutputSchema,
           );
-          expect(receiverMarked.updated).toBe(1);
+          expect(receiverMarked.updated).toBe(2);
           expect(senderMarked.updated).toBe(1);
           expect(sent.message.expires_at).toBeDefined();
         } finally {

@@ -1,5 +1,7 @@
 import type {
   Agent,
+  BroadcastMessageCommand,
+  BroadcastMessageResult,
   GetMessagesQuery,
   MarkMessagesReadCommand,
   MarkMessagesReadResult,
@@ -22,6 +24,7 @@ export interface MessageStore {
   registerAgent(command: RegisterAgentCommand): Awaitable<Agent>;
   getAgent(agentId: AgentId): Awaitable<Agent | null>;
   listAgents(): Awaitable<readonly Agent[]>;
+  broadcastMessage(command: BroadcastMessageCommand): Awaitable<BroadcastMessageResult>;
   sendMessage(command: SendMessageCommand): Awaitable<SendMessageResult>;
   getMessages(query: GetMessagesQuery): Awaitable<readonly Message[]>;
   markMessagesRead(command: MarkMessagesReadCommand): Awaitable<MarkMessagesReadResult>;

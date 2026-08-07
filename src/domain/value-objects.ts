@@ -14,6 +14,7 @@ const AgentIdValueSchema: z.ZodString = z
 const DisplayNameValueSchema: z.ZodString = z.string().trim().min(1).max(200);
 const MessageContentValueSchema: z.ZodString = z.string().min(1).max(100_000);
 const MessageIdValueSchema: z.ZodString = z.string().uuid();
+const BroadcastIdValueSchema: z.ZodString = z.string().uuid();
 const ThreadIdValueSchema: z.ZodString = z.string().trim().min(1).max(200);
 const IdempotencyKeyValueSchema: z.ZodString = z.string().trim().min(1).max(200);
 const RepositoryNameValueSchema: z.ZodString = z
@@ -30,6 +31,12 @@ const AgentClientValueSchema: z.ZodEnum<{
   claude: "claude";
   codex: "codex";
 }> = z.enum(["claude", "codex"]);
+const MachineNameValueSchema: z.ZodString = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u, "Use letters, numbers, dots, underscores, or hyphens");
 const SequenceValueSchema: z.ZodNumber = z.number().int().nonnegative().safe();
 const InstantValueSchema: z.ZodISODateTime = z.iso.datetime({ offset: true });
 
@@ -101,6 +108,23 @@ export class MessageId {
 
   public equals(other: MessageId): boolean {
     return this.value === other.value;
+  }
+}
+
+export class BroadcastId {
+  public readonly value: string;
+
+  private constructor(value: string) {
+    this.value = value;
+  }
+
+  public static parse(input: unknown): BroadcastId {
+    const value: string = BroadcastIdValueSchema.parse(input);
+    return new BroadcastId(value);
+  }
+
+  public static generate(): BroadcastId {
+    return BroadcastId.parse(randomUUID());
   }
 }
 
@@ -182,6 +206,19 @@ export class AgentClient {
 
   public equals(other: AgentClient): boolean {
     return this.value === other.value;
+  }
+}
+
+export class MachineName {
+  public readonly value: string;
+
+  private constructor(value: string) {
+    this.value = value;
+  }
+
+  public static parse(input: unknown): MachineName {
+    const value: string = MachineNameValueSchema.parse(input);
+    return new MachineName(value);
   }
 }
 
