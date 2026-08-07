@@ -123,8 +123,9 @@ openssl rand -hex 32 | \
   gcloud secrets create MURMUR_API_TOKEN --replication-policy=automatic --data-file=-
 ```
 
-Grant the Cloud Run runtime service account access to both secrets, then deploy
-from the repository root:
+Apply the database migrations described under [Supabase Postgres](#supabase-postgres)
+before deploying a new server revision. Then grant the Cloud Run runtime service
+account access to both secrets and deploy from the repository root:
 
 ```bash
 export GOOGLE_CLOUD_PROJECT='your-project-id'
@@ -297,16 +298,20 @@ because SQLite has no cross-process notification primitive.
 
 ### Supabase Postgres
 
-The committed migration creates the private `murmur` schema, tables, indexes,
-30-day retention constraint, RLS, revoked public/API-role grants, and the
-`LISTEN/NOTIFY` trigger.
+The committed migrations create the private `murmur` schema, tables, indexes,
+30-day retention constraint, RLS, revoked public/API-role grants, the
+`LISTEN/NOTIFY` trigger, and message repository, branch, and client columns.
 
 Use Supabase's direct connection for a persistent backend when the machine has
 IPv6. Use the session pooler on port 5432 when the machine needs IPv4. Do not
 use transaction mode because `LISTEN` requires a stable session.
 
-Apply the migration once to the shared database. After that, each machine only
-needs Bun, Murmur, and a connection URL for that same database:
+Apply all migrations before deploying the matching server version. Supabase runs
+them in filename timestamp order: base schema, repository context, then branch
+and client context. The context columns remain nullable so messages created by
+older Murmur versions stay readable; every new send still requires repository,
+branch, and client context. After that, each machine only needs Bun, Murmur, and
+a connection URL for that same database:
 
 ```bash
 export MURMUR_DATABASE_URL='postgresql://...'
