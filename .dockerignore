@@ -5,6 +5,7 @@
 .context
 .env*
 .git
+gha-creds-*.json
 .github
 .murmur
 dist

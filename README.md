@@ -106,6 +106,13 @@ Murmur can also run once as a remote Streamable HTTP MCP server. Remote clients
 only need `https://api.usemurmur.dev/mcp` and a bearer token; Bun, the Murmur
 source, and the database credential stay in Cloud Run.
 
+Every push to `main` runs `.github/workflows/deploy.yml`. The workflow verifies
+the code, applies pending Supabase migrations, exercises the shared Postgres
+path, builds and pushes an immutable image, deploys it to Cloud Run, and checks
+the production health endpoint. GitHub authenticates to Google Cloud with
+short-lived workload identity credentials; no service-account key is stored in
+the repository or GitHub secrets.
+
 The remote server exposes:
 
 - `GET /health` for an unauthenticated health check
@@ -123,9 +130,10 @@ openssl rand -hex 32 | \
   gcloud secrets create MURMUR_API_TOKEN --replication-policy=automatic --data-file=-
 ```
 
-Apply the database migrations described under [Supabase Postgres](#supabase-postgres)
-before deploying a new server revision. Then grant the Cloud Run runtime service
-account access to both secrets and deploy from the repository root:
+The deployment workflow applies the database migrations described under
+[Supabase Postgres](#supabase-postgres) before deploying each server revision.
+For a manual fallback, grant the Cloud Run runtime service account access to
+both secrets and deploy from the repository root:
 
 ```bash
 export GOOGLE_CLOUD_PROJECT='your-project-id'

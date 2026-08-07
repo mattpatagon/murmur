@@ -1,6 +1,7 @@
 .gcloudignore
 .git
 .gitignore
+gha-creds-*.json
 .agents
 .claude
 .codex

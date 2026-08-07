@@ -1,0 +1,18 @@
+# Murmur
+
+## Deploy Configuration (configured by /setup-deploy)
+
+- Platform: Google Cloud Run through GitHub Actions
+- Production URL: https://api.usemurmur.dev
+- Deploy workflow: `.github/workflows/deploy.yml` on every push to `main`
+- Deploy status command: `gh run list --workflow "Deploy production" --limit 1`
+- Merge method: squash
+- Project type: MCP API service
+- Post-deploy health check: https://api.usemurmur.dev/health
+
+### Custom deploy hooks
+
+- Pre-merge: `bun run test && bun run build:http`
+- Deploy trigger: automatic on push to `main`
+- Deploy status: poll the `Deploy production` GitHub Actions workflow
+- Health check: https://api.usemurmur.dev/health
