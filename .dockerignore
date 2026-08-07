@@ -1,0 +1,15 @@
+.agents
+.claude
+.codex
+.conductor
+.context
+.env*
+.git
+gha-creds-*.json
+.github
+.murmur
+dist
+node_modules
+supabase
+test
+*.md

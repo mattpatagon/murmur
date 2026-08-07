@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.murmur/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.gstack/
+gha-creds-*.json
