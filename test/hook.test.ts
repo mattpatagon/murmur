@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { expect, test } from "bun:test";
 
+import type { Agent, BroadcastMessageResult } from "../src/domain/models.js";
 import {
   buildHookOutput,
   checkRemoteInbox,
@@ -14,6 +15,15 @@ import {
   type InboxSummary,
 } from "../src/hook.js";
 import { startHttpServer, type MurmurHttpServer } from "../src/http-server.js";
+import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
+import {
+  AgentClient,
+  AgentId,
+  BranchName,
+  DisplayName,
+  MessageContent,
+  RepositoryName,
+} from "../src/domain/value-objects.js";
 
 function requireOutput(output: HookOutput | null): HookOutput {
   if (output === null) throw new Error("Expected hook output");
@@ -30,7 +40,9 @@ function requireContext(output: HookOutput): string {
 
 test("derives a stable agent ID from machine, client, and workspace", (): void => {
   const environment: NodeJS.ProcessEnv = {
+    MURMUR_BRANCH: "feature/broadcast-hook",
     MURMUR_MACHINE_ID: "dev vm",
+    MURMUR_REPOSITORY: "mattpatagon/murmur",
     MURMUR_WORKSPACE_ID: "cancun-v1",
   };
   const first: AgentIdentity = deriveAgentIdentity("codex", "/work/murmur", environment);
@@ -38,6 +50,8 @@ test("derives a stable agent ID from machine, client, and workspace", (): void =
   const claude: AgentIdentity = deriveAgentIdentity("claude", "/work/murmur", environment);
   expect(first.agentId).toBe(second.agentId);
   expect(first.agentId).toStartWith("dev-vm:codex:cancun-v1:");
+  expect(first.branch).toBe("feature/broadcast-hook");
+  expect(first.repository).toBe("mattpatagon/murmur");
   expect(claude.agentId).not.toBe(first.agentId);
 });
 
@@ -160,15 +174,18 @@ test("SessionStart supplies identity context and reports a missing token", async
 test("checks a real Streamable HTTP Murmur inbox", async (): Promise<void> => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-hook-http-"));
   const token: string = "hook-test-token";
+  const databasePath: string = join(directory, "messages.db");
   const server: MurmurHttpServer = await startHttpServer({
     MURMUR_API_TOKEN: token,
-    MURMUR_DB_PATH: join(directory, "messages.db"),
+    MURMUR_DB_PATH: databasePath,
     MURMUR_HTTP_HOST: "127.0.0.1",
     PORT: "0",
   });
   try {
     const identity: AgentIdentity = deriveAgentIdentity("codex", directory, {
+      MURMUR_BRANCH: "feature/hook-broadcast",
       MURMUR_MACHINE_ID: "test-machine",
+      MURMUR_REPOSITORY: "mattpatagon/murmur",
     });
     const summary: InboxSummary = await checkRemoteInbox(identity, {
       timeoutMs: 2_000,
@@ -176,6 +193,35 @@ test("checks a real Streamable HTTP Murmur inbox", async (): Promise<void> => {
       url: server.mcpUrl.toString(),
     });
     expect(summary).toEqual({ inboxVersion: 0, messageCount: 0, senderIds: [] });
+    const verificationStore: SqliteMessageStore = new SqliteMessageStore(databasePath);
+    try {
+      const registeredAgent: Agent | null = verificationStore.getAgent(
+        AgentId.parse(identity.agentId),
+      );
+      if (registeredAgent === null) throw new Error("Expected the hook agent registration");
+      expect(registeredAgent.metadata["repository"]).toBe("mattpatagon/murmur");
+      verificationStore.registerAgent({
+        agentId: AgentId.parse("test-machine:codex:sender:1234567890"),
+        displayName: DisplayName.parse("Hook broadcast sender"),
+        metadata: { machine: "test-machine", repository: "mattpatagon/murmur" },
+      });
+      const broadcast: BroadcastMessageResult = verificationStore.broadcastMessage({
+        audience: {
+          machineName: null,
+          repositoryName: RepositoryName.parse("mattpatagon/murmur"),
+        },
+        branchName: BranchName.parse("feature/hook-broadcast"),
+        client: AgentClient.parse("codex"),
+        content: MessageContent.parse("hook registration routing check"),
+        idempotencyKey: null,
+        repositoryName: RepositoryName.parse("mattpatagon/murmur"),
+        senderId: AgentId.parse("test-machine:codex:sender:1234567890"),
+        threadId: null,
+      });
+      expect(broadcast.recipientCount).toBe(1);
+    } finally {
+      verificationStore.close();
+    }
   } finally {
     await server.stop();
     rmSync(directory, { force: true, recursive: true });

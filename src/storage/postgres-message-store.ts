@@ -1,7 +1,8 @@
 import postgres, { type ListenMeta, type Sql, type TransactionSql } from "postgres";
 import { z } from "zod";
 
-import { RETENTION_DAYS } from "../domain/contracts.js";
+import { broadcastRequestMatches } from "../domain/broadcasts.js";
+import { ACTIVE_AGENT_WINDOW_MINUTES, RETENTION_DAYS } from "../domain/contracts.js";
 import {
   IdempotencyConflictError,
   StorageCorruptionError,
@@ -9,6 +10,8 @@ import {
 } from "../domain/errors.js";
 import type {
   Agent,
+  BroadcastMessageCommand,
+  BroadcastMessageResult,
   GetMessagesQuery,
   MarkMessagesReadCommand,
   MarkMessagesReadResult,
@@ -21,12 +24,14 @@ import {
   AgentClient,
   AgentId,
   BranchName,
+  BroadcastId,
   DisplayName,
   type Clock,
   Instant,
   JsonObjectSchema,
   MessageContent,
   MessageId,
+  MachineName,
   RepositoryName,
   Sequence,
   SystemClock,
@@ -36,6 +41,7 @@ import {
 import type { InboxSubscription, InboxUpdateHandler, MessageStore } from "./message-store.js";
 
 const INBOX_CHANNEL: string = "murmur_inbox_changed";
+export const POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED: string = "671255459461899938";
 
 type AgentRow = {
   readonly agent_id: string;
@@ -47,6 +53,7 @@ type AgentRow = {
 
 type MessageRow = {
   readonly branch_name: string | null;
+  readonly broadcast_id: string | null;
   readonly client_name: string | null;
   readonly content: string;
   readonly created_at: string;
@@ -60,6 +67,25 @@ type MessageRow = {
   readonly thread_id: string;
 };
 
+type BroadcastRow = {
+  readonly audience_machine_name: string | null;
+  readonly audience_repository_name: string | null;
+  readonly branch_name: string;
+  readonly broadcast_id: string;
+  readonly client_name: "claude" | "codex";
+  readonly content: string;
+  readonly created_at: string;
+  readonly expires_at: string;
+  readonly idempotency_key: string | null;
+  readonly repository_name: string;
+  readonly sender_id: string;
+  readonly thread_id: string;
+};
+
+type AgentIdRow = {
+  readonly agent_id: string;
+};
+
 type CountRow = {
   readonly count: number;
 };
@@ -71,6 +97,8 @@ type InboxVersionRow = {
 type SchemaProbeRow = {
   readonly agents_table: string | null;
   readonly branch_column: boolean;
+  readonly broadcast_column: boolean;
+  readonly broadcasts_table: string | null;
   readonly client_column: boolean;
   readonly messages_table: string | null;
   readonly repository_column: boolean;
@@ -115,6 +143,7 @@ const AgentRowSchema: z.ZodType<AgentRow> = z.strictObject({
 
 const MessageRowSchema: z.ZodType<MessageRow> = z.strictObject({
   branch_name: z.string().nullable(),
+  broadcast_id: z.string().nullable(),
   client_name: z.string().nullable(),
   content: z.string(),
   created_at: z.string(),
@@ -128,6 +157,25 @@ const MessageRowSchema: z.ZodType<MessageRow> = z.strictObject({
   thread_id: z.string(),
 });
 
+const BroadcastRowSchema: z.ZodType<BroadcastRow> = z.strictObject({
+  audience_machine_name: z.string().nullable(),
+  audience_repository_name: z.string().nullable(),
+  branch_name: z.string(),
+  broadcast_id: z.string(),
+  client_name: z.enum(["claude", "codex"]),
+  content: z.string(),
+  created_at: z.string(),
+  expires_at: z.string(),
+  idempotency_key: z.string().nullable(),
+  repository_name: z.string(),
+  sender_id: z.string(),
+  thread_id: z.string(),
+});
+
+const AgentIdRowSchema: z.ZodType<AgentIdRow> = z.strictObject({
+  agent_id: z.string(),
+});
+
 const CountRowSchema: z.ZodType<CountRow> = z.strictObject({
   count: SafeDatabaseIntegerSchema.pipe(z.number().nonnegative()),
 });
@@ -139,6 +187,8 @@ const InboxVersionRowSchema: z.ZodType<InboxVersionRow> = z.strictObject({
 const SchemaProbeRowSchema: z.ZodType<SchemaProbeRow> = z.strictObject({
   agents_table: z.string().nullable(),
   branch_column: z.boolean(),
+  broadcast_column: z.boolean(),
+  broadcasts_table: z.string().nullable(),
   client_column: z.boolean(),
   messages_table: z.string().nullable(),
   repository_column: z.boolean(),
@@ -182,6 +232,7 @@ function mapMessageRow(input: unknown): Message {
     const readAt: Instant | null = row.read_at === null ? null : Instant.parse(row.read_at);
     return {
       branchName: row.branch_name === null ? null : BranchName.parse(row.branch_name),
+      broadcastId: row.broadcast_id === null ? null : BroadcastId.parse(row.broadcast_id),
       client: row.client_name === null ? null : AgentClient.parse(row.client_name),
       content: MessageContent.parse(row.content),
       createdAt: Instant.parse(row.created_at),
@@ -198,6 +249,10 @@ function mapMessageRow(input: unknown): Message {
   } catch (error: unknown) {
     throw new StorageCorruptionError("message", error);
   }
+}
+
+function minutesBefore(instant: Instant, minutes: number): Instant {
+  return Instant.fromDate(new Date(instant.toEpochMilliseconds() - minutes * 60 * 1000));
 }
 
 class CallbackInboxSubscription implements InboxSubscription {
@@ -283,6 +338,7 @@ export class PostgresMessageStore implements MessageStore {
     const rawRows: unknown = await this.database`
       SELECT
         to_regclass('murmur.agents')::text AS agents_table,
+        to_regclass('murmur.broadcasts')::text AS broadcasts_table,
         to_regclass('murmur.messages')::text AS messages_table,
         EXISTS (
           SELECT 1
@@ -303,6 +359,13 @@ export class PostgresMessageStore implements MessageStore {
           FROM information_schema.columns
           WHERE table_schema = 'murmur'
             AND table_name = 'messages'
+            AND column_name = 'broadcast_id'
+        ) AS broadcast_column,
+        EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = 'murmur'
+            AND table_name = 'messages'
             AND column_name = 'repository_name'
         ) AS repository_column
     `;
@@ -310,10 +373,12 @@ export class PostgresMessageStore implements MessageStore {
     const row: SchemaProbeRow = firstRow(rows, "schema probe");
     if (
       row.agents_table === null ||
+      row.broadcasts_table === null ||
       row.messages_table === null ||
       !row.repository_column ||
       !row.branch_column ||
-      !row.client_column
+      !row.client_column ||
+      !row.broadcast_column
     ) {
       throw new Error(
         "Murmur's Postgres schema is missing. Apply the committed Supabase migration first.",
@@ -484,6 +549,295 @@ export class PostgresMessageStore implements MessageStore {
     if (!knownIds.has(recipientId.value)) throw new UnknownAgentError(recipientId.value);
   }
 
+  private async requireBroadcastSender(
+    transaction: TransactionSql,
+    senderId: AgentId,
+  ): Promise<void> {
+    const rawRows: unknown = await transaction`
+      SELECT agent_id
+      FROM murmur.agents
+      WHERE agent_id = ${senderId.value}
+    `;
+    const rows: AgentIdRow[] = z.array(AgentIdRowSchema).parse(rawRows);
+    if (rows.length === 0) throw new UnknownAgentError(senderId.value);
+  }
+
+  private async lockRecipientCommitOrder(
+    transaction: TransactionSql,
+    recipientIds: readonly string[],
+  ): Promise<void> {
+    if (recipientIds.length === 0) return;
+    const orderedRecipientIds: string[] = Array.from(recipientIds);
+    await transaction`
+      SELECT pg_catalog.pg_advisory_xact_lock(
+        pg_catalog.hashtextextended(recipient.agent_id, ${POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED}::bigint)
+      )
+      FROM unnest(${this.database.array(orderedRecipientIds)}::text[])
+        WITH ORDINALITY AS recipient(agent_id, position)
+      ORDER BY recipient.position
+    `;
+  }
+
+  private async activeBroadcastRecipients(
+    transaction: TransactionSql,
+    senderId: AgentId,
+    activeSince: string,
+    repositoryName: string | null,
+    machineName: string | null,
+  ): Promise<readonly AgentIdRow[]> {
+    let rawRows: unknown;
+    if (repositoryName !== null && machineName !== null) {
+      rawRows = await transaction`
+        SELECT agent_id
+        FROM murmur.agents
+        WHERE agent_id <> ${senderId.value}
+          AND last_seen_at >= ${activeSince}::timestamptz
+          AND metadata ->> 'repository' = ${repositoryName}
+          AND metadata ->> 'machine' = ${machineName}
+        ORDER BY agent_id ASC
+      `;
+    } else if (repositoryName !== null) {
+      rawRows = await transaction`
+        SELECT agent_id
+        FROM murmur.agents
+        WHERE agent_id <> ${senderId.value}
+          AND last_seen_at >= ${activeSince}::timestamptz
+          AND metadata ->> 'repository' = ${repositoryName}
+        ORDER BY agent_id ASC
+      `;
+    } else if (machineName !== null) {
+      rawRows = await transaction`
+        SELECT agent_id
+        FROM murmur.agents
+        WHERE agent_id <> ${senderId.value}
+          AND last_seen_at >= ${activeSince}::timestamptz
+          AND metadata ->> 'machine' = ${machineName}
+        ORDER BY agent_id ASC
+      `;
+    } else {
+      rawRows = await transaction`
+        SELECT agent_id
+        FROM murmur.agents
+        WHERE agent_id <> ${senderId.value}
+          AND last_seen_at >= ${activeSince}::timestamptz
+        ORDER BY agent_id ASC
+      `;
+    }
+    return z.array(AgentIdRowSchema).parse(rawRows);
+  }
+
+  private async broadcastResult(
+    transaction: TransactionSql,
+    row: BroadcastRow,
+    duplicate: boolean,
+  ): Promise<BroadcastMessageResult> {
+    const broadcastId: BroadcastId = BroadcastId.parse(row.broadcast_id);
+    const rawCountRows: unknown = await transaction`
+      SELECT COUNT(*) AS count
+      FROM murmur.messages
+      WHERE broadcast_id = ${broadcastId.value}::uuid
+    `;
+    const countRows: CountRow[] = z.array(CountRowSchema).parse(rawCountRows);
+    return {
+      audience: {
+        machineName:
+          row.audience_machine_name === null ? null : MachineName.parse(row.audience_machine_name),
+        repositoryName:
+          row.audience_repository_name === null
+            ? null
+            : RepositoryName.parse(row.audience_repository_name),
+      },
+      broadcastId,
+      createdAt: Instant.parse(row.created_at),
+      duplicate,
+      expiresAt: Instant.parse(row.expires_at),
+      recipientCount: firstRow(countRows, "broadcast recipient count").count,
+      threadId: ThreadId.parse(row.thread_id),
+    };
+  }
+
+  public async broadcastMessage(command: BroadcastMessageCommand): Promise<BroadcastMessageResult> {
+    this.ensureOpen();
+    const now: Instant = this.clock.now();
+    await this.pruneExpired(now);
+    if (command.repositoryName === null || command.branchName === null || command.client === null) {
+      throw new Error("Broadcast message context must include repository, branch, and client");
+    }
+    const repositoryName: string = command.repositoryName.value;
+    const branchName: string = command.branchName.value;
+    const clientName: string = command.client.value;
+
+    return await this.database.begin(
+      async (transaction: TransactionSql): Promise<BroadcastMessageResult> => {
+        await this.requireBroadcastSender(transaction, command.senderId);
+        const broadcastId: BroadcastId = BroadcastId.generate();
+        const threadId: ThreadId =
+          command.threadId === null ? ThreadId.generate() : command.threadId;
+        const createdAt: string = now.toISOString();
+        const expiresAt: string = now.addDays(RETENTION_DAYS).toISOString();
+        const audienceRepository: string | null =
+          command.audience.repositoryName === null ? null : command.audience.repositoryName.value;
+        const audienceMachine: string | null =
+          command.audience.machineName === null ? null : command.audience.machineName.value;
+        const idempotencyKey: string | null =
+          command.idempotencyKey === null ? null : command.idempotencyKey.value;
+        const rawInsertedRows: unknown = await transaction`
+          INSERT INTO murmur.broadcasts(
+            broadcast_id,
+            thread_id,
+            sender_id,
+            content,
+            repository_name,
+            branch_name,
+            client_name,
+            audience_repository_name,
+            audience_machine_name,
+            idempotency_key,
+            created_at,
+            expires_at
+          )
+          VALUES (
+            ${broadcastId.value}::uuid,
+            ${threadId.value},
+            ${command.senderId.value},
+            ${command.content.value},
+            ${repositoryName},
+            ${branchName},
+            ${clientName},
+            ${audienceRepository},
+            ${audienceMachine},
+            ${idempotencyKey},
+            ${createdAt}::timestamptz,
+            ${expiresAt}::timestamptz
+          )
+          ON CONFLICT(sender_id, idempotency_key) DO NOTHING
+          RETURNING
+            broadcast_id::text AS broadcast_id,
+            thread_id,
+            sender_id,
+            content,
+            repository_name,
+            branch_name,
+            client_name,
+            audience_repository_name,
+            audience_machine_name,
+            idempotency_key,
+            to_char(
+              created_at AT TIME ZONE 'UTC',
+              'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+            ) AS created_at,
+            to_char(
+              expires_at AT TIME ZONE 'UTC',
+              'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+            ) AS expires_at
+        `;
+        const insertedRows: BroadcastRow[] = z.array(BroadcastRowSchema).parse(rawInsertedRows);
+        const inserted: BroadcastRow | undefined = insertedRows[0];
+        if (inserted === undefined) {
+          if (command.idempotencyKey === null) {
+            throw new Error("Broadcast insert returned no row without an idempotency key");
+          }
+          const rawExistingRows: unknown = await transaction`
+            SELECT
+              broadcast_id::text AS broadcast_id,
+              thread_id,
+              sender_id,
+              content,
+              repository_name,
+              branch_name,
+              client_name,
+              audience_repository_name,
+              audience_machine_name,
+              idempotency_key,
+              to_char(
+                created_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+              ) AS created_at,
+              to_char(
+                expires_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+              ) AS expires_at
+            FROM murmur.broadcasts
+            WHERE sender_id = ${command.senderId.value}
+              AND idempotency_key = ${command.idempotencyKey.value}
+          `;
+          const existingRows: BroadcastRow[] = z.array(BroadcastRowSchema).parse(rawExistingRows);
+          const existing: BroadcastRow = firstRow(existingRows, "idempotent broadcast");
+          if (
+            !broadcastRequestMatches(
+              {
+                audienceMachineName: existing.audience_machine_name,
+                audienceRepositoryName: existing.audience_repository_name,
+                branchName: existing.branch_name,
+                clientName: existing.client_name,
+                content: existing.content,
+                repositoryName: existing.repository_name,
+                threadId: existing.thread_id,
+              },
+              command,
+            )
+          ) {
+            throw new IdempotencyConflictError(command.idempotencyKey.value);
+          }
+          return await this.broadcastResult(transaction, existing, true);
+        }
+
+        const activeSince: string = minutesBefore(now, ACTIVE_AGENT_WINDOW_MINUTES).toISOString();
+        const recipientRows: readonly AgentIdRow[] = await this.activeBroadcastRecipients(
+          transaction,
+          command.senderId,
+          activeSince,
+          audienceRepository,
+          audienceMachine,
+        );
+        if (recipientRows.length > 0) {
+          const messageIds: string[] = recipientRows.map((): string => MessageId.generate().value);
+          const recipientIds: string[] = recipientRows.map(
+            (recipient: AgentIdRow): string => recipient.agent_id,
+          );
+          await this.lockRecipientCommitOrder(transaction, recipientIds);
+          await transaction`
+            INSERT INTO murmur.messages(
+              message_id,
+              thread_id,
+              sender_id,
+              recipient_id,
+              broadcast_id,
+              content,
+              repository_name,
+              branch_name,
+              client_name,
+              created_at,
+              expires_at
+            )
+            SELECT
+              delivery.message_id,
+              ${threadId.value},
+              ${command.senderId.value},
+              delivery.recipient_id,
+              ${broadcastId.value}::uuid,
+              ${command.content.value},
+              ${repositoryName},
+              ${branchName},
+              ${clientName},
+              ${createdAt}::timestamptz,
+              ${expiresAt}::timestamptz
+            FROM unnest(
+              ${this.database.array(messageIds)}::uuid[],
+              ${this.database.array(recipientIds)}::text[]
+            ) AS delivery(message_id, recipient_id)
+          `;
+        }
+        await transaction`
+          UPDATE murmur.agents
+          SET last_seen_at = ${createdAt}::timestamptz
+          WHERE agent_id = ${command.senderId.value}
+        `;
+        return await this.broadcastResult(transaction, inserted, false);
+      },
+    );
+  }
+
   public async sendMessage(command: SendMessageCommand): Promise<SendMessageResult> {
     this.ensureOpen();
     const now: Instant = this.clock.now();
@@ -491,6 +845,7 @@ export class PostgresMessageStore implements MessageStore {
     return await this.database.begin(
       async (transaction: TransactionSql): Promise<SendMessageResult> => {
         await this.requireAgents(transaction, command.senderId, command.recipientId);
+        await this.lockRecipientCommitOrder(transaction, [command.recipientId.value]);
         const messageId: MessageId = MessageId.generate();
         const threadId: ThreadId =
           command.threadId === null ? ThreadId.generate() : command.threadId;
@@ -534,6 +889,7 @@ export class PostgresMessageStore implements MessageStore {
           RETURNING
             sequence,
             message_id::text AS message_id,
+            broadcast_id::text AS broadcast_id,
             thread_id,
             sender_id,
             recipient_id,
@@ -574,6 +930,7 @@ export class PostgresMessageStore implements MessageStore {
           SELECT
             sequence,
             message_id::text AS message_id,
+            broadcast_id::text AS broadcast_id,
             thread_id,
             sender_id,
             recipient_id,
@@ -642,6 +999,7 @@ export class PostgresMessageStore implements MessageStore {
       SELECT
         sequence,
         message_id::text AS message_id,
+        broadcast_id::text AS broadcast_id,
         thread_id,
         sender_id,
         recipient_id,
@@ -742,16 +1100,22 @@ export class PostgresMessageStore implements MessageStore {
 
   public async pruneExpired(now: Instant): Promise<number> {
     this.ensureOpen();
-    const rawRows: unknown = await this.database`
-      WITH deleted AS (
-        DELETE FROM murmur.messages
+    return await this.database.begin(async (transaction: TransactionSql): Promise<number> => {
+      const rawRows: unknown = await transaction`
+        WITH deleted AS (
+          DELETE FROM murmur.messages
+          WHERE expires_at <= ${now.toISOString()}::timestamptz
+          RETURNING 1
+        )
+        SELECT COUNT(*) AS count FROM deleted
+      `;
+      await transaction`
+        DELETE FROM murmur.broadcasts
         WHERE expires_at <= ${now.toISOString()}::timestamptz
-        RETURNING 1
-      )
-      SELECT COUNT(*) AS count FROM deleted
-    `;
-    const rows: CountRow[] = z.array(CountRowSchema).parse(rawRows);
-    return firstRow(rows, "expiration count").count;
+      `;
+      const rows: CountRow[] = z.array(CountRowSchema).parse(rawRows);
+      return firstRow(rows, "expiration count").count;
+    });
   }
 
   public async close(): Promise<void> {

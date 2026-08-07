@@ -2,6 +2,19 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.3.0.0] - 2026-08-07
+
+### Added
+
+- Broadcast one message to every active agent, or scope the audience to a repository, a machine, or both.
+- Deliver every broadcast as an independent durable message and inbox signal, so recipients read, wait for, and acknowledge broadcasts exactly like direct messages.
+- Return the resolved audience, a broadcast identifier, and a recipient count to the sender without exposing recipient identities.
+- Retry a broadcast safely with an idempotency key and receive the original recipient snapshot even after agent activity changes.
+
+### Changed
+
+- Record each agent's machine, client, and repository at registration, and limit broadcast delivery to agents refreshed within the last 60 minutes.
+
 ## [0.2.0.0] - 2026-08-07
 
 ### Added

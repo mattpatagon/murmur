@@ -27,6 +27,8 @@ import {
 import { z } from "zod";
 
 import {
+  BroadcastMessageInputSchema,
+  BroadcastMessageOutputSchema,
   GetMessagesInputSchema,
   InboxOutputSchema,
   ListAgentsInputSchema,
@@ -35,12 +37,14 @@ import {
   MarkMessagesReadOutputSchema,
   RegisterAgentInputSchema,
   RegisterAgentOutputSchema,
+  ACTIVE_AGENT_WINDOW_MINUTES,
   RETENTION_DAYS,
   SendMessageInputSchema,
   SendMessageOutputSchema,
   WaitForMessagesInputSchema,
   WaitForMessagesOutputSchema,
   agentClientFromInput,
+  broadcastAudienceFromInput,
   branchNameFromInput,
   nullableIdempotencyKey,
   nullableThreadId,
@@ -51,12 +55,15 @@ import {
   registerAgentCommand,
   toAgentDto,
   toMessageDto,
+  type BroadcastMessageInput,
+  type BroadcastMessageOutput,
   type GetMessagesInput,
   type InboxOutput,
   type ListAgentsInput,
   type ListAgentsOutput,
   type MarkMessagesReadInput,
   type MarkMessagesReadOutput,
+  type MessageContextDto,
   type RegisterAgentInput,
   type RegisterAgentOutput,
   type SendMessageInput,
@@ -66,6 +73,8 @@ import {
 } from "../domain/contracts.js";
 import type {
   Agent,
+  BroadcastMessageCommand,
+  BroadcastMessageResult,
   GetMessagesQuery,
   MarkMessagesReadResult,
   Message,
@@ -77,6 +86,8 @@ import {
   AgentId,
   type AgentClient,
   type BranchName,
+  type JsonObject,
+  MachineName,
   type RepositoryName,
   Sequence,
 } from "../domain/value-objects.js";
@@ -93,6 +104,12 @@ type ListedResource = ListResourcesResult["resources"][number];
 
 type ActiveInboxSubscription = {
   readonly storeSubscription: InboxSubscription;
+};
+
+type RequiredMessageContext = {
+  readonly branchName: BranchName;
+  readonly client: AgentClient;
+  readonly repositoryName: RepositoryName;
 };
 
 export type MurmurApplicationDependencies = {
@@ -173,6 +190,16 @@ function messagesQuery(input: GetMessagesInput): GetMessagesQuery {
   };
 }
 
+function machineNameFromAgentId(agentId: AgentId): MachineName | null {
+  const separatorIndex: number = agentId.value.indexOf(":");
+  if (separatorIndex <= 0) return null;
+  try {
+    return MachineName.parse(agentId.value.slice(0, separatorIndex));
+  } catch (_error: unknown) {
+    return null;
+  }
+}
+
 export class MurmurApplication {
   public readonly server: Server;
   private readonly closeStoreOnClose: boolean;
@@ -201,9 +228,9 @@ export class MurmurApplication {
           tools: {},
         },
         instructions:
-          "Murmur provides durable agent-to-agent inboxes. Call register_agent first, then send_message or get_messages. " +
+          "Murmur provides durable agent-to-agent inboxes. Call register_agent first, then send_message, broadcast_message, or get_messages. " +
           "Outgoing messages include context.repository, context.branch, context.client, and a created_at timestamp. " +
-          "Repository, branch, and client are detected from the launching agent when possible; otherwise send_message must supply them in context. " +
+          "Repository, branch, and client are detected from the launching agent when possible; otherwise send_message or broadcast_message must supply them in context. " +
           "For push signals, subscribe to murmur://inbox/{agent_id}; always read the durable inbox after a notification or reconnect. " +
           `Messages expire automatically after ${RETENTION_DAYS} days. MCP notifications do not themselves guarantee that a host starts a new model turn.`,
       },
@@ -256,6 +283,19 @@ export class MurmurApplication {
         },
       ),
       toolDefinition(
+        "broadcast_message",
+        "Broadcast agent message",
+        `Persist one durable inbox delivery for every agent refreshed in the last ${ACTIVE_AGENT_WINDOW_MINUTES} minutes that matches the optional audience filters. Repository and machine filters combine with AND; omit both to broadcast globally. The sender is excluded, and idempotent retries preserve the original recipient snapshot.`,
+        BroadcastMessageInputSchema,
+        BroadcastMessageOutputSchema,
+        {
+          destructiveHint: false,
+          idempotentHint: false,
+          readOnlyHint: false,
+          title: "Broadcast agent message",
+        },
+      ),
+      toolDefinition(
         "get_messages",
         "Read agent inbox",
         "Read an agent's durable inbox. Reading does not mark messages as read.",
@@ -295,6 +335,31 @@ export class MurmurApplication {
         },
       ),
     ];
+  }
+
+  private requiredMessageContext(input: MessageContextDto | undefined): RequiredMessageContext {
+    const repositoryName: RepositoryName | null = repositoryNameFromInput(
+      input,
+      this.repositoryName,
+    );
+    if (repositoryName === null) {
+      throw new Error(
+        "Message repository context is required. Supply context.repository or configure MURMUR_REPOSITORY/X-Murmur-Repository.",
+      );
+    }
+    const branchName: BranchName | null = branchNameFromInput(input, this.branchName);
+    if (branchName === null) {
+      throw new Error(
+        "Message branch context is required. Supply context.branch or configure MURMUR_BRANCH/X-Murmur-Branch.",
+      );
+    }
+    const client: AgentClient | null = agentClientFromInput(input, this.client);
+    if (client === null) {
+      throw new Error(
+        "Message client context is required. Supply context.client or configure MURMUR_CLIENT/X-Murmur-Client.",
+      );
+    }
+    return { branchName, client, repositoryName };
   }
 
   private registerRequestHandlers(): void {
@@ -389,7 +454,15 @@ export class MurmurApplication {
           const input: RegisterAgentInput = RegisterAgentInputSchema.parse(
             request.params.arguments,
           );
-          const command: RegisterAgentCommand = registerAgentCommand(input);
+          const parsedCommand: RegisterAgentCommand = registerAgentCommand(input);
+          const inferredMachine: MachineName | null = machineNameFromAgentId(parsedCommand.agentId);
+          const metadata: JsonObject = {
+            ...(inferredMachine === null ? {} : { machine: inferredMachine.value }),
+            ...parsedCommand.metadata,
+            ...(this.client === null ? {} : { client: this.client.value }),
+            ...(this.repositoryName === null ? {} : { repository: this.repositoryName.value }),
+          };
+          const command: RegisterAgentCommand = { ...parsedCommand, metadata };
           const wasKnown: boolean = (await this.store.getAgent(command.agentId)) !== null;
           const agent: Agent = await this.store.registerAgent(command);
           if (!wasKnown) await this.server.sendResourceListChanged();
@@ -410,34 +483,14 @@ export class MurmurApplication {
         }
         case "send_message": {
           const input: SendMessageInput = SendMessageInputSchema.parse(request.params.arguments);
-          const repositoryName: RepositoryName | null = repositoryNameFromInput(
-            input.context,
-            this.repositoryName,
-          );
-          if (repositoryName === null) {
-            throw new Error(
-              "Message repository context is required. Supply context.repository or configure MURMUR_REPOSITORY/X-Murmur-Repository.",
-            );
-          }
-          const branchName: BranchName | null = branchNameFromInput(input.context, this.branchName);
-          if (branchName === null) {
-            throw new Error(
-              "Message branch context is required. Supply context.branch or configure MURMUR_BRANCH/X-Murmur-Branch.",
-            );
-          }
-          const client: AgentClient | null = agentClientFromInput(input.context, this.client);
-          if (client === null) {
-            throw new Error(
-              "Message client context is required. Supply context.client or configure MURMUR_CLIENT/X-Murmur-Client.",
-            );
-          }
+          const context: RequiredMessageContext = this.requiredMessageContext(input.context);
           const command: SendMessageCommand = {
-            branchName,
-            client,
+            branchName: context.branchName,
+            client: context.client,
             content: parseContent(input.content),
             idempotencyKey: nullableIdempotencyKey(input.idempotency_key),
             recipientId: AgentId.parse(input.recipient_id),
-            repositoryName,
+            repositoryName: context.repositoryName,
             senderId: AgentId.parse(input.sender_id),
             threadId: nullableThreadId(input.thread_id),
           };
@@ -447,6 +500,43 @@ export class MurmurApplication {
             message: toMessageDto(result.message),
             retention_days: RETENTION_DAYS,
             status: "stored",
+          });
+          return toolResult(output);
+        }
+        case "broadcast_message": {
+          const input: BroadcastMessageInput = BroadcastMessageInputSchema.parse(
+            request.params.arguments,
+          );
+          const context: RequiredMessageContext = this.requiredMessageContext(input.context);
+          const command: BroadcastMessageCommand = {
+            audience: broadcastAudienceFromInput(input.audience),
+            branchName: context.branchName,
+            client: context.client,
+            content: parseContent(input.content),
+            idempotencyKey: nullableIdempotencyKey(input.idempotency_key),
+            repositoryName: context.repositoryName,
+            senderId: AgentId.parse(input.sender_id),
+            threadId: nullableThreadId(input.thread_id),
+          };
+          const result: BroadcastMessageResult = await this.store.broadcastMessage(command);
+          const audience: BroadcastMessageOutput["audience"] = {
+            ...(result.audience.machineName === null
+              ? {}
+              : { machine: result.audience.machineName.value }),
+            ...(result.audience.repositoryName === null
+              ? {}
+              : { repository: result.audience.repositoryName.value }),
+          };
+          const output: BroadcastMessageOutput = BroadcastMessageOutputSchema.parse({
+            audience,
+            broadcast_id: result.broadcastId.value,
+            created_at: result.createdAt.toISOString(),
+            duplicate: result.duplicate,
+            expires_at: result.expiresAt.toISOString(),
+            recipient_count: result.recipientCount,
+            retention_days: RETENTION_DAYS,
+            status: "stored",
+            thread_id: result.threadId.value,
           });
           return toolResult(output);
         }

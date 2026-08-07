@@ -18,10 +18,12 @@ import {
 import type { z } from "zod";
 
 import {
+  BroadcastMessageOutputSchema,
   InboxOutputSchema,
   MarkMessagesReadOutputSchema,
   RegisterAgentOutputSchema,
   SendMessageOutputSchema,
+  type BroadcastMessageOutput,
   type InboxOutput,
   type MarkMessagesReadOutput,
   type RegisterAgentOutput,
@@ -207,6 +209,7 @@ test("two MCP processes exchange a durable message and push an inbox update", as
     expect(sent.message.context.repository).toBe("mattpatagon/murmur");
     expect(sent.message.context.branch).toBe("feature/mcp-context");
     expect(sent.message.context.client).toBe("codex");
+    expect(Object.hasOwn(sent.message, "broadcast_id")).toBe(false);
     expect(Number.isNaN(Date.parse(sent.message.created_at))).toBe(false);
     const pushed: ResourceUpdatedNotification = await Promise.race([
       notificationPromise,
@@ -228,6 +231,7 @@ test("two MCP processes exchange a durable message and push an inbox update", as
     expect(inboxMessage.context.branch).toBe("feature/mcp-context");
     expect(inboxMessage.context.client).toBe("codex");
     expect(inboxMessage.created_at).toBe(sent.message.created_at);
+    expect(Object.hasOwn(inboxMessage, "broadcast_id")).toBe(false);
 
     const marked: MarkMessagesReadOutput = await callValidated(
       receiver.client,
@@ -241,6 +245,113 @@ test("two MCP processes exchange a durable message and push an inbox update", as
     expect(marked.updated).toBe(1);
   } finally {
     await Promise.allSettled([sender.client.close(), receiver.client.close()]);
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("a broadcast fans out to every matching MCP inbox and pushes each update", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-broadcast-mcp-"));
+  const databasePath: string = join(directory, "messages.db");
+  const sender: ClientHarness = await connectClient("broadcast-sender", databasePath);
+  const firstReceiver: ClientHarness = await connectClient("broadcast-receiver-1", databasePath);
+  const secondReceiver: ClientHarness = await connectClient("broadcast-receiver-2", databasePath);
+  const senderId: string = "mac-1:codex:sender:0001";
+  const firstReceiverId: string = "mac-1:codex:receiver-1:0002";
+  const secondReceiverId: string = "mac-1:claude:receiver-2:0003";
+  try {
+    const toolsResult: Awaited<ReturnType<Client["listTools"]>> = await sender.client.listTools();
+    expect(
+      toolsResult.tools.some(
+        (tool: (typeof toolsResult.tools)[number]): boolean => tool.name === "broadcast_message",
+      ),
+    ).toBe(true);
+    await callValidated(
+      sender.client,
+      "register_agent",
+      { agent_id: senderId, display_name: "Broadcast Sender" },
+      RegisterAgentOutputSchema,
+    );
+    await callValidated(
+      firstReceiver.client,
+      "register_agent",
+      { agent_id: firstReceiverId, display_name: "Broadcast Receiver 1" },
+      RegisterAgentOutputSchema,
+    );
+    await callValidated(
+      secondReceiver.client,
+      "register_agent",
+      { agent_id: secondReceiverId, display_name: "Broadcast Receiver 2" },
+      RegisterAgentOutputSchema,
+    );
+
+    const firstUri: string = `murmur://inbox/${firstReceiverId}`;
+    const secondUri: string = `murmur://inbox/${secondReceiverId}`;
+    const firstPush: Promise<ResourceUpdatedNotification> = new Promise(
+      (resolvePush: (value: ResourceUpdatedNotification) => void): void => {
+        firstReceiver.client.setNotificationHandler(ResourceUpdatedNotificationSchema, resolvePush);
+      },
+    );
+    const secondPush: Promise<ResourceUpdatedNotification> = new Promise(
+      (resolvePush: (value: ResourceUpdatedNotification) => void): void => {
+        secondReceiver.client.setNotificationHandler(
+          ResourceUpdatedNotificationSchema,
+          resolvePush,
+        );
+      },
+    );
+    await Promise.all([
+      firstReceiver.client.subscribeResource({ uri: firstUri }),
+      secondReceiver.client.subscribeResource({ uri: secondUri }),
+    ]);
+
+    const broadcast: BroadcastMessageOutput = await callValidated(
+      sender.client,
+      "broadcast_message",
+      {
+        audience: { machine: "mac-1", repository: "mattpatagon/murmur" },
+        content: "hello to every matching MCP process",
+        idempotency_key: "broadcast-e2e-1",
+        sender_id: senderId,
+      },
+      BroadcastMessageOutputSchema,
+    );
+    expect(broadcast.recipient_count).toBe(2);
+    const pushes: ResourceUpdatedNotification[] = await Promise.race([
+      Promise.all([firstPush, secondPush]),
+      notificationTimeout(),
+    ]);
+    expect(
+      pushes.map((push: ResourceUpdatedNotification): string => push.params.uri).sort(),
+    ).toEqual([firstUri, secondUri].sort());
+
+    const inboxes: InboxOutput[] = await Promise.all([
+      callValidated(
+        firstReceiver.client,
+        "get_messages",
+        { after_sequence: 0, agent_id: firstReceiverId, limit: 100, unread_only: false },
+        InboxOutputSchema,
+      ),
+      callValidated(
+        secondReceiver.client,
+        "get_messages",
+        { after_sequence: 0, agent_id: secondReceiverId, limit: 100, unread_only: false },
+        InboxOutputSchema,
+      ),
+    ]);
+    for (const inbox of inboxes) {
+      expect(inbox.messages).toHaveLength(1);
+      const message: InboxOutput["messages"][number] | undefined = inbox.messages[0];
+      if (message === undefined) throw new Error("Expected one broadcast inbox message");
+      expect(Object.hasOwn(message, "broadcast_id")).toBe(false);
+      expect(message.thread_id).toBe(broadcast.thread_id);
+      expect(message.content).toBe("hello to every matching MCP process");
+    }
+  } finally {
+    await Promise.allSettled([
+      sender.client.close(),
+      firstReceiver.client.close(),
+      secondReceiver.client.close(),
+    ]);
     rmSync(directory, { force: true, recursive: true });
   }
 });
@@ -351,6 +462,37 @@ test("generic MCP clients must provide complete message context", async (): Prom
     );
     expect(missingClient.isError).toBe(true);
     expect(JSON.stringify(missingClient.content)).toContain("Message client context is required");
+
+    const missingBroadcastRepository: CallToolResult = CallToolResultSchema.parse(
+      await sender.client.callTool({
+        arguments: {
+          content: "broadcast missing repository",
+          sender_id: "generic-a",
+        },
+        name: "broadcast_message",
+      }),
+    );
+    expect(missingBroadcastRepository.isError).toBe(true);
+    expect(JSON.stringify(missingBroadcastRepository.content)).toContain(
+      "Message repository context is required",
+    );
+
+    const broadcast: BroadcastMessageOutput = await callValidated(
+      sender.client,
+      "broadcast_message",
+      {
+        content: "global broadcast with explicit context",
+        context: {
+          branch: "feature/explicit-context",
+          client: "claude",
+          repository: "another/project",
+        },
+        sender_id: "generic-a",
+      },
+      BroadcastMessageOutputSchema,
+    );
+    expect(broadcast.audience).toEqual({});
+    expect(broadcast.recipient_count).toBe(1);
   } finally {
     await Promise.allSettled([sender.client.close(), receiver.client.close()]);
     rmSync(directory, { force: true, recursive: true });

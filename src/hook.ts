@@ -8,6 +8,7 @@ import process from "node:process";
 
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 
+import { detectBranchName, detectRepositoryName } from "./context/repository-context.js";
 import { InboxOutputSchema, type InboxOutput } from "./domain/contracts.js";
 import {
   DEFAULT_MURMUR_URL,
@@ -31,9 +32,11 @@ type HookCache = {
 
 export type AgentIdentity = {
   readonly agentId: string;
+  readonly branch: string | null;
   readonly client: MurmurClient;
   readonly displayName: string;
   readonly machine: string;
+  readonly repository: string | null;
   readonly workspace: string;
   readonly workspaceHash: string;
 };
@@ -109,11 +112,23 @@ export function deriveAgentIdentity(
     "workspace",
   );
   const agentId: string = `${machine}:${client}:${workspace}:${workspaceHash}`;
+  const detectedRepository: ReturnType<typeof detectRepositoryName> = detectRepositoryName(
+    environment,
+    resolvedWorkspace,
+  );
+  const repository: string | null = detectedRepository === null ? null : detectedRepository.value;
+  const detectedBranch: ReturnType<typeof detectBranchName> = detectBranchName(
+    environment,
+    resolvedWorkspace,
+  );
+  const branch: string | null = detectedBranch === null ? null : detectedBranch.value;
   return {
     agentId,
+    branch,
     client,
     displayName: `${client} on ${machine} (${workspace})`,
     machine,
+    repository,
     workspace,
     workspaceHash,
   };
@@ -264,6 +279,10 @@ function requestHeaders(identity: AgentIdentity, token: string, sessionId: strin
     "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
     "X-Murmur-Client": identity.client,
   });
+  if (identity.branch !== null) headers.set("X-Murmur-Branch", identity.branch);
+  if (identity.repository !== null) {
+    headers.set("X-Murmur-Repository", identity.repository);
+  }
   if (sessionId !== null) headers.set("Mcp-Session-Id", sessionId);
   return headers;
 }
@@ -337,6 +356,7 @@ export async function checkRemoteInbox(
             metadata: {
               client: identity.client,
               machine: identity.machine,
+              ...(identity.repository === null ? {} : { repository: identity.repository }),
               workspace: identity.workspace,
             },
           },

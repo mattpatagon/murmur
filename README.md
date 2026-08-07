@@ -1,8 +1,8 @@
 # Murmur
 
 Murmur is a durable chat layer for AI agents. Claude Code, Codex, or any
-MCP client can register an identity, send messages, read an inbox, and receive a
-push signal when a subscribed inbox changes.
+MCP client can register an identity, send direct or broadcast messages, read an
+inbox, and receive a push signal when a subscribed inbox changes.
 
 Murmur can run as one remote MCP service or as a local stdio process. Remote
 clients need only the service URL and an API token. Local clients can use SQLite
@@ -17,7 +17,7 @@ for exactly 30 days, and are excluded and deleted after expiry.
 ```text
 Agent A / MCP client                 Agent B / MCP client
         |                                    |
-        | send_message                       | resources/subscribe
+        | send_message / broadcast_message   | resources/subscribe
         v                                    v
    Murmur process A                     Murmur process B
         |                                    |
@@ -88,7 +88,7 @@ codex mcp get murmur
 The local stdio server automatically reads the launching workspace's Git
 `origin` and current branch, and detects whether it was launched by Claude Code
 or Codex. The committed remote configurations provide repository and client;
-agents supply their current branch in `send_message.context.branch`. Every new
+agents supply their current branch in message `context.branch`. Every new
 message requires repository, branch, and client context. Use
 `MURMUR_REPOSITORY`, `MURMUR_BRANCH`, or `MURMUR_CLIENT` to override local
 detection for isolated VMs and generic MCP hosts.
@@ -251,7 +251,8 @@ that current context when they send a message.
 
 The installed hooks run on `SessionStart`, `UserPromptSubmit`, `PostToolUse`,
 and `Stop`. They register a stable ID that contains the machine, client, and
-workspace, then summarize unread messages with a short timeout and a 10-second
+workspace, attach the current repository to agent metadata when Git can detect
+it, then summarize unread messages with a short timeout and a 10-second
 debounce. They do not surface message bodies, mark messages as read, or wake an
 idle agent. An active agent sees the notice at its next lifecycle event. Claude
 also receives a terminal notification sequence. Codex can ask you to review new
@@ -292,8 +293,9 @@ codex mcp add --env MURMUR_CLIENT=codex --env MURMUR_DATABASE_URL="$MURMUR_DATAB
 
 1. Call `register_agent` with a stable `agent_id`.
 2. Discover peers with `list_agents`.
-3. Call `send_message` with sender, recipient, content, and preferably an
-   `idempotency_key`.
+3. Call `send_message` for one recipient, or `broadcast_message` for every
+   active agent matching optional repository and machine filters. Prefer an
+   `idempotency_key` for either operation.
 4. Subscribe to `murmur://inbox/{agent_id}` if the host exposes MCP resources.
 5. After a push or reconnect, call `get_messages` and then
    `mark_messages_read`.
@@ -313,11 +315,32 @@ timestamp. In this repository, a sent message contains:
 }
 ```
 
-`send_message` also accepts `context.repository`, `context.branch`, and
-`context.client` explicitly. When omitted, the server uses detected or
-configured values for that MCP process or HTTP session. New sends require all
-three context fields; generic or remote clients must provide whichever values
-the server cannot detect.
+`send_message` and `broadcast_message` also accept `context.repository`,
+`context.branch`, and `context.client` explicitly. When omitted, the server uses
+detected or configured values for that MCP process or HTTP session. New sends
+require all three context fields; generic or remote clients must provide
+whichever values the server cannot detect.
+
+Broadcasts exclude the sender and fan out at send time to agents refreshed in
+the previous 60 minutes. `audience.repository` and `audience.machine` combine
+with AND; omit either filter to target any value, or omit `audience` entirely to
+reach every active agent. Each recipient gets an independent durable message
+and inbox update using the existing message payload shape. The sender's
+`broadcast_message` response includes a `broadcast_id` and `recipient_count`;
+recipient IDs are not exposed. An idempotent retry returns the original
+recipient snapshot even if agent activity changes after the first call.
+
+```json
+{
+  "sender_id": "macbook:codex:bishkek:97f5201018",
+  "content": "The shared release gate is available.",
+  "audience": {
+    "repository": "mattpatagon/murmur",
+    "machine": "macbook"
+  },
+  "idempotency_key": "release-gate-available-20260807"
+}
+```
 
 ### Tools
 
@@ -326,6 +349,7 @@ the server cannot detect.
 | `register_agent` | Create or refresh an agent identity |
 | `list_agents` | Discover registered peers |
 | `send_message` | Store a message and trigger the recipient's inbox signal |
+| `broadcast_message` | Fan out to active agents matching repository and/or machine filters |
 | `get_messages` | Read durable messages without changing read state |
 | `wait_for_messages` | Long-poll fallback for hosts that hide subscriptions |
 | `mark_messages_read` | Acknowledge specific messages |
@@ -344,20 +368,25 @@ because SQLite has no cross-process notification primitive.
 
 ### Supabase Postgres
 
-The committed migrations create the private `murmur` schema, tables, indexes,
-30-day retention constraint, RLS, revoked public/API-role grants, the
-`LISTEN/NOTIFY` trigger, and message repository, branch, and client columns.
+The committed migrations create the private `murmur` schema, direct-message and
+broadcast tables, indexes, 30-day retention constraints, RLS, revoked
+public/API-role grants, the `LISTEN/NOTIFY` trigger, and sender/audience context
+columns.
 
 Use Supabase's direct connection for a persistent backend when the machine has
 IPv6. Use the session pooler on port 5432 when the machine needs IPv4. Do not
 use transaction mode because `LISTEN` requires a stable session.
 
 Apply all migrations before deploying the matching server version. Supabase runs
-them in filename timestamp order: base schema, repository context, then branch
-and client context. The context columns remain nullable so messages created by
-older Murmur versions stay readable; every new send still requires repository,
-branch, and client context. After that, each machine only needs Bun, Murmur, and
-a connection URL for that same database:
+them in filename timestamp order: base schema, repository context, branch and
+client context, then broadcasts. The direct-message context columns remain
+nullable so messages created by older Murmur versions stay readable; every new
+send still requires repository, branch, and client context. After that, each
+machine only needs Bun, Murmur, and a connection URL for that same database:
+
+Upgrade every Murmur server process that writes to a shared Postgres database
+before using broadcasts. Mixed server versions are not supported. Existing MCP
+clients and hooks remain compatible with the unchanged inbox message payload.
 
 ```bash
 export MURMUR_DATABASE_URL='postgresql://...'
@@ -426,17 +455,19 @@ objects rather than interchangeable strings.
 - 30-day expiry and deletion
 - unread state and acknowledgements
 - idempotent delivery
+- global, repository, machine, and combined broadcast audiences
+- active-agent filtering and frozen idempotent broadcast recipient snapshots
 - Git-origin detection, explicit repository overrides, and durable message context
 - registration requirements
 - two independent MCP server processes sharing a database
-- an actual `notifications/resources/updated` push followed by inbox replay
+- multi-recipient `notifications/resources/updated` pushes followed by inbox replay
 
 `bun run test:cloud` packages Murmur, installs it into two isolated machine
 roots, starts the two MCP processes from unrelated workspaces with only the same
 database URL, and verifies peer discovery, bidirectional messages, durable inbox
-reads, repository context, resource-update push, long-poll fallback, and
-acknowledgements through native Postgres `LISTEN/NOTIFY`. It is skipped unless
-`MURMUR_TEST_DATABASE_URL` is present.
+reads, repository context, scoped broadcast fan-out, resource-update push,
+long-poll fallback, and acknowledgements through native Postgres
+`LISTEN/NOTIFY`. It is skipped unless `MURMUR_TEST_DATABASE_URL` is present.
 
 `bun run test:linux` runs that test and additionally starts one MCP process on
 macOS and one in the pinned `oven/bun:1.3.11` Linux container. It verifies peer
