@@ -65,6 +65,23 @@ test("excludes erased type declarations but keeps executable TypeScript in the c
   expect(hasRuntimeCode("export const retentionDays: number = 30;\n")).toBeTrue();
 });
 
+test("rejects non-TypeScript files from the tracked source census", (): void => {
+  expect(
+    (): CoverageAudit =>
+      auditCoverage(
+        ["src/tracked.ts", "src/bypass.js"],
+        record({
+          functionsFound: 1,
+          functionsHit: 1,
+          linesFound: 1,
+          linesHit: 1,
+          source: "src/tracked.ts",
+        }),
+        "/workspace",
+      ),
+  ).toThrow("Only .ts files are permitted under src");
+});
+
 test("rejects exactly ninety percent and untracked source records", (): void => {
   const lcov: string =
     record({
@@ -72,7 +89,7 @@ test("rejects exactly ninety percent and untracked source records", (): void => 
       functionsHit: 9,
       linesFound: 10,
       linesHit: 9,
-      source: "C:\\workspace\\src\\tracked.ts",
+      source: "C:\\WORKSPACE\\src\\tracked.ts",
     }) +
     record({
       functionsFound: 1,

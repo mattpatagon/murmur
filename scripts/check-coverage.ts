@@ -44,7 +44,14 @@ function normalizeSource(source: string, workspace: string): string {
   const normalizedSource: string = source.replaceAll("\\", "/");
   const normalizedWorkspace: string = workspace.replaceAll("\\", "/").replace(/\/+$/u, "");
   const workspacePrefix: string = `${normalizedWorkspace}/`;
-  if (normalizedSource.startsWith(workspacePrefix)) {
+  const windowsWorkspace: boolean = /^[A-Za-z]:\//u.test(normalizedWorkspace);
+  const comparableSource: string = windowsWorkspace
+    ? normalizedSource.toLowerCase()
+    : normalizedSource;
+  const comparablePrefix: string = windowsWorkspace
+    ? workspacePrefix.toLowerCase()
+    : workspacePrefix;
+  if (comparableSource.startsWith(comparablePrefix)) {
     return normalizedSource.slice(workspacePrefix.length);
   }
   return normalizedSource.startsWith("./") ? normalizedSource.slice(2) : normalizedSource;
@@ -129,6 +136,14 @@ export function auditCoverage(
   if (!Number.isFinite(minimumPercent) || minimumPercent < 0 || minimumPercent >= 100) {
     throw new Error("Coverage minimum must be a finite percentage from 0 through 99.999...");
   }
+  const unsupportedTrackedSources: string[] = trackedSources.filter(
+    (source: string): boolean => source.startsWith("src/") && !source.endsWith(".ts"),
+  );
+  if (unsupportedTrackedSources.length > 0) {
+    throw new Error(
+      `Only .ts files are permitted under src; unsupported tracked files: ${unsupportedTrackedSources.join(", ")}`,
+    );
+  }
   const normalizedTrackedSources: string[] = trackedSources
     .map((source: string): string => normalizeSource(source, workspace))
     .filter((source: string): boolean => source.startsWith("src/") && source.endsWith(".ts"))
@@ -139,13 +154,22 @@ export function auditCoverage(
   }
 
   const sourceRecords: Map<string, CoverageRecord> = new Map<string, CoverageRecord>();
+  const unsupportedLcovSources: string[] = [];
   for (const record of parseLcov(lcovContent, workspace)) {
-    if (record.source.startsWith("src/") && record.source.endsWith(".ts")) {
-      sourceRecords.set(record.source, record);
+    if (!record.source.startsWith("src/")) continue;
+    if (!record.source.endsWith(".ts")) {
+      unsupportedLcovSources.push(record.source);
+      continue;
     }
+    sourceRecords.set(record.source, record);
   }
 
   const errors: string[] = [];
+  if (unsupportedLcovSources.length > 0) {
+    errors.push(
+      `Non-TypeScript runtime sources present in LCOV: ${unsupportedLcovSources.join(", ")}`,
+    );
+  }
   const missingSources: string[] = normalizedTrackedSources.filter(
     (source: string): boolean => !sourceRecords.has(source),
   );
@@ -190,18 +214,25 @@ export function trackedRuntimeSources(workspace: string = process.cwd()): readon
     cwd: workspace,
     encoding: "utf8",
   });
-  return output
+  const trackedSources: string[] = output
     .split("\0")
-    .filter(
-      (source: string): boolean =>
-        source.startsWith("src/") &&
-        source.endsWith(".ts") &&
-        hasRuntimeCode(readFileSync(join(workspace, source), "utf8")),
+    .filter((source: string): boolean => source.startsWith("src/") && source !== "");
+  const unsupportedSources: string[] = trackedSources.filter(
+    (source: string): boolean => !source.endsWith(".ts"),
+  );
+  if (unsupportedSources.length > 0) {
+    throw new Error(
+      `Only .ts files are permitted under src; unsupported tracked files: ${unsupportedSources.join(", ")}`,
     );
+  }
+  return trackedSources.filter((source: string): boolean =>
+    hasRuntimeCode(readFileSync(join(workspace, source), "utf8")),
+  );
 }
 
 export function hasRuntimeCode(source: string): boolean {
   const transpiler: Bun.Transpiler = new Bun.Transpiler({ loader: "ts" });
+  // Type-only modules have no executable statements and therefore no Bun LCOV record.
   return transpiler.transformSync(source).trim() !== "";
 }
 
