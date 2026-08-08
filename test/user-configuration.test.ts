@@ -278,7 +278,7 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
       HOME: "/users/test",
     }),
   ).toEqual({
-    claudeMcp: "/users/test/.claude.json",
+    claudeMcp: "/config/claude/.claude.json",
     claudeSettings: "/config/claude/settings.json",
     codexConfig: "/config/codex/config.toml",
     codexHooks: "/config/codex/hooks.json",
@@ -296,6 +296,21 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
     claudeSettings: join("C:\\Users\\test", ".claude", "settings.json"),
     codexConfig: join("C:\\Users\\test", ".codex", "config.toml"),
     codexHooks: join("C:\\Users\\test", ".codex", "hooks.json"),
+  });
+  expect(
+    defaultUserConfigurationPaths(
+      {
+        CLAUDE_CONFIG_DIR: " ",
+        CODEX_HOME: "",
+        HOME: "/home/test",
+      },
+      "linux",
+    ),
+  ).toEqual({
+    claudeMcp: "/home/test/.claude.json",
+    claudeSettings: "/home/test/.claude/settings.json",
+    codexConfig: "/home/test/.codex/config.toml",
+    codexHooks: "/home/test/.codex/hooks.json",
   });
 });
 

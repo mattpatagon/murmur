@@ -2,7 +2,7 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { homedir, hostname } from "node:os";
+import { hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import process from "node:process";
 
@@ -10,6 +10,7 @@ import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 
 import { detectBranchName, detectRepositoryName } from "./context/repository-context.js";
 import { InboxOutputSchema, type InboxOutput } from "./domain/contracts.js";
+import { defaultHookCacheDirectory, environmentPath, positiveInteger } from "./platform-paths.js";
 import {
   DEFAULT_MURMUR_URL,
   MURMUR_TOKEN_ENV,
@@ -57,26 +58,6 @@ export type HookOutput = {
   readonly systemMessage?: string | undefined;
   readonly terminalSequence?: string | undefined;
 };
-
-export function defaultHookCacheDirectory(
-  environment: NodeJS.ProcessEnv = process.env,
-  platform: NodeJS.Platform = process.platform,
-): string {
-  const xdgCacheHome: string | undefined = environment["XDG_CACHE_HOME"];
-  if (xdgCacheHome !== undefined && xdgCacheHome.trim() !== "") {
-    return join(xdgCacheHome, "murmur", "hooks");
-  }
-  if (platform === "win32") {
-    const localAppData: string | undefined = environment["LOCALAPPDATA"];
-    if (localAppData !== undefined && localAppData.trim() !== "") {
-      return join(localAppData, "murmur", "hooks");
-    }
-    const windowsHome: string = environment["USERPROFILE"] ?? homedir();
-    return join(windowsHome, "AppData", "Local", "murmur", "hooks");
-  }
-  const home: string = environment["HOME"] ?? homedir();
-  return join(home, ".cache", "murmur", "hooks");
-}
 
 type CheckInbox = (
   identity: AgentIdentity,
@@ -250,12 +231,6 @@ function missingTokenOutput(
     notification,
   });
   return output;
-}
-
-function numericEnvironmentValue(value: string | undefined, fallback: number): number {
-  if (value === undefined) return fallback;
-  const parsed: number = Number.parseInt(value, 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function rpcResult(response: unknown): unknown {
@@ -444,16 +419,15 @@ export async function handleHook(
     return missingTokenOutput(client, eventName, identity);
   }
 
+  const configuredCacheDirectory: string | null = environmentPath(environment, "MURMUR_CACHE_DIR");
   const cacheDirectory: string =
-    options.cacheDirectory ??
-    environment["MURMUR_CACHE_DIR"] ??
-    defaultHookCacheDirectory(environment);
+    options.cacheDirectory ?? configuredCacheDirectory ?? defaultHookCacheDirectory(environment);
   const path: string = cachePath(cacheDirectory, identity);
   const cache: HookCache = readCache(path);
   const now: number = options.now ?? Date.now();
   const debounceMs: number =
     options.debounceMs ??
-    numericEnvironmentValue(environment["MURMUR_HOOK_DEBOUNCE_MS"], DEFAULT_DEBOUNCE_MS);
+    positiveInteger(environment["MURMUR_HOOK_DEBOUNCE_MS"], DEFAULT_DEBOUNCE_MS);
   if (eventName !== "SessionStart" && now - cache.lastCheckedAt < debounceMs) return null;
 
   writeCache(path, {
@@ -462,8 +436,7 @@ export async function handleHook(
   });
 
   const timeoutMs: number =
-    options.timeoutMs ??
-    numericEnvironmentValue(environment["MURMUR_HOOK_TIMEOUT_MS"], DEFAULT_TIMEOUT_MS);
+    options.timeoutMs ?? positiveInteger(environment["MURMUR_HOOK_TIMEOUT_MS"], DEFAULT_TIMEOUT_MS);
   const summary: InboxSummary = await (options.checkInbox ?? checkRemoteInbox)(identity, {
     afterSequence: eventName === "SessionStart" ? 0 : cache.lastNotifiedInboxVersion,
     token,

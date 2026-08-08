@@ -8,7 +8,6 @@ import type { Agent, BroadcastMessageResult } from "../src/domain/models.js";
 import {
   buildHookOutput,
   checkRemoteInbox,
-  defaultHookCacheDirectory,
   deriveAgentIdentity,
   handleHook,
   type AgentIdentity,
@@ -16,6 +15,7 @@ import {
   type InboxSummary,
 } from "../src/hook.js";
 import { startHttpServer, type MurmurHttpServer } from "../src/http-server.js";
+import { defaultHookCacheDirectory } from "../src/platform-paths.js";
 import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
 import {
   AgentClient,
@@ -69,6 +69,12 @@ test("resolves hook cache roots consistently across operating systems", (): void
   expect(defaultHookCacheDirectory({ HOME: "/home/test" }, "linux")).toBe(
     join("/home/test", ".cache", "murmur", "hooks"),
   );
+  expect(
+    defaultHookCacheDirectory(
+      { LOCALAPPDATA: "", USERPROFILE: "C:\\Users\\test", XDG_CACHE_HOME: " " },
+      "win32",
+    ),
+  ).toBe(join("C:\\Users\\test", "AppData", "Local", "murmur", "hooks"));
 });
 
 test("builds metadata-only notification output and a Claude terminal signal", (): void => {
