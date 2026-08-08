@@ -350,8 +350,12 @@ export function shellQuote(value: string): string {
 
 export function defaultUserConfigurationPaths(
   environment: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): UserConfigurationPaths {
-  const home: string = environment["HOME"] ?? homedir();
+  const home: string =
+    platform === "win32"
+      ? (environment["USERPROFILE"] ?? homedir())
+      : (environment["HOME"] ?? homedir());
   const codexHome: string = environment["CODEX_HOME"] ?? join(home, ".codex");
   const claudeDirectory: string = environment["CLAUDE_CONFIG_DIR"] ?? join(home, ".claude");
   return {

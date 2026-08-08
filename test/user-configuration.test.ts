@@ -283,6 +283,20 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
     codexConfig: "/config/codex/config.toml",
     codexHooks: "/config/codex/hooks.json",
   });
+  expect(
+    defaultUserConfigurationPaths(
+      {
+        HOME: "/msys/home/test",
+        USERPROFILE: "C:\\Users\\test",
+      },
+      "win32",
+    ),
+  ).toEqual({
+    claudeMcp: join("C:\\Users\\test", ".claude.json"),
+    claudeSettings: join("C:\\Users\\test", ".claude", "settings.json"),
+    codexConfig: join("C:\\Users\\test", ".codex", "config.toml"),
+    codexHooks: join("C:\\Users\\test", ".codex", "hooks.json"),
+  });
 });
 
 test("creates user configuration files with private permissions", (): void => {

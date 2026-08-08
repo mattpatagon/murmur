@@ -2,7 +2,7 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { hostname } from "node:os";
+import { homedir, hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import process from "node:process";
 
@@ -57,6 +57,26 @@ export type HookOutput = {
   readonly systemMessage?: string | undefined;
   readonly terminalSequence?: string | undefined;
 };
+
+export function defaultHookCacheDirectory(
+  environment: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const xdgCacheHome: string | undefined = environment["XDG_CACHE_HOME"];
+  if (xdgCacheHome !== undefined && xdgCacheHome.trim() !== "") {
+    return join(xdgCacheHome, "murmur", "hooks");
+  }
+  if (platform === "win32") {
+    const localAppData: string | undefined = environment["LOCALAPPDATA"];
+    if (localAppData !== undefined && localAppData.trim() !== "") {
+      return join(localAppData, "murmur", "hooks");
+    }
+    const windowsHome: string = environment["USERPROFILE"] ?? homedir();
+    return join(windowsHome, "AppData", "Local", "murmur", "hooks");
+  }
+  const home: string = environment["HOME"] ?? homedir();
+  return join(home, ".cache", "murmur", "hooks");
+}
 
 type CheckInbox = (
   identity: AgentIdentity,
@@ -427,11 +447,7 @@ export async function handleHook(
   const cacheDirectory: string =
     options.cacheDirectory ??
     environment["MURMUR_CACHE_DIR"] ??
-    join(
-      environment["XDG_CACHE_HOME"] ?? join(environment["HOME"] ?? ".", ".cache"),
-      "murmur",
-      "hooks",
-    );
+    defaultHookCacheDirectory(environment);
   const path: string = cachePath(cacheDirectory, identity);
   const cache: HookCache = readCache(path);
   const now: number = options.now ?? Date.now();

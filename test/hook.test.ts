@@ -8,6 +8,7 @@ import type { Agent, BroadcastMessageResult } from "../src/domain/models.js";
 import {
   buildHookOutput,
   checkRemoteInbox,
+  defaultHookCacheDirectory,
   deriveAgentIdentity,
   handleHook,
   type AgentIdentity,
@@ -53,6 +54,21 @@ test("derives a stable agent ID from machine, client, and workspace", (): void =
   expect(first.branch).toBe("feature/broadcast-hook");
   expect(first.repository).toBe("mattpatagon/murmur");
   expect(claude.agentId).not.toBe(first.agentId);
+});
+
+test("resolves hook cache roots consistently across operating systems", (): void => {
+  expect(defaultHookCacheDirectory({ XDG_CACHE_HOME: "/var/cache/test" }, "linux")).toBe(
+    join("/var/cache/test", "murmur", "hooks"),
+  );
+  expect(
+    defaultHookCacheDirectory({ LOCALAPPDATA: "C:\\Users\\test\\AppData\\Local" }, "win32"),
+  ).toBe(join("C:\\Users\\test\\AppData\\Local", "murmur", "hooks"));
+  expect(defaultHookCacheDirectory({ USERPROFILE: "C:\\Users\\test" }, "win32")).toBe(
+    join("C:\\Users\\test", "AppData", "Local", "murmur", "hooks"),
+  );
+  expect(defaultHookCacheDirectory({ HOME: "/home/test" }, "linux")).toBe(
+    join("/home/test", ".cache", "murmur", "hooks"),
+  );
 });
 
 test("builds metadata-only notification output and a Claude terminal signal", (): void => {
