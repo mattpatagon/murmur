@@ -207,3 +207,20 @@ test("workflow performs authoritative secret reads before applying migrations", 
     previousPosition = position;
   }
 });
+
+test("workflows pin every GitHub Action to an immutable commit", async (): Promise<void> => {
+  const workflowPaths: readonly string[] = [
+    ".github/workflows/ci.yml",
+    ".github/workflows/deploy.yml",
+  ];
+  for (const workflowPath of workflowPaths) {
+    const workflow: string = await Bun.file(workflowPath).text();
+    const actionUses: readonly string[] = workflow
+      .split("\n")
+      .filter((line: string): boolean => /^\s*uses:/u.test(line));
+    expect(actionUses.length).toBeGreaterThan(0);
+    actionUses.forEach((line: string): void => {
+      expect(line).toMatch(/^\s*uses:\s+[^\s@]+@[0-9a-f]{40}(?:\s+#\s+v\d+)?\s*$/u);
+    });
+  }
+});
