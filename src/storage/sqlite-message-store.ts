@@ -39,6 +39,7 @@ import {
   Sequence,
   SystemClock,
   ThreadId,
+  TenantId,
   type JsonObject,
 } from "../domain/value-objects.js";
 import type { InboxSubscription, InboxUpdateHandler, MessageStore } from "./message-store.js";
@@ -280,6 +281,13 @@ export class SqliteMessageStore implements MessageStore {
     this.database.exec("PRAGMA busy_timeout = 5000");
     this.migrate();
     this.pruneExpired(this.clock.now());
+  }
+
+  public scope(tenantId: TenantId): MessageStore {
+    if (!tenantId.equals(TenantId.founding())) {
+      throw new Error("SQLite storage supports only the founding tenant");
+    }
+    return this;
   }
 
   private ensureOpen(): void {

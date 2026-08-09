@@ -35,6 +35,8 @@ import {
   type SendMessageOutput,
   type WaitForMessagesOutput,
 } from "../src/domain/contracts.js";
+import { FOUNDING_TENANT_ID } from "../src/domain/value-objects.js";
+import { postgresSslOptions, postgresTlsConfiguration } from "../src/postgres-tls.js";
 import { POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED } from "../src/storage/postgres-message-store.js";
 
 const cloudDatabaseUrl: string | undefined = process.env["MURMUR_TEST_DATABASE_URL"];
@@ -138,6 +140,12 @@ function hostChildEnvironment(databaseUrl: string): Record<string, string> {
   environment["MURMUR_BRANCH"] = branchName;
   environment["MURMUR_CLIENT"] = clientName;
   environment["MURMUR_REPOSITORY"] = repositoryName;
+  const databaseCaPath: string | undefined = process.env["MURMUR_DATABASE_CA_PATH"];
+  if (databaseCaPath !== undefined) environment["MURMUR_DATABASE_CA_PATH"] = databaseCaPath;
+  const insecureDatabaseTls: string | undefined = process.env["MURMUR_DATABASE_TLS_INSECURE"];
+  if (insecureDatabaseTls !== undefined) {
+    environment["MURMUR_DATABASE_TLS_INSECURE"] = insecureDatabaseTls;
+  }
   return environment;
 }
 
@@ -153,7 +161,7 @@ async function connectClient(
     command: "murmur-mcp",
     cwd: workspace,
     env: cloudChildEnvironment(databaseUrl, binaryDirectory),
-    stderr: "pipe",
+    stderr: "inherit",
   });
   await client.connect(transport);
   return { client, transport };
@@ -166,7 +174,7 @@ async function connectProjectClient(name: string, databaseUrl: string): Promise<
     command: "bun",
     cwd: projectRoot,
     env: hostChildEnvironment(databaseUrl),
-    stderr: "pipe",
+    stderr: "inherit",
   });
   await client.connect(transport);
   return { client, transport };
@@ -190,6 +198,8 @@ async function connectDockerClient(
       "--env",
       "MURMUR_DATABASE_URL",
       "--env",
+      "MURMUR_DATABASE_TLS_INSECURE",
+      "--env",
       "MURMUR_BRANCH",
       "--env",
       "MURMUR_CLIENT",
@@ -202,7 +212,7 @@ async function connectDockerClient(
     ],
     command: "docker",
     env: hostChildEnvironment(databaseUrl),
-    stderr: "pipe",
+    stderr: "inherit",
   });
   await client.connect(transport);
   return { client, transport };
@@ -235,6 +245,7 @@ async function waitForMessageCommitLockWaiters(
   recipientId: string,
   expected: number,
 ): Promise<void> {
+  const tenantRecipientId: string = `${FOUNDING_TENANT_ID}:${recipientId}`;
   let attempt: number = 0;
   while (attempt < 200) {
     const rows: AdvisoryWaiterCountRow[] = await database<AdvisoryWaiterCountRow[]>`
@@ -243,13 +254,13 @@ async function waitForMessageCommitLockWaiters(
       WHERE locktype = 'advisory'
         AND classid = (
           pg_catalog.hashtextextended(
-            ${recipientId},
+            ${tenantRecipientId},
             ${POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED}::bigint
           ) >> 32 & 4294967295::bigint
         )::oid
         AND objid = (
           pg_catalog.hashtextextended(
-            ${recipientId},
+            ${tenantRecipientId},
             ${POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED}::bigint
           ) & 4294967295::bigint
         )::oid
@@ -467,8 +478,9 @@ test.skipIf(cloudDatabaseUrl === undefined)(
           const coordinationDatabase: Sql = postgres(databaseUrl, {
             connect_timeout: 10,
             max: 2,
-            ssl: "require",
+            ssl: postgresSslOptions(databaseUrl, postgresTlsConfiguration(process.env)),
           });
+          const tenantReceiverId: string = `${FOUNDING_TENANT_ID}:${receiverId}`;
           const lockHeld: DeferredSignal = deferredSignal();
           const commitLockReleased: DeferredSignal = deferredSignal();
           const lockHolder: Promise<unknown> = coordinationDatabase.begin(
@@ -476,7 +488,7 @@ test.skipIf(cloudDatabaseUrl === undefined)(
               await transaction`
                 SELECT pg_catalog.pg_advisory_xact_lock(
                   pg_catalog.hashtextextended(
-                    ${receiverId},
+                    ${tenantReceiverId},
                     ${POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED}::bigint
                   )
                 )
@@ -497,7 +509,10 @@ test.skipIf(cloudDatabaseUrl === undefined)(
               sender.client,
               "broadcast_message",
               {
-                audience: { machine: machineName, repository: repositoryName },
+                audience: {
+                  machine: machineName,
+                  repository: repositoryName,
+                },
                 content: "ordered broadcast",
                 idempotency_key: `cloud-e2e-ordered-broadcast-${uniqueSuffix}`,
                 sender_id: senderId,

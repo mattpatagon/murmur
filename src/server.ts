@@ -13,6 +13,7 @@ import { MurmurApplication } from "./mcp/murmur-application.js";
 import type { AgentClient, BranchName, RepositoryName } from "./domain/value-objects.js";
 import { createStore } from "./storage/create-store.js";
 import type { MessageStore } from "./storage/message-store.js";
+import { logSafeError } from "./safe-errors.js";
 
 export async function main(): Promise<void> {
   const store: MessageStore = await createStore();
@@ -35,16 +36,22 @@ export async function main(): Promise<void> {
     await application.close();
   };
   process.once("SIGINT", (): void => {
-    void shutdown();
+    void shutdown().catch((error: unknown): void => {
+      logSafeError("Murmur shutdown failed", error);
+      process.exitCode = 1;
+    });
   });
   process.once("SIGTERM", (): void => {
-    void shutdown();
+    void shutdown().catch((error: unknown): void => {
+      logSafeError("Murmur shutdown failed", error);
+      process.exitCode = 1;
+    });
   });
 }
 
 if (import.meta.main) {
   main().catch((error: unknown): void => {
-    console.error(error);
+    logSafeError("Murmur startup failed", error);
     process.exitCode = 1;
   });
 }

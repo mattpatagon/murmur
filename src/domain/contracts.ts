@@ -4,6 +4,7 @@ import type { Agent, Message } from "./models.js";
 import {
   AgentClient,
   AgentId,
+  BoundedJsonObjectSchema,
   BranchName,
   DisplayName,
   IdempotencyKey,
@@ -183,7 +184,7 @@ export type MarkMessagesReadInput = {
 export const RegisterAgentInputSchema: z.ZodType<RegisterAgentInput> = z.strictObject({
   agent_id: AgentIdTextSchema,
   display_name: DisplayNameTextSchema.optional(),
-  metadata: JsonObjectSchema.optional(),
+  metadata: BoundedJsonObjectSchema.optional(),
 });
 
 export const ListAgentsInputSchema: z.ZodType<ListAgentsInput> = z.strictObject({});

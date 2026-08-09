@@ -10,7 +10,7 @@ import type {
   SendMessageCommand,
   SendMessageResult,
 } from "../domain/models.js";
-import type { AgentId, Instant, Sequence } from "../domain/value-objects.js";
+import type { AgentId, Instant, Sequence, TenantId } from "../domain/value-objects.js";
 
 export type Awaitable<T> = Promise<T> | T;
 
@@ -21,6 +21,7 @@ export interface InboxSubscription {
 }
 
 export interface MessageStore {
+  scope(tenantId: TenantId): MessageStore;
   registerAgent(command: RegisterAgentCommand): Awaitable<Agent>;
   getAgent(agentId: AgentId): Awaitable<Agent | null>;
   listAgents(): Awaitable<readonly Agent[]>;
