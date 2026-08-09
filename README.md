@@ -150,6 +150,59 @@ the Cloud Run runtime service account. The deploy identity reads the
 certificate for migrations; Cloud Run mounts the same version for runtime
 connections.
 
+Pre-create the empty operator-token secret and grant the deploy identity only
+the secret-level roles needed for resumable rotation and strict cutover. The
+workflow creates the first operator-token *version* before it asks the database
+to commit the matching hash, so an interrupted bootstrap can safely resume. Do
+not add a value manually.
+
+```bash
+export GOOGLE_CLOUD_PROJECT='your-project-id'
+export MURMUR_DEPLOY_SERVICE_ACCOUNT='murmur-github-deploy@your-project-id.iam.gserviceaccount.com'
+deploy_member="serviceAccount:$MURMUR_DEPLOY_SERVICE_ACCOUNT"
+
+gcloud secrets describe MURMUR_OPERATOR_TOKEN \
+  --project "$GOOGLE_CLOUD_PROJECT" >/dev/null 2>&1 || \
+  gcloud secrets create MURMUR_OPERATOR_TOKEN \
+    --project "$GOOGLE_CLOUD_PROJECT" \
+    --replication-policy automatic
+
+for role in \
+  roles/secretmanager.secretVersionManager \
+  roles/secretmanager.secretAccessor
+do
+  gcloud secrets add-iam-policy-binding MURMUR_DATABASE_URL \
+    --project "$GOOGLE_CLOUD_PROJECT" \
+    --member "$deploy_member" \
+    --role "$role"
+done
+
+for role in \
+  roles/secretmanager.viewer \
+  roles/secretmanager.secretVersionAdder \
+  roles/secretmanager.secretAccessor
+do
+  gcloud secrets add-iam-policy-binding MURMUR_OPERATOR_TOKEN \
+    --project "$GOOGLE_CLOUD_PROJECT" \
+    --member "$deploy_member" \
+    --role "$role"
+done
+
+gcloud secrets add-iam-policy-binding MURMUR_API_TOKEN \
+  --project "$GOOGLE_CLOUD_PROJECT" \
+  --member "$deploy_member" \
+  --role roles/secretmanager.admin
+```
+
+The `MURMUR_DATABASE_URL` grants are scoped to runtime credential versions. The
+legacy `MURMUR_API_TOKEN` administrator grant is scoped to that one retiring
+secret and lets the workflow remove Cloud Run's accessor binding after strict
+cutover. `MURMUR_CI_DATABASE_URL`, `MURMUR_DATABASE_CA`, and the operator secret
+also require `roles/secretmanager.secretAccessor` for the deploy identity. The
+workflow exercises non-mutating reads before migrations and reports missing
+mutating permissions as an early diagnostic. Secret Manager still authorizes
+every real rollout operation.
+
 The deployment workflow applies the database migrations described under
 [Supabase Postgres](#supabase-postgres) before deploying each server revision.
 GitHub-hosted runners use the IPv4 Supabase session-pooler connection stored in
