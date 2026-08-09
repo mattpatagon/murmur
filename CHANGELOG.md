@@ -2,6 +2,13 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.4.2.0] - 2026-08-09
+
+### Fixed
+
+- Pin every GitHub Action used by CI and production deployment to a reviewed immutable commit, preventing mutable upstream tags from changing the build or obtaining the deploy identity.
+- Enforce immutable Action references with a repository test while retaining readable release-version comments for updates.
+
 ## [0.4.1.0] - 2026-08-09
 
 ### Fixed
