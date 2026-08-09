@@ -217,6 +217,9 @@ request reauthenticates; revocation and tenant suspension therefore affect
 existing sessions on their next request, while the local service also closes
 matching sessions proactively.
 
+If every operator credential is lost or unavailable, follow the
+[owner-only operator recovery runbook](docs/operator-recovery.md).
+
 The runtime connects as the non-owner, non-superuser, non-`BYPASSRLS`
 `murmur_app` role. Tenant-qualified queries and forced Postgres RLS are separate
 isolation layers. The deployment tests the role and denied table grants on a
@@ -503,8 +506,8 @@ and set:
 export MURMUR_DATABASE_CA_PATH='/absolute/path/to/prod-ca.crt'
 ```
 
-`MURMUR_DATABASE_TLS_INSECURE=1` disables verification and is accepted only as
-an explicit development override for local TLS test databases.
+`MURMUR_DATABASE_TLS_INSECURE=1` disables TLS entirely and is accepted only as
+an explicit development override for local plaintext test databases.
 
 On macOS, the launcher can read the cloud URL from Keychain without putting a
 secret in the repository:
