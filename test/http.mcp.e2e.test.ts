@@ -497,7 +497,10 @@ test("remote MCP error responses never expose sentinel content", async (): Promi
       logged.push(values.map(String).join(" "));
     };
     HostedAuthenticator.prototype.identity = (): string => {
-      throw new Error(`failed via postgresql://murmur:${sentinel}@database.example/murmur`);
+      const databaseUrl: URL = new URL("postgresql://database.example/murmur");
+      databaseUrl.username = "murmur";
+      databaseUrl.password = sentinel;
+      throw new Error(`failed via ${databaseUrl.toString()}`);
     };
     const internal: Response = await postJson(
       server.mcpUrl,

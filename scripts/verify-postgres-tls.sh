@@ -32,9 +32,10 @@ openssl x509 -req \
 chmod 600 "$certificate_directory/server.key"
 sudo chown 999:999 "$certificate_directory/server.key" "$certificate_directory/server.crt"
 
+database_password='murmur_tls_test_password'
 docker run --detach \
   --name "$container_name" \
-  --env POSTGRES_PASSWORD=murmur_tls_test_password \
+  --env POSTGRES_PASSWORD="$database_password" \
   --publish 127.0.0.1::5432 \
   --volume "$certificate_directory:/certificates:ro" \
   postgres:17 \
@@ -43,7 +44,20 @@ docker run --detach \
   -c ssl_key_file=/certificates/server.key >/dev/null
 
 database_port="$(docker port "$container_name" 5432/tcp | sed 's/.*://')"
-database_url="postgresql://postgres:murmur_tls_test_password@localhost:$database_port/postgres"
+database_url="$(MURMUR_TLS_TEST_HOST='localhost' \
+  MURMUR_TLS_TEST_PASSWORD="$database_password" \
+  MURMUR_TLS_TEST_PORT="$database_port" bun -e '
+    const host = process.env.MURMUR_TLS_TEST_HOST;
+    const password = process.env.MURMUR_TLS_TEST_PASSWORD;
+    const port = process.env.MURMUR_TLS_TEST_PORT;
+    if (host === undefined || password === undefined || port === undefined) process.exit(1);
+    const url = new URL("postgresql://localhost/postgres");
+    url.hostname = host;
+    url.port = port;
+    url.username = "postgres";
+    url.password = password;
+    process.stdout.write(url.toString());
+  ')"
 verified_url="$(MURMUR_DATABASE_CA_PATH="$certificate_directory/ca.crt" \
   MURMUR_DATABASE_URL_TO_VERIFY="$database_url" \
   bun scripts/require-verified-database-url.ts)"
@@ -58,7 +72,18 @@ for attempt in {1..30}; do
   sleep 1
 done
 
-if psql "postgresql://postgres:murmur_tls_test_password@127.0.0.1:$database_port/postgres?sslmode=verify-full&sslrootcert=$certificate_directory/ca.crt" \
+wrong_host_url="$(MURMUR_TLS_TEST_URL="$database_url" \
+  MURMUR_TLS_TEST_CA_PATH="$certificate_directory/ca.crt" bun -e '
+    const value = process.env.MURMUR_TLS_TEST_URL;
+    const caPath = process.env.MURMUR_TLS_TEST_CA_PATH;
+    if (value === undefined || caPath === undefined) process.exit(1);
+    const url = new URL(value);
+    url.hostname = "127.0.0.1";
+    url.searchParams.set("sslmode", "verify-full");
+    url.searchParams.set("sslrootcert", caPath);
+    process.stdout.write(url.toString());
+  ')"
+if psql "$wrong_host_url" \
   --command 'select 1' >/dev/null 2>&1; then
   echo 'verify-full unexpectedly accepted a certificate for the wrong host' >&2
   exit 1

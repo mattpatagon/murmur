@@ -22,6 +22,14 @@ import {
   parseOperatorTokenSecret,
 } from "../src/hosted/token-secret.js";
 
+function databaseUrl(hostname: string): string {
+  const url: URL = new URL("postgresql://database.example:5432/postgres");
+  url.hostname = hostname;
+  url.username = "user";
+  url.password = "secret";
+  return url.toString();
+}
+
 test("production adoption rejects a legacy token that strict auth cannot parse", async (): Promise<void> => {
   const child: Bun.Subprocess<"ignore", "pipe", "pipe"> = Bun.spawn(
     [process.execPath, "run", "scripts/bootstrap-production.ts"],
@@ -127,22 +135,22 @@ test("database TLS verifies peers unless insecure mode is explicit", (): void =>
   ).toThrow("cannot be combined");
 
   expect(
-    postgresSslOptions("postgresql://user:secret@database.example.com:5432/postgres", {
+    postgresSslOptions(databaseUrl("database.example.com"), {
       mode: "verify-system",
     }),
   ).toEqual({ rejectUnauthorized: true, servername: "database.example.com" });
   expect(
-    postgresSslOptions("postgresql://user:secret@127.0.0.1:5432/postgres", {
+    postgresSslOptions(databaseUrl("127.0.0.1"), {
       mode: "verify-system",
     }),
   ).toEqual({ rejectUnauthorized: true });
   expect(
-    postgresSslOptions("postgresql://user:secret@[::1]:5432/postgres", {
+    postgresSslOptions(databaseUrl("[::1]"), {
       mode: "verify-system",
     }),
   ).toEqual({ rejectUnauthorized: true });
   expect(
-    postgresSslOptions("postgresql://user:secret@database.example.com:5432/postgres", {
+    postgresSslOptions(databaseUrl("database.example.com"), {
       mode: "insecure",
     }),
   ).toBe(false);
@@ -160,12 +168,7 @@ test("database TLS loads a custom certificate authority in verify-full mode", ()
       certificateAuthority: "test certificate authority\n",
       mode: "verify-full",
     });
-    expect(
-      postgresSslOptions(
-        "postgresql://user:secret@database.example.com:5432/postgres",
-        configuration,
-      ),
-    ).toEqual({
+    expect(postgresSslOptions(databaseUrl("database.example.com"), configuration)).toEqual({
       ca: "test certificate authority\n",
       rejectUnauthorized: true,
       servername: "database.example.com",

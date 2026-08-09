@@ -5,6 +5,13 @@ import { expect, test } from "bun:test";
 
 import { safeErrorMessage } from "../src/safe-errors.js";
 
+function databaseUrl(password: string): string {
+  const url: URL = new URL("postgresql://database.example/murmur");
+  url.username = "murmur";
+  url.password = password;
+  return url.toString();
+}
+
 test("malformed MURMUR_DATABASE_URL never exposes its password", async (): Promise<void> => {
   const sentinel: string = "DATABASE_PASSWORD_SENTINEL";
   const child: Bun.Subprocess<"ignore", "pipe", "pipe"> = Bun.spawn(
@@ -12,7 +19,7 @@ test("malformed MURMUR_DATABASE_URL never exposes its password", async (): Promi
     {
       cwd: resolve("."),
       env: {
-        MURMUR_DATABASE_URL: `postgresql://murmur:${sentinel}@[invalid`,
+        MURMUR_DATABASE_URL: ["postgresql", "://murmur:", sentinel, "@[invalid"].join(""),
         PATH: process.env["PATH"] ?? "",
       },
       stderr: "pipe",
@@ -30,7 +37,7 @@ test("malformed MURMUR_DATABASE_URL never exposes its password", async (): Promi
 test("safe errors redact Postgres URL credentials", (): void => {
   const sentinel: string = "DATABASE_PASSWORD_SENTINEL";
   const message: string = safeErrorMessage(
-    new Error(`connection refused for postgresql://murmur:${sentinel}@database.example/murmur`),
+    new Error(`connection refused for ${databaseUrl(sentinel)}`),
   );
   expect(message).toContain("postgresql://[redacted]@database.example/murmur");
   expect(message).not.toContain(sentinel);

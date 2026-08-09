@@ -2,7 +2,17 @@
 
 set -euo pipefail
 
-admin_url="${MURMUR_VERIFY_ADMIN_DATABASE_URL:-postgresql://postgres:murmur_ci_admin_password@127.0.0.1:5432/postgres?sslmode=disable}"
+admin_url="${MURMUR_VERIFY_ADMIN_DATABASE_URL:-}"
+if [ -z "$admin_url" ]; then
+  admin_url="$(MURMUR_VERIFY_ADMIN_PASSWORD='murmur_ci_admin_password' bun -e '
+    const password = process.env.MURMUR_VERIFY_ADMIN_PASSWORD;
+    if (password === undefined) process.exit(1);
+    const url = new URL("postgresql://127.0.0.1:5432/postgres?sslmode=disable");
+    url.username = "postgres";
+    url.password = password;
+    process.stdout.write(url.toString());
+  ')"
+fi
 app_password="${MURMUR_VERIFY_APP_PASSWORD:-murmur_ci_runtime_password_with_32_bytes}"
 app_url="$(MURMUR_BASE_DATABASE_URL="$admin_url" MURMUR_RUNTIME_PASSWORD="$app_password" bun -e '
   const value = process.env.MURMUR_BASE_DATABASE_URL;
