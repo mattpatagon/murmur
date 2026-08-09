@@ -39,13 +39,76 @@ const MachineNameValueSchema: z.ZodString = z
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u, "Use letters, numbers, dots, underscores, or hyphens");
 const SequenceValueSchema: z.ZodNumber = z.number().int().nonnegative().safe();
 const InstantValueSchema: z.ZodISODateTime = z.iso.datetime({ offset: true });
+const TenantIdValueSchema: z.ZodString = z.string().uuid();
+
+export const FOUNDING_TENANT_ID: string = "00000000-0000-4000-8000-000000000001";
 
 export type JsonPrimitive = boolean | null | number | string;
 export type JsonValue = JsonPrimitive | JsonValue[] | { readonly [key: string]: JsonValue };
 export type JsonObject = { readonly [key: string]: JsonValue };
 
+const MAX_METADATA_BYTES: number = 16 * 1024;
+const MAX_METADATA_DEPTH: number = 5;
+const MAX_METADATA_CONTAINER_ENTRIES: number = 100;
+
+function validateJsonValueBounds(
+  value: JsonValue,
+  depth: number,
+  context: z.core.$RefinementCtx<JsonObject>,
+): void {
+  if (depth > MAX_METADATA_DEPTH) {
+    context.addIssue({
+      code: "custom",
+      message: `Metadata depth exceeds ${MAX_METADATA_DEPTH}`,
+    });
+    return;
+  }
+  if (value === null || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    if (value.length > MAX_METADATA_CONTAINER_ENTRIES) {
+      context.addIssue({
+        code: "custom",
+        message: `Metadata arrays may contain at most ${MAX_METADATA_CONTAINER_ENTRIES} values`,
+      });
+      return;
+    }
+    value.forEach((nested: JsonValue): void => {
+      validateJsonValueBounds(nested, depth + 1, context);
+    });
+    return;
+  }
+  const entries: [string, JsonValue][] = Object.entries(value);
+  if (entries.length > MAX_METADATA_CONTAINER_ENTRIES) {
+    context.addIssue({
+      code: "custom",
+      message: `Metadata objects may contain at most ${MAX_METADATA_CONTAINER_ENTRIES} keys`,
+    });
+    return;
+  }
+  entries.forEach((entry: [string, JsonValue]): void => {
+    validateJsonValueBounds(entry[1], depth + 1, context);
+  });
+}
+
+function validateJsonObjectBounds(
+  value: JsonObject,
+  context: z.core.$RefinementCtx<JsonObject>,
+): void {
+  if (Buffer.byteLength(JSON.stringify(value), "utf8") > MAX_METADATA_BYTES) {
+    context.addIssue({
+      code: "custom",
+      message: `Metadata exceeds ${MAX_METADATA_BYTES} UTF-8 bytes`,
+    });
+    return;
+  }
+  validateJsonValueBounds(value, 1, context);
+}
+
 export const JsonValueSchema: z.ZodType<JsonValue> = z.json();
 export const JsonObjectSchema: z.ZodType<JsonObject> = z.record(z.string(), JsonValueSchema);
+export const BoundedJsonObjectSchema: z.ZodType<JsonObject> = z
+  .record(z.string().max(200), JsonValueSchema)
+  .superRefine(validateJsonObjectBounds);
 
 export class AgentId {
   public readonly value: string;
@@ -240,6 +303,31 @@ export class Sequence {
 
   public isAfter(other: Sequence): boolean {
     return this.value > other.value;
+  }
+}
+
+export class TenantId {
+  public readonly value: string;
+
+  private constructor(value: string) {
+    this.value = value;
+  }
+
+  public static parse(input: unknown): TenantId {
+    const value: string = TenantIdValueSchema.parse(input);
+    return new TenantId(value);
+  }
+
+  public static founding(): TenantId {
+    return TenantId.parse(FOUNDING_TENANT_ID);
+  }
+
+  public static generate(): TenantId {
+    return TenantId.parse(randomUUID());
+  }
+
+  public equals(other: TenantId): boolean {
+    return this.value === other.value;
   }
 }
 

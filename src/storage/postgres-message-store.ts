@@ -35,12 +35,20 @@ import {
   RepositoryName,
   Sequence,
   SystemClock,
+  TenantId,
   ThreadId,
   type JsonObject,
 } from "../domain/value-objects.js";
+import {
+  postgresSslOptions,
+  type PostgresTlsConfiguration,
+  type PostgresSslOptions,
+} from "../postgres-tls.js";
 import type { InboxSubscription, InboxUpdateHandler, MessageStore } from "./message-store.js";
 
 const INBOX_CHANNEL: string = "murmur_inbox_changed";
+const MAX_AGENTS_PER_TENANT: number = 1_000;
+const MAX_BROADCAST_RECIPIENTS: number = 100;
 export const POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED: string = "671255459461899938";
 
 type AgentRow = {
@@ -95,11 +103,15 @@ type InboxVersionRow = {
 };
 
 type SchemaProbeRow = {
+  readonly agents_tenant_column: boolean;
   readonly agents_table: string | null;
   readonly branch_column: boolean;
   readonly broadcast_column: boolean;
+  readonly broadcasts_tenant_column: boolean;
   readonly broadcasts_table: string | null;
   readonly client_column: boolean;
+  readonly messages_tenant_column: boolean;
+  readonly messages_tenant_sequence_column: boolean;
   readonly messages_table: string | null;
   readonly repository_column: boolean;
 };
@@ -107,24 +119,28 @@ type SchemaProbeRow = {
 type InboxNotification = {
   readonly agent_id: string;
   readonly sequence: number;
+  readonly tenant_id?: string | undefined;
 };
 
 type PostgresInboxSubscriber = {
   readonly agentId: AgentId;
   readonly handler: InboxUpdateHandler;
   readonly id: number;
+  readonly tenantId: TenantId;
   lastSequence: Sequence;
 };
 
-export type PostgresTlsConfiguration =
-  | { readonly mode: "require" }
-  | { readonly certificateAuthority: string; readonly mode: "verify-full" };
-
-type VerifiedTlsOptions = {
-  readonly ca: string;
-  readonly rejectUnauthorized: true;
-  readonly servername: string;
+type PostgresSharedState = {
+  closed: boolean;
+  listener: ListenMeta | null;
+  nextSubscriberId: number;
+  notificationQueue: Promise<void>;
+  readonly subscribersByInbox: Map<string, Map<number, PostgresInboxSubscriber>>;
 };
+
+function subscriberInboxKey(tenantId: TenantId, agentId: AgentId): string {
+  return `${tenantId.value}\u0000${agentId.value}`;
+}
 
 const SafeDatabaseIntegerSchema: z.ZodType<number> = z
   .union([z.string().regex(/^\d+$/u), z.number().int(), z.bigint()])
@@ -185,11 +201,15 @@ const InboxVersionRowSchema: z.ZodType<InboxVersionRow> = z.strictObject({
 });
 
 const SchemaProbeRowSchema: z.ZodType<SchemaProbeRow> = z.strictObject({
+  agents_tenant_column: z.boolean(),
   agents_table: z.string().nullable(),
   branch_column: z.boolean(),
   broadcast_column: z.boolean(),
+  broadcasts_tenant_column: z.boolean(),
   broadcasts_table: z.string().nullable(),
   client_column: z.boolean(),
+  messages_tenant_column: z.boolean(),
+  messages_tenant_sequence_column: z.boolean(),
   messages_table: z.string().nullable(),
   repository_column: z.boolean(),
 });
@@ -197,6 +217,7 @@ const SchemaProbeRowSchema: z.ZodType<SchemaProbeRow> = z.strictObject({
 const InboxNotificationSchema: z.ZodType<InboxNotification> = z.strictObject({
   agent_id: z.string(),
   sequence: SafeDatabaseIntegerSchema.pipe(z.number().nonnegative()),
+  tenant_id: z.string().uuid().optional(),
 });
 
 const MessageIdRowSchema: z.ZodType<{ readonly message_id: string }> = z.strictObject({
@@ -274,20 +295,22 @@ class CallbackInboxSubscription implements InboxSubscription {
 export class PostgresMessageStore implements MessageStore {
   private readonly clock: Clock;
   private readonly database: Sql;
-  private readonly subscribers: Map<number, PostgresInboxSubscriber>;
-  private closed: boolean;
-  private listener: ListenMeta | null;
-  private notificationQueue: Promise<void>;
-  private nextSubscriberId: number;
+  private readonly ownsDatabase: boolean;
+  private readonly shared: PostgresSharedState;
+  private readonly tenantId: TenantId;
 
-  private constructor(database: Sql, clock: Clock) {
+  private constructor(
+    database: Sql,
+    clock: Clock,
+    tenantId: TenantId,
+    shared: PostgresSharedState,
+    ownsDatabase: boolean,
+  ) {
     this.clock = clock;
-    this.closed = false;
     this.database = database;
-    this.listener = null;
-    this.nextSubscriberId = 1;
-    this.notificationQueue = Promise.resolve();
-    this.subscribers = new Map<number, PostgresInboxSubscriber>();
+    this.ownsDatabase = ownsDatabase;
+    this.shared = shared;
+    this.tenantId = tenantId;
   }
 
   public static async connect(
@@ -295,21 +318,26 @@ export class PostgresMessageStore implements MessageStore {
     tlsConfiguration: PostgresTlsConfiguration,
     clock: Clock = new SystemClock(),
   ): Promise<PostgresMessageStore> {
-    const parsedUrl: URL = new URL(databaseUrl);
-    const ssl: "require" | VerifiedTlsOptions =
-      tlsConfiguration.mode === "require"
-        ? "require"
-        : {
-            ca: tlsConfiguration.certificateAuthority,
-            rejectUnauthorized: true,
-            servername: parsedUrl.hostname,
-          };
+    const ssl: PostgresSslOptions = postgresSslOptions(databaseUrl, tlsConfiguration);
     const database: Sql = postgres(databaseUrl, {
       connect_timeout: 10,
       max: 4,
       ssl,
     });
-    const store: PostgresMessageStore = new PostgresMessageStore(database, clock);
+    const shared: PostgresSharedState = {
+      closed: false,
+      listener: null,
+      nextSubscriberId: 1,
+      notificationQueue: Promise.resolve(),
+      subscribersByInbox: new Map<string, Map<number, PostgresInboxSubscriber>>(),
+    };
+    const store: PostgresMessageStore = new PostgresMessageStore(
+      database,
+      clock,
+      TenantId.founding(),
+      shared,
+      true,
+    );
     try {
       await store.initialize();
       return store;
@@ -320,7 +348,27 @@ export class PostgresMessageStore implements MessageStore {
   }
 
   private ensureOpen(): void {
-    if (this.closed) throw new Error("The message store is closed");
+    if (this.shared.closed) throw new Error("The message store is closed");
+  }
+
+  public scope(tenantId: TenantId): MessageStore {
+    this.ensureOpen();
+    return new PostgresMessageStore(this.database, this.clock, tenantId, this.shared, false);
+  }
+
+  private async setTenantContext(transaction: TransactionSql): Promise<void> {
+    await transaction`
+      SELECT pg_catalog.set_config('murmur.tenant_id', ${this.tenantId.value}, true)
+    `;
+  }
+
+  private async inTenantTransaction(
+    action: (transaction: TransactionSql) => Promise<unknown>,
+  ): Promise<unknown> {
+    return await this.database.begin(async (transaction: TransactionSql): Promise<unknown> => {
+      await this.setTenantContext(transaction);
+      return await action(transaction);
+    });
   }
 
   private async initialize(): Promise<void> {
@@ -331,15 +379,45 @@ export class PostgresMessageStore implements MessageStore {
       (payload: string): void => this.enqueueNotification(payload),
       (): void => this.enqueueCatchUp(),
     );
-    this.listener = listener;
+    this.shared.listener = listener;
   }
 
   private async ensureSchema(): Promise<void> {
-    const rawRows: unknown = await this.database`
-      SELECT
+    const rawRows: unknown = await this.inTenantTransaction(
+      async (transaction: TransactionSql): Promise<unknown> =>
+        await transaction`
+        SELECT
         to_regclass('murmur.agents')::text AS agents_table,
         to_regclass('murmur.broadcasts')::text AS broadcasts_table,
         to_regclass('murmur.messages')::text AS messages_table,
+        EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = 'murmur'
+            AND table_name = 'agents'
+            AND column_name = 'tenant_id'
+        ) AS agents_tenant_column,
+        EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = 'murmur'
+            AND table_name = 'broadcasts'
+            AND column_name = 'tenant_id'
+        ) AS broadcasts_tenant_column,
+        EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = 'murmur'
+            AND table_name = 'messages'
+            AND column_name = 'tenant_id'
+        ) AS messages_tenant_column,
+        EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = 'murmur'
+            AND table_name = 'messages'
+            AND column_name = 'tenant_sequence'
+        ) AS messages_tenant_sequence_column,
         EXISTS (
           SELECT 1
           FROM information_schema.columns
@@ -368,13 +446,18 @@ export class PostgresMessageStore implements MessageStore {
             AND table_name = 'messages'
             AND column_name = 'repository_name'
         ) AS repository_column
-    `;
+      `,
+    );
     const rows: SchemaProbeRow[] = z.array(SchemaProbeRowSchema).parse(rawRows);
     const row: SchemaProbeRow = firstRow(rows, "schema probe");
     if (
       row.agents_table === null ||
       row.broadcasts_table === null ||
       row.messages_table === null ||
+      !row.agents_tenant_column ||
+      !row.broadcasts_tenant_column ||
+      !row.messages_tenant_column ||
+      !row.messages_tenant_sequence_column ||
       !row.repository_column ||
       !row.branch_column ||
       !row.client_column ||
@@ -390,7 +473,12 @@ export class PostgresMessageStore implements MessageStore {
     const task: () => Promise<void> = async (): Promise<void> => {
       const parsedPayload: unknown = JSON.parse(payload);
       const notification: InboxNotification = InboxNotificationSchema.parse(parsedPayload);
+      const tenantId: TenantId =
+        notification.tenant_id === undefined
+          ? TenantId.founding()
+          : TenantId.parse(notification.tenant_id);
       await this.deliverUpdate(
+        tenantId,
         AgentId.parse(notification.agent_id),
         Sequence.parse(notification.sequence),
       );
@@ -411,30 +499,40 @@ export class PostgresMessageStore implements MessageStore {
         console.error("Murmur Postgres inbox listener error:", error);
       }
     };
-    this.notificationQueue = this.notificationQueue.then(guardedTask, guardedTask);
+    this.shared.notificationQueue = this.shared.notificationQueue.then(guardedTask, guardedTask);
   }
 
   private async catchUpSubscribers(): Promise<void> {
-    const subscribers: readonly PostgresInboxSubscriber[] = Array.from(this.subscribers.values());
+    const subscribers: readonly PostgresInboxSubscriber[] = Array.from(
+      this.shared.subscribersByInbox.values(),
+    ).flatMap((inboxSubscribers: Map<number, PostgresInboxSubscriber>): PostgresInboxSubscriber[] =>
+      Array.from(inboxSubscribers.values()),
+    );
     let index: number = 0;
     while (index < subscribers.length) {
       const subscriber: PostgresInboxSubscriber | undefined = subscribers[index];
       if (subscriber === undefined) throw new Error("Inbox subscriber disappeared during catch-up");
-      const currentSequence: Sequence = await this.getInboxVersion(subscriber.agentId);
+      const scopedStore: MessageStore = this.scope(subscriber.tenantId);
+      const currentSequence: Sequence = await scopedStore.getInboxVersion(subscriber.agentId);
       await this.deliverToSubscriber(subscriber, currentSequence);
       index += 1;
     }
   }
 
-  private async deliverUpdate(agentId: AgentId, sequence: Sequence): Promise<void> {
-    const subscribers: readonly PostgresInboxSubscriber[] = Array.from(this.subscribers.values());
+  private async deliverUpdate(
+    tenantId: TenantId,
+    agentId: AgentId,
+    sequence: Sequence,
+  ): Promise<void> {
+    const inboxSubscribers: Map<number, PostgresInboxSubscriber> | undefined =
+      this.shared.subscribersByInbox.get(subscriberInboxKey(tenantId, agentId));
+    const subscribers: readonly PostgresInboxSubscriber[] =
+      inboxSubscribers === undefined ? [] : Array.from(inboxSubscribers.values());
     let index: number = 0;
     while (index < subscribers.length) {
       const subscriber: PostgresInboxSubscriber | undefined = subscribers[index];
       if (subscriber === undefined) throw new Error("Inbox subscriber disappeared during delivery");
-      if (subscriber.agentId.equals(agentId)) {
-        await this.deliverToSubscriber(subscriber, sequence);
-      }
+      await this.deliverToSubscriber(subscriber, sequence);
       index += 1;
     }
   }
@@ -451,18 +549,21 @@ export class PostgresMessageStore implements MessageStore {
   public async registerAgent(command: RegisterAgentCommand): Promise<Agent> {
     this.ensureOpen();
     const timestamp: string = this.clock.now().toISOString();
-    const rawRows: unknown = await this.database`
-      INSERT INTO murmur.agents(
-        agent_id, display_name, metadata, created_at, last_seen_at
+    const rawRows: unknown = await this.inTenantTransaction(
+      async (transaction: TransactionSql): Promise<unknown> =>
+        await transaction`
+        INSERT INTO murmur.agents(
+        tenant_id, agent_id, display_name, metadata, created_at, last_seen_at
       )
       VALUES (
+        ${this.tenantId.value}::uuid,
         ${command.agentId.value},
         ${command.displayName.value},
         ${this.database.json(command.metadata)},
         ${timestamp}::timestamptz,
         ${timestamp}::timestamptz
       )
-      ON CONFLICT(agent_id) DO UPDATE SET
+      ON CONFLICT(tenant_id, agent_id) DO UPDATE SET
         display_name = excluded.display_name,
         metadata = excluded.metadata,
         last_seen_at = excluded.last_seen_at
@@ -478,15 +579,18 @@ export class PostgresMessageStore implements MessageStore {
           last_seen_at AT TIME ZONE 'UTC',
           'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
         ) AS last_seen_at
-    `;
+      `,
+    );
     const rows: AgentRow[] = z.array(AgentRowSchema).parse(rawRows);
     return mapAgentRow(firstRow(rows, "registered agent"));
   }
 
   public async getAgent(agentId: AgentId): Promise<Agent | null> {
     this.ensureOpen();
-    const rawRows: unknown = await this.database`
-      SELECT
+    const rawRows: unknown = await this.inTenantTransaction(
+      async (transaction: TransactionSql): Promise<unknown> =>
+        await transaction`
+        SELECT
         agent_id,
         display_name,
         metadata::text AS metadata_json,
@@ -499,8 +603,10 @@ export class PostgresMessageStore implements MessageStore {
           'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
         ) AS last_seen_at
       FROM murmur.agents
-      WHERE agent_id = ${agentId.value}
-    `;
+      WHERE tenant_id = ${this.tenantId.value}::uuid
+        AND agent_id = ${agentId.value}
+      `,
+    );
     const rows: AgentRow[] = z.array(AgentRowSchema).parse(rawRows);
     const row: AgentRow | undefined = rows[0];
     return row === undefined ? null : mapAgentRow(row);
@@ -509,8 +615,10 @@ export class PostgresMessageStore implements MessageStore {
   public async listAgents(): Promise<readonly Agent[]> {
     this.ensureOpen();
     await this.pruneExpired(this.clock.now());
-    const rawRows: unknown = await this.database`
-      SELECT
+    const rawRows: unknown = await this.inTenantTransaction(
+      async (transaction: TransactionSql): Promise<unknown> =>
+        await transaction`
+        SELECT
         agent_id,
         display_name,
         metadata::text AS metadata_json,
@@ -523,9 +631,15 @@ export class PostgresMessageStore implements MessageStore {
           'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
         ) AS last_seen_at
       FROM murmur.agents
+      WHERE tenant_id = ${this.tenantId.value}::uuid
       ORDER BY last_seen_at DESC, agent_id ASC
-    `;
+      LIMIT ${MAX_AGENTS_PER_TENANT + 1}
+      `,
+    );
     const rows: AgentRow[] = z.array(AgentRowSchema).parse(rawRows);
+    if (rows.length > MAX_AGENTS_PER_TENANT) {
+      throw new Error("Tenant agent quota invariant exceeded");
+    }
     return rows.map((row: AgentRow): Agent => mapAgentRow(row));
   }
 
@@ -537,7 +651,8 @@ export class PostgresMessageStore implements MessageStore {
     const rawRows: unknown = await transaction`
       SELECT agent_id
       FROM murmur.agents
-      WHERE agent_id = ${senderId.value} OR agent_id = ${recipientId.value}
+      WHERE tenant_id = ${this.tenantId.value}::uuid
+        AND (agent_id = ${senderId.value} OR agent_id = ${recipientId.value})
     `;
     const rows: { readonly agent_id: string }[] = z
       .array(z.strictObject({ agent_id: z.string() }))
@@ -556,7 +671,8 @@ export class PostgresMessageStore implements MessageStore {
     const rawRows: unknown = await transaction`
       SELECT agent_id
       FROM murmur.agents
-      WHERE agent_id = ${senderId.value}
+      WHERE tenant_id = ${this.tenantId.value}::uuid
+        AND agent_id = ${senderId.value}
     `;
     const rows: AgentIdRow[] = z.array(AgentIdRowSchema).parse(rawRows);
     if (rows.length === 0) throw new UnknownAgentError(senderId.value);
@@ -570,7 +686,10 @@ export class PostgresMessageStore implements MessageStore {
     const orderedRecipientIds: string[] = Array.from(recipientIds);
     await transaction`
       SELECT pg_catalog.pg_advisory_xact_lock(
-        pg_catalog.hashtextextended(recipient.agent_id, ${POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED}::bigint)
+        pg_catalog.hashtextextended(
+          ${this.tenantId.value}::text || ':' || recipient.agent_id,
+          ${POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED}::bigint
+        )
       )
       FROM unnest(${this.database.array(orderedRecipientIds)}::text[])
         WITH ORDINALITY AS recipient(agent_id, position)
@@ -590,40 +709,52 @@ export class PostgresMessageStore implements MessageStore {
       rawRows = await transaction`
         SELECT agent_id
         FROM murmur.agents
-        WHERE agent_id <> ${senderId.value}
+        WHERE tenant_id = ${this.tenantId.value}::uuid
+          AND agent_id <> ${senderId.value}
           AND last_seen_at >= ${activeSince}::timestamptz
           AND metadata ->> 'repository' = ${repositoryName}
           AND metadata ->> 'machine' = ${machineName}
         ORDER BY agent_id ASC
+        LIMIT ${MAX_BROADCAST_RECIPIENTS + 1}
       `;
     } else if (repositoryName !== null) {
       rawRows = await transaction`
         SELECT agent_id
         FROM murmur.agents
-        WHERE agent_id <> ${senderId.value}
+        WHERE tenant_id = ${this.tenantId.value}::uuid
+          AND agent_id <> ${senderId.value}
           AND last_seen_at >= ${activeSince}::timestamptz
           AND metadata ->> 'repository' = ${repositoryName}
         ORDER BY agent_id ASC
+        LIMIT ${MAX_BROADCAST_RECIPIENTS + 1}
       `;
     } else if (machineName !== null) {
       rawRows = await transaction`
         SELECT agent_id
         FROM murmur.agents
-        WHERE agent_id <> ${senderId.value}
+        WHERE tenant_id = ${this.tenantId.value}::uuid
+          AND agent_id <> ${senderId.value}
           AND last_seen_at >= ${activeSince}::timestamptz
           AND metadata ->> 'machine' = ${machineName}
         ORDER BY agent_id ASC
+        LIMIT ${MAX_BROADCAST_RECIPIENTS + 1}
       `;
     } else {
       rawRows = await transaction`
         SELECT agent_id
         FROM murmur.agents
-        WHERE agent_id <> ${senderId.value}
+        WHERE tenant_id = ${this.tenantId.value}::uuid
+          AND agent_id <> ${senderId.value}
           AND last_seen_at >= ${activeSince}::timestamptz
         ORDER BY agent_id ASC
+        LIMIT ${MAX_BROADCAST_RECIPIENTS + 1}
       `;
     }
-    return z.array(AgentIdRowSchema).parse(rawRows);
+    const rows: AgentIdRow[] = z.array(AgentIdRowSchema).parse(rawRows);
+    if (rows.length > MAX_BROADCAST_RECIPIENTS) {
+      throw new Error(`Broadcasts are limited to ${MAX_BROADCAST_RECIPIENTS} recipients`);
+    }
+    return rows;
   }
 
   private async broadcastResult(
@@ -635,7 +766,8 @@ export class PostgresMessageStore implements MessageStore {
     const rawCountRows: unknown = await transaction`
       SELECT COUNT(*) AS count
       FROM murmur.messages
-      WHERE broadcast_id = ${broadcastId.value}::uuid
+      WHERE tenant_id = ${this.tenantId.value}::uuid
+        AND broadcast_id = ${broadcastId.value}::uuid
     `;
     const countRows: CountRow[] = z.array(CountRowSchema).parse(rawCountRows);
     return {
@@ -669,6 +801,7 @@ export class PostgresMessageStore implements MessageStore {
 
     return await this.database.begin(
       async (transaction: TransactionSql): Promise<BroadcastMessageResult> => {
+        await this.setTenantContext(transaction);
         await this.requireBroadcastSender(transaction, command.senderId);
         const broadcastId: BroadcastId = BroadcastId.generate();
         const threadId: ThreadId =
@@ -683,6 +816,7 @@ export class PostgresMessageStore implements MessageStore {
           command.idempotencyKey === null ? null : command.idempotencyKey.value;
         const rawInsertedRows: unknown = await transaction`
           INSERT INTO murmur.broadcasts(
+            tenant_id,
             broadcast_id,
             thread_id,
             sender_id,
@@ -697,6 +831,7 @@ export class PostgresMessageStore implements MessageStore {
             expires_at
           )
           VALUES (
+            ${this.tenantId.value}::uuid,
             ${broadcastId.value}::uuid,
             ${threadId.value},
             ${command.senderId.value},
@@ -710,7 +845,7 @@ export class PostgresMessageStore implements MessageStore {
             ${createdAt}::timestamptz,
             ${expiresAt}::timestamptz
           )
-          ON CONFLICT(sender_id, idempotency_key) DO NOTHING
+          ON CONFLICT(tenant_id, sender_id, idempotency_key) DO NOTHING
           RETURNING
             broadcast_id::text AS broadcast_id,
             thread_id,
@@ -758,7 +893,8 @@ export class PostgresMessageStore implements MessageStore {
                 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
               ) AS expires_at
             FROM murmur.broadcasts
-            WHERE sender_id = ${command.senderId.value}
+            WHERE tenant_id = ${this.tenantId.value}::uuid
+              AND sender_id = ${command.senderId.value}
               AND idempotency_key = ${command.idempotencyKey.value}
           `;
           const existingRows: BroadcastRow[] = z.array(BroadcastRowSchema).parse(rawExistingRows);
@@ -798,6 +934,7 @@ export class PostgresMessageStore implements MessageStore {
           await this.lockRecipientCommitOrder(transaction, recipientIds);
           await transaction`
             INSERT INTO murmur.messages(
+              tenant_id,
               message_id,
               thread_id,
               sender_id,
@@ -811,6 +948,7 @@ export class PostgresMessageStore implements MessageStore {
               expires_at
             )
             SELECT
+              ${this.tenantId.value}::uuid,
               delivery.message_id,
               ${threadId.value},
               ${command.senderId.value},
@@ -831,7 +969,8 @@ export class PostgresMessageStore implements MessageStore {
         await transaction`
           UPDATE murmur.agents
           SET last_seen_at = ${createdAt}::timestamptz
-          WHERE agent_id = ${command.senderId.value}
+          WHERE tenant_id = ${this.tenantId.value}::uuid
+            AND agent_id = ${command.senderId.value}
         `;
         return await this.broadcastResult(transaction, inserted, false);
       },
@@ -844,6 +983,7 @@ export class PostgresMessageStore implements MessageStore {
     await this.pruneExpired(now);
     return await this.database.begin(
       async (transaction: TransactionSql): Promise<SendMessageResult> => {
+        await this.setTenantContext(transaction);
         await this.requireAgents(transaction, command.senderId, command.recipientId);
         await this.lockRecipientCommitOrder(transaction, [command.recipientId.value]);
         const messageId: MessageId = MessageId.generate();
@@ -860,6 +1000,7 @@ export class PostgresMessageStore implements MessageStore {
         const clientName: string | null = command.client === null ? null : command.client.value;
         const rawInsertedRows: unknown = await transaction`
           INSERT INTO murmur.messages(
+            tenant_id,
             message_id,
             thread_id,
             sender_id,
@@ -873,6 +1014,7 @@ export class PostgresMessageStore implements MessageStore {
             expires_at
           )
           VALUES (
+            ${this.tenantId.value}::uuid,
             ${messageId.value}::uuid,
             ${threadId.value},
             ${command.senderId.value},
@@ -885,9 +1027,9 @@ export class PostgresMessageStore implements MessageStore {
             ${createdAt}::timestamptz,
             ${expiresAt}::timestamptz
           )
-          ON CONFLICT(sender_id, idempotency_key) DO NOTHING
+          ON CONFLICT(tenant_id, sender_id, idempotency_key) DO NOTHING
           RETURNING
-            sequence,
+            tenant_sequence AS sequence,
             message_id::text AS message_id,
             broadcast_id::text AS broadcast_id,
             thread_id,
@@ -919,7 +1061,8 @@ export class PostgresMessageStore implements MessageStore {
           await transaction`
             UPDATE murmur.agents
             SET last_seen_at = ${createdAt}::timestamptz
-            WHERE agent_id = ${command.senderId.value}
+            WHERE tenant_id = ${this.tenantId.value}::uuid
+              AND agent_id = ${command.senderId.value}
           `;
           return { duplicate: false, message: mapMessageRow(insertedRow) };
         }
@@ -928,7 +1071,7 @@ export class PostgresMessageStore implements MessageStore {
         }
         const rawExistingRows: unknown = await transaction`
           SELECT
-            sequence,
+            tenant_sequence AS sequence,
             message_id::text AS message_id,
             broadcast_id::text AS broadcast_id,
             thread_id,
@@ -954,7 +1097,8 @@ export class PostgresMessageStore implements MessageStore {
               )
             END AS read_at
           FROM murmur.messages
-          WHERE sender_id = ${command.senderId.value}
+          WHERE tenant_id = ${this.tenantId.value}::uuid
+            AND sender_id = ${command.senderId.value}
             AND idempotency_key = ${command.idempotencyKey.value}
         `;
         const existingRows: MessageRow[] = z.array(MessageRowSchema).parse(rawExistingRows);
@@ -995,9 +1139,11 @@ export class PostgresMessageStore implements MessageStore {
     await this.pruneExpired(now);
     await this.requireAgent(query.agentId);
     const threadId: string | null = query.threadId === null ? null : query.threadId.value;
-    const rawRows: unknown = await this.database`
-      SELECT
-        sequence,
+    const rawRows: unknown = await this.inTenantTransaction(
+      async (transaction: TransactionSql): Promise<unknown> =>
+        await transaction`
+        SELECT
+        tenant_sequence AS sequence,
         message_id::text AS message_id,
         broadcast_id::text AS broadcast_id,
         thread_id,
@@ -1023,14 +1169,16 @@ export class PostgresMessageStore implements MessageStore {
           )
         END AS read_at
       FROM murmur.messages
-      WHERE recipient_id = ${query.agentId.value}
-        AND sequence > ${query.afterSequence.value}
+      WHERE tenant_id = ${this.tenantId.value}::uuid
+        AND recipient_id = ${query.agentId.value}
+        AND tenant_sequence > ${query.afterSequence.value}
         AND expires_at > ${now.toISOString()}::timestamptz
         AND (${query.unreadOnly} = false OR read_at IS NULL)
         AND (${threadId}::text IS NULL OR thread_id = ${threadId})
-      ORDER BY sequence ASC
+      ORDER BY tenant_sequence ASC
       LIMIT ${query.limit}
-    `;
+      `,
+    );
     const rows: MessageRow[] = z.array(MessageRowSchema).parse(rawRows);
     return rows.map((row: MessageRow): Message => mapMessageRow(row));
   }
@@ -1044,26 +1192,34 @@ export class PostgresMessageStore implements MessageStore {
     const messageIds: string[] = command.messageIds.map(
       (messageId: MessageId): string => messageId.value,
     );
-    const rawRows: unknown = await this.database`
-      UPDATE murmur.messages
+    const rawRows: unknown = await this.inTenantTransaction(
+      async (transaction: TransactionSql): Promise<unknown> =>
+        await transaction`
+        UPDATE murmur.messages
       SET read_at = COALESCE(read_at, ${now.toISOString()}::timestamptz)
-      WHERE recipient_id = ${command.agentId.value}
+      WHERE tenant_id = ${this.tenantId.value}::uuid
+        AND recipient_id = ${command.agentId.value}
         AND message_id = ANY(${this.database.array(messageIds)}::uuid[])
         AND expires_at > ${now.toISOString()}::timestamptz
       RETURNING message_id::text AS message_id
-    `;
+      `,
+    );
     const rows: { readonly message_id: string }[] = z.array(MessageIdRowSchema).parse(rawRows);
     return { readAt: now, updated: rows.length };
   }
 
   public async getInboxVersion(agentId: AgentId): Promise<Sequence> {
     this.ensureOpen();
-    const rawRows: unknown = await this.database`
-      SELECT COALESCE(MAX(sequence), 0) AS version
+    const rawRows: unknown = await this.inTenantTransaction(
+      async (transaction: TransactionSql): Promise<unknown> =>
+        await transaction`
+        SELECT COALESCE(MAX(tenant_sequence), 0) AS version
       FROM murmur.messages
-      WHERE recipient_id = ${agentId.value}
+      WHERE tenant_id = ${this.tenantId.value}::uuid
+        AND recipient_id = ${agentId.value}
         AND expires_at > ${this.clock.now().toISOString()}::timestamptz
-    `;
+      `,
+    );
     const rows: InboxVersionRow[] = z.array(InboxVersionRowSchema).parse(rawRows);
     return Sequence.parse(firstRow(rows, "inbox version").version);
   }
@@ -1075,17 +1231,23 @@ export class PostgresMessageStore implements MessageStore {
   ): Promise<InboxSubscription> {
     this.ensureOpen();
     await this.requireAgent(agentId);
-    const subscriberId: number = this.nextSubscriberId;
-    this.nextSubscriberId += 1;
+    const subscriberId: number = this.shared.nextSubscriberId;
+    this.shared.nextSubscriberId += 1;
     const subscriber: PostgresInboxSubscriber = {
       agentId,
       handler,
       id: subscriberId,
       lastSequence: afterSequence,
+      tenantId: this.tenantId,
     };
-    this.subscribers.set(subscriberId, subscriber);
+    const inboxKey: string = subscriberInboxKey(this.tenantId, agentId);
+    const inboxSubscribers: Map<number, PostgresInboxSubscriber> =
+      this.shared.subscribersByInbox.get(inboxKey) ?? new Map<number, PostgresInboxSubscriber>();
+    inboxSubscribers.set(subscriberId, subscriber);
+    this.shared.subscribersByInbox.set(inboxKey, inboxSubscribers);
     const closeAction: () => void = (): void => {
-      this.subscribers.delete(subscriberId);
+      inboxSubscribers.delete(subscriberId);
+      if (inboxSubscribers.size === 0) this.shared.subscribersByInbox.delete(inboxKey);
     };
     const subscription: InboxSubscription = new CallbackInboxSubscription(closeAction);
     try {
@@ -1101,17 +1263,36 @@ export class PostgresMessageStore implements MessageStore {
   public async pruneExpired(now: Instant): Promise<number> {
     this.ensureOpen();
     return await this.database.begin(async (transaction: TransactionSql): Promise<number> => {
+      await this.setTenantContext(transaction);
       const rawRows: unknown = await transaction`
-        WITH deleted AS (
-          DELETE FROM murmur.messages
-          WHERE expires_at <= ${now.toISOString()}::timestamptz
+        WITH expired AS (
+          SELECT tenant_id, tenant_sequence
+          FROM murmur.messages
+          WHERE tenant_id = ${this.tenantId.value}::uuid
+            AND expires_at <= ${now.toISOString()}::timestamptz
+          ORDER BY tenant_sequence
+          LIMIT 1000
+        ), deleted AS (
+          DELETE FROM murmur.messages AS message
+          USING expired
+          WHERE message.tenant_id = expired.tenant_id
+            AND message.tenant_sequence = expired.tenant_sequence
           RETURNING 1
         )
         SELECT COUNT(*) AS count FROM deleted
       `;
       await transaction`
-        DELETE FROM murmur.broadcasts
-        WHERE expires_at <= ${now.toISOString()}::timestamptz
+        DELETE FROM murmur.broadcasts AS broadcast
+        USING (
+          SELECT tenant_id, broadcast_id
+          FROM murmur.broadcasts
+          WHERE tenant_id = ${this.tenantId.value}::uuid
+            AND expires_at <= ${now.toISOString()}::timestamptz
+          ORDER BY expires_at, broadcast_id
+          LIMIT 1000
+        ) AS expired
+        WHERE broadcast.tenant_id = expired.tenant_id
+          AND broadcast.broadcast_id = expired.broadcast_id
       `;
       const rows: CountRow[] = z.array(CountRowSchema).parse(rawRows);
       return firstRow(rows, "expiration count").count;
@@ -1119,13 +1300,13 @@ export class PostgresMessageStore implements MessageStore {
   }
 
   public async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    this.subscribers.clear();
-    const listener: ListenMeta | null = this.listener;
-    this.listener = null;
+    if (!this.ownsDatabase || this.shared.closed) return;
+    this.shared.closed = true;
+    this.shared.subscribersByInbox.clear();
+    const listener: ListenMeta | null = this.shared.listener;
+    this.shared.listener = null;
     if (listener !== null) await listener.unlisten();
-    await this.notificationQueue;
+    await this.shared.notificationQueue;
     await this.database.end({ timeout: 5 });
   }
 }

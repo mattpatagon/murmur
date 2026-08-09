@@ -2,6 +2,28 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.4.0.0] - 2026-08-09
+
+### Added
+
+- Host multiple organizations on one Murmur service while mapping every authenticated request, message, broadcast, subscription, and administrative action to exactly one tenant.
+- Manage the hosted service entirely through MCP with one-time operator bootstrap, operator tokens, tenant creation, tenant suspension and restoration, tenant-admin recovery, access-token rotation and revocation, and paginated audit history.
+- Support organization-wide messaging and direct communication between agents inside the same organization without exposing agent identities or message data to other tenants.
+- Enforce per-tenant limits for agents, tokens, messages, broadcasts, stored bytes, fan-out, sessions, subscriptions, authentication work, and request rates.
+- Verify tenant isolation, credential lifecycles, staged schema upgrades, populated legacy upgrades, direct RLS behavior, TLS hostname validation, and recovery paths in CI against PostgreSQL 17.
+
+### Changed
+
+- Qualify every shared-database identity, message sequence, idempotency key, and broadcast relationship by tenant, with forced row-level security as defense in depth.
+- Run production with a least-privilege `murmur_app` database role, verified TLS using the Supabase project CA, and separate migration and runtime credentials.
+- Deploy the hosted migration through resumable compatibility, credential-rotation, bootstrap, strict-authentication, tenant-contract, old-revision drain, and privileged-secret retirement phases.
+- Keep the self-hosted SQLite and legacy single-token modes compatible while hosted deployments adopt the founding tenant without losing existing agents or messages.
+
+### Fixed
+
+- Prevent forged, stale, or key-ID-colliding credentials from exhausting authentication capacity reserved for valid first-use credentials.
+- Close cross-tenant and resource-amplification paths involving broadcasts with no recipients, concurrent subscriptions, founding-tenant suspension, revoked-token retention, and stale deployment configuration.
+
 ## [0.3.0.0] - 2026-08-07
 
 ### Added
