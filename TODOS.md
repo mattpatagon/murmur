@@ -16,30 +16,6 @@
 
 ## Remote MCP
 
-### Expire abandoned HTTP sessions
-
-**What:** Add an idle timeout and bounded capacity to the remote MCP session registry.
-
-**Why:** Clients that disappear without closing can otherwise retain transports and applications indefinitely.
-
-**Context:** Track session activity in `src/http-server.ts`, close idle sessions, and reject or evict safely at a documented capacity.
-
-**Effort:** M
-**Priority:** P2
-**Depends on:** None
-
-### Bound request and agent metadata size
-
-**What:** Enforce request-body, metadata size, and metadata-depth limits before persistence.
-
-**Why:** A trusted-token client can currently grow memory, database storage, and `list_agents` responses with oversized metadata.
-
-**Context:** Add a body-size guard in `src/http-server.ts` and bounded metadata validation in `src/domain/contracts.ts`.
-
-**Effort:** M
-**Priority:** P2
-**Depends on:** None
-
 ### Decide whether sender context should be attested
 
 **What:** Decide whether HTTP session context must override or match tool-supplied repository, branch, and client values.
@@ -53,3 +29,13 @@
 **Depends on:** Per-client authentication design
 
 ## Completed
+
+- Expire abandoned HTTP sessions while preserving active SSE responses; bound global and
+  per-tenant session capacity.
+
+  **Completed:** v0.4.0.0 (2026-08-09)
+
+- Bound HTTP request bodies and agent metadata size, nesting depth, and key count before
+  persistence while tolerantly decoding historical rows.
+
+  **Completed:** v0.4.0.0 (2026-08-09)
