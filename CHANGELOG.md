@@ -2,6 +2,13 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.4.1.0] - 2026-08-09
+
+### Fixed
+
+- Fail production deployment before migrations when required Secret Manager containers, readable versions, IAM-policy access, or rollout permissions are missing.
+- Preserve interrupted-cutover recovery by probing explicit enabled database credential versions, retaining legacy-token cleanup checks after adoption, and requiring the operator-token secret to be pre-created.
+
 ## [0.4.0.0] - 2026-08-09
 
 ### Added
