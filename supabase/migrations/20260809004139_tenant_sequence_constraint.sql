@@ -5,4 +5,3 @@ alter table murmur.messages
     check (tenant_sequence is not null and tenant_sequence > 0) not valid;
 
 commit;
-

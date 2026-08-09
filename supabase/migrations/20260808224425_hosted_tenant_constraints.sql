@@ -35,4 +35,3 @@ alter table murmur.broadcasts
     not valid;
 
 commit;
-
