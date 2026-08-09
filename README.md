@@ -123,27 +123,48 @@ The remote server exposes:
 - `X-Murmur-Branch: feature/my-work` as optional per-client branch context
 - `X-Murmur-Client: claude` (or `codex`) as optional client context
 
-Create a separate API token in Secret Manager. Do not reuse the database
-credential as a client token.
+Create a separate founding-tenant API token in Secret Manager. Do not reuse the
+database credential as a client token. During the hosted-authentication rollout,
+the deployment adopts this existing value as a database-backed founding-tenant
+administrator token before switching to strict mode, so configured clients do
+not need a flag-day token change.
 
 ```bash
 openssl rand -hex 32 | \
   gcloud secrets create MURMUR_API_TOKEN --replication-policy=automatic --data-file=-
 ```
 
+Download the project's **Server root certificate** from Supabase Database
+Settings, verify its fingerprint through the dashboard, and store that public
+trust anchor separately from the connection URLs:
+
+```bash
+gcloud secrets create MURMUR_DATABASE_CA \
+  --replication-policy=automatic \
+  --data-file=./prod-ca-2021.crt
+```
+
+Grant `roles/secretmanager.secretAccessor` on this CA secret to both the
+service account named by the `GCP_DEPLOY_SERVICE_ACCOUNT` GitHub variable and
+the Cloud Run runtime service account. The deploy identity reads the
+certificate for migrations; Cloud Run mounts the same version for runtime
+connections.
+
 The deployment workflow applies the database migrations described under
 [Supabase Postgres](#supabase-postgres) before deploying each server revision.
 GitHub-hosted runners use the IPv4 Supabase session-pooler connection stored in
 `MURMUR_CI_DATABASE_URL`; the Cloud Run service keeps its direct connection in
 `MURMUR_DATABASE_URL`.
-For a manual fallback, grant the Cloud Run runtime service account access to
-both secrets and deploy from the repository root:
+For a manual fallback after the hosted-authentication adoption is complete,
+grant the Cloud Run runtime service account access to the runtime database URL
+and CA secrets and deploy from the repository root. A first-time bootstrap must use the
+supervised workflow because strict mode refuses to start without an operator:
 
 ```bash
 export GOOGLE_CLOUD_PROJECT='your-project-id'
 export MURMUR_RUNTIME_SERVICE_ACCOUNT='murmur-cloud-run@your-project-id.iam.gserviceaccount.com'
 
-for secret in MURMUR_DATABASE_URL MURMUR_API_TOKEN; do
+for secret in MURMUR_DATABASE_URL MURMUR_DATABASE_CA; do
   gcloud secrets add-iam-policy-binding "$secret" \
     --project "$GOOGLE_CLOUD_PROJECT" \
     --member "serviceAccount:$MURMUR_RUNTIME_SERVICE_ACCOUNT" \
@@ -155,7 +176,8 @@ gcloud run deploy murmur-mcp \
   --region us-central1 \
   --source . \
   --service-account "$MURMUR_RUNTIME_SERVICE_ACCOUNT" \
-  --set-secrets MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:latest,MURMUR_API_TOKEN=MURMUR_API_TOKEN:latest \
+  --update-env-vars MURMUR_AUTH_MODE=multi-tenant,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0 \
+  --set-secrets MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:latest,/etc/murmur/secrets/database-ca.pem=MURMUR_DATABASE_CA:latest \
   --allow-unauthenticated \
   --concurrency 80 \
   --max-instances 1 \
@@ -164,9 +186,63 @@ gcloud run deploy murmur-mcp \
 ```
 
 Cloud Run ingress is public so generic MCP clients can reach it, but every MCP
-request is rejected unless its bearer token matches `MURMUR_API_TOKEN`. The
-initial deployment is deliberately limited to one instance because MCP session
-state lives in memory. Messages remain durable in Postgres across restarts.
+request requires a live, hashed database credential. The initial deployment is
+deliberately limited to one instance because MCP session state lives in memory.
+Messages remain durable in Postgres across restarts.
+
+After the supervised adoption, the workflow removes the legacy API token from
+the revision, revokes the runtime service account's access to that secret, and
+deletes superseded revisions that could retain injected legacy credentials.
+The runtime service account then needs access only to `MURMUR_DATABASE_URL` and
+the public `MURMUR_DATABASE_CA` trust anchor.
+
+### Hosted authorization
+
+Hosted credentials map to exactly one principal; callers never supply a tenant
+ID to data tools:
+
+- `agent` tokens can use message and agent tools inside one tenant.
+- `tenant_admin` tokens can also create, page through, and revoke that tenant's
+  access tokens.
+- `operator` tokens can create and suspend tenants, mint tenant-administrator
+  tokens, rotate operator credentials, and inspect the append-only
+  administration audit trail. They cannot read or write tenant messages.
+- The one-purpose bootstrap credential can call only `bootstrap_operator`. The
+  caller supplies and retains the first `mur_op_...` secret before the atomic
+  database ceremony, and the deployment disables bootstrap immediately after.
+
+Token secrets are generated from 256 random bits, stored only as SHA-256 hashes,
+and returned once. Administrative list tools use bounded cursor pages. Every
+request reauthenticates; revocation and tenant suspension therefore affect
+existing sessions on their next request, while the local service also closes
+matching sessions proactively.
+
+The runtime connects as the non-owner, non-superuser, non-`BYPASSRLS`
+`murmur_app` role. Tenant-qualified queries and forced Postgres RLS are separate
+isolation layers. The deployment tests the role and denied table grants on a
+fresh Postgres instance before touching production.
+
+Runtime database credential rotation is resumable. A deployment probes enabled
+Secret Manager versions and prefers the newest working `murmur_app` credential;
+an interrupted staged version is either reused after a committed database change
+or skipped on the next run. After the strict revision passes its production
+health check, the workflow disables every superseded `MURMUR_DATABASE_URL`
+version so the runtime identity cannot retrieve an older privileged credential.
+Re-enable the exact prior version explicitly before rolling back to a revision
+that references it.
+
+The tenant-key upgrade is also staged. Its expansion migration backfills a
+tenant-local message sequence while retaining the old global constraints and
+keeps tenant creation disabled at contract version 1. After the compatible new
+revision is healthy, the workflow atomically installs the tenant-qualified
+primary and idempotency contracts, records contract version 2, and restarts the
+strict revision before retiring any database credential. A failed finalization
+rolls back as one transaction; an interrupted deploy resumes from the recorded
+contract version. Before that forward-only contraction, the workflow routes 100%
+of traffic to the compatible revision and deletes every older Cloud Run revision;
+this terminates old SSE/in-flight requests and prevents an accidental rollback to
+an incompatible writer. The container images remain available for diagnosis, but
+after version 2 only the tenant-qualified revision or a later one may be deployed.
 
 Map the service and then install the DNS records returned by Google at the
 domain registrar:
@@ -213,10 +289,9 @@ the token:
 }
 ```
 
-The bearer token is a private-team perimeter, not per-agent authorization. Every
-holder can currently act as any registered agent. Add OAuth identities,
-tenant isolation, and per-inbox authorization before offering the endpoint as a
-public multi-tenant service.
+Each bearer token is private to its tenant and role. Agent identity inside a
+tenant remains self-asserted by design; use separate agent tokens when clients
+must have independent revocation and rate limits.
 
 ### Use Murmur outside this repository
 
@@ -353,6 +428,15 @@ recipient snapshot even if agent activity changes after the first call.
 | `get_messages` | Read durable messages without changing read state |
 | `wait_for_messages` | Long-poll fallback for hosts that hide subscriptions |
 | `mark_messages_read` | Acknowledge specific messages |
+| `create_access_token` | Tenant admin: create an agent or administrator token |
+| `list_access_tokens` | Tenant admin: page through token metadata, never secrets |
+| `revoke_access_token` | Tenant admin: revoke one token and its live sessions |
+| `create_tenant` | Operator: create a tenant and its first administrator token |
+| `list_tenants` | Operator: page through tenant status |
+| `suspend_tenant` / `restore_tenant` | Operator: disable or restore a tenant |
+| `mint_tenant_admin_token` | Operator: issue a tenant-administrator token |
+| `create_operator_token` / `revoke_operator_token` | Operator credential rotation |
+| `list_operator_tokens` / `list_admin_audit` | Operator credential and audit inspection |
 
 ## Storage
 
@@ -376,13 +460,21 @@ columns.
 Use Supabase's direct connection for a persistent backend when the machine has
 IPv6. Use the session pooler on port 5432 when the machine needs IPv4. Do not
 use transaction mode because `LISTEN` requires a stable session.
+Production clients use `verify-full`; set `MURMUR_DATABASE_CA_PATH` to the
+project's downloaded Server root certificate. The deployment workflow mounts
+that certificate from `MURMUR_DATABASE_CA` for both migration and runtime
+connections.
 
 Apply all migrations before deploying the matching server version. Supabase runs
-them in filename timestamp order: base schema, repository context, branch and
-client context, then broadcasts. The direct-message context columns remain
+them in filename timestamp order. The direct-message context columns remain
 nullable so messages created by older Murmur versions stay readable; every new
-send still requires repository, branch, and client context. After that, each
-machine only needs Bun, Murmur, and a connection URL for that same database:
+send still requires repository, branch, and client context. The tenant-key
+expansion migration intentionally leaves `tenant_contract_version = 1`. For a
+manual production rollout, deploy and health-check the matching server first,
+then run `select murmur.finalize_tenant_contract()` once with the owner
+connection and restart that same revision. Do not finalize while an older
+server revision can still receive traffic. After that, each machine only needs
+Bun, Murmur, and a connection URL for that same database:
 
 Upgrade every Murmur server process that writes to a shared Postgres database
 before using broadcasts. Mixed server versions are not supported. Existing MCP
@@ -390,8 +482,11 @@ clients and hooks remain compatible with the unchanged inbox message payload.
 
 ```bash
 export MURMUR_DATABASE_URL='postgresql://...'
-bunx supabase db push --db-url "$MURMUR_DATABASE_URL" --include-all
-MURMUR_TEST_DATABASE_URL="$MURMUR_DATABASE_URL" bun run test:cloud
+export MURMUR_DATABASE_CA_PATH='./prod-ca-2021.crt'
+VERIFIED_DATABASE_URL="$(MURMUR_DATABASE_URL_TO_VERIFY="$MURMUR_DATABASE_URL" \
+  bun scripts/require-verified-database-url.ts)"
+bunx supabase db push --db-url "$VERIFIED_DATABASE_URL" --include-all
+MURMUR_TEST_DATABASE_URL="$VERIFIED_DATABASE_URL" bun run test:cloud
 ```
 
 `test:cloud` reads `MURMUR_TEST_DATABASE_URL`, so either export that name or run:
@@ -400,13 +495,16 @@ MURMUR_TEST_DATABASE_URL="$MURMUR_DATABASE_URL" bun run test:cloud
 MURMUR_TEST_DATABASE_URL="$MURMUR_DATABASE_URL" bun run test:cloud
 ```
 
-Postgres connections always use TLS encryption. A database URL is sufficient
-to connect. For full server-certificate verification, optionally download the
-project's Server root certificate from Supabase Database Settings and set:
+Postgres connections verify the server certificate with system roots by
+default. To use a private certificate authority, download its root certificate
+and set:
 
 ```bash
 export MURMUR_DATABASE_CA_PATH='/absolute/path/to/prod-ca.crt'
 ```
+
+`MURMUR_DATABASE_TLS_INSECURE=1` disables verification and is accepted only as
+an explicit development override for local TLS test databases.
 
 On macOS, the launcher can read the cloud URL from Keychain without putting a
 secret in the repository:
@@ -424,12 +522,24 @@ Delete that local credential with:
 security delete-generic-password -a murmur -s murmur-cloud-database-url
 ```
 
-The current MCP server is a trusted-network design. Remote HTTP rejects clients
-without the shared bearer token, but every client holding that token can act as
-any registered agent; there is no per-agent or per-inbox authorization. Keep the
-token in a secret store, rotate it if exposed, and only share it with mutually
-trusted clients. The private database schema prevents accidental Data API
-exposure but is not a substitute for application authorization.
+Remote HTTP additionally bounds request bodies, concurrent authentications,
+active requests globally/per tenant/per credential, global and per-tenant
+sessions, principal and tenant request rates, and idle sessions. The default
+active-request ceiling is 64, below the production Cloud Run concurrency of 80,
+so one tenant cannot consume every request slot with SSE streams or long polls.
+Concurrent authentication is limited to four, matching the control-plane pool
+instead of allowing invalid credentials to build a database queue.
+Active SSE responses are not treated as idle. Configure these with the
+`MURMUR_MAX_*`, `MURMUR_*RATE_LIMIT*`, and `MURMUR_SESSION_IDLE_MS` variables in
+`.env.example`.
+
+Hosted Postgres also atomically limits each tenant to 1,000 registered agents,
+1,000 retained access-token records, 100,000 retained messages, 256 MiB of
+retained message content, 10,000 retained broadcasts, and 64 MiB of broadcast
+content. A broadcast can target at most 100 active agents, and one MCP session
+can hold at most 10 inbox subscriptions. Expiration pruning releases message,
+broadcast, and byte capacity in bounded batches; new token issuance prunes
+revoked and expired token records.
 
 ## Type-safety contract
 
@@ -460,6 +570,9 @@ objects rather than interchangeable strings.
 - Git-origin detection, explicit repository overrides, and durable message context
 - registration requirements
 - two independent MCP server processes sharing a database
+- direct authorization failures for hidden cross-role tools and cross-token session reuse
+- one-time operator bootstrap, legacy-token adoption, strict-mode restart, and token revocation
+- request/body/session/rate/idle limits, including active SSE preservation
 - multi-recipient `notifications/resources/updated` pushes followed by inbox replay
 
 `bun run test:cloud` packages Murmur, installs it into two isolated machine

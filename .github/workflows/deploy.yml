@@ -20,6 +20,7 @@ env:
   REGION: ${{ vars.GCP_REGION }}
   RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
   SERVICE: ${{ vars.GCP_SERVICE }}
+  PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
 
 jobs:
   deploy:
@@ -29,6 +30,18 @@ jobs:
     environment:
       name: production
       url: ${{ vars.PRODUCTION_URL }}
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: murmur_ci_admin_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
 
     steps:
       - name: Check out the merged revision
@@ -45,6 +58,12 @@ jobs:
       - name: Run local verification
         run: bun run test
 
+      - name: Verify custom-CA Postgres TLS
+        run: bash scripts/verify-postgres-tls.sh
+
+      - name: Verify hosted isolation as the non-owner runtime role
+        run: bash scripts/verify-hosted-postgres.sh
+
       - name: Authenticate for migrations
         uses: google-github-actions/auth@v3
         with:
@@ -55,6 +74,19 @@ jobs:
       - name: Install Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v3
 
+      - name: Install the Supabase database trust anchor
+        shell: bash
+        run: |
+          set -euo pipefail
+          database_ca_path="$RUNNER_TEMP/murmur-database-ca.pem"
+          gcloud secrets versions access latest \
+            --project "$PROJECT_ID" \
+            --secret MURMUR_DATABASE_CA > "$database_ca_path"
+          chmod 600 "$database_ca_path"
+          openssl x509 -in "$database_ca_path" -noout -subject >/dev/null
+          echo "MURMUR_DATABASE_CA_PATH=$database_ca_path" >> "$GITHUB_ENV"
+          unset database_ca_path
+
       - name: Apply migrations and verify shared Postgres
         shell: bash
         run: |
@@ -63,8 +95,125 @@ jobs:
             --project "$PROJECT_ID" \
             --secret MURMUR_CI_DATABASE_URL)"
           echo "::add-mask::$database_url"
+          bootstrap_database_credential="$database_url"
+          database_url="$(MURMUR_DATABASE_URL_TO_VERIFY="$database_url" \
+            bun scripts/require-verified-database-url.ts)"
+          echo "::add-mask::$database_url"
+          MURMUR_MIGRATION_DATABASE_URL="$database_url" \
+            bash scripts/prune-expired-before-migration.sh
           bunx supabase db push --db-url "$database_url" --include-all --yes
+          MURMUR_BOOTSTRAP_DATABASE_CREDENTIAL="$bootstrap_database_credential" \
+            MURMUR_BOOTSTRAP_DATABASE_URL="$database_url" \
+            bun run scripts/configure-operator-bootstrap.ts
+          has_operator="$(psql "$database_url" --tuples-only --no-align \
+            --command 'select murmur.operator_has_active_token()')"
+          legacy_adopted="$(psql "$database_url" --tuples-only --no-align \
+            --command 'select legacy_imported_at is not null from murmur.platform_state where singleton_id = 1')"
+          runtime_provisioned="$(psql "$database_url" --tuples-only --no-align \
+            --command 'select runtime_role_provisioned_at is not null from murmur.platform_state where singleton_id = 1')"
+          tenant_contract_version="$(psql "$database_url" --tuples-only --no-align \
+            --command 'select tenant_contract_version from murmur.platform_state where singleton_id = 1')"
+          if [ "$legacy_adopted" != 't' ]; then
+            legacy_token="$(gcloud secrets versions access latest \
+              --project "$PROJECT_ID" \
+              --secret MURMUR_API_TOKEN)"
+            echo "::add-mask::$legacy_token"
+            MURMUR_LEGACY_TOKEN_TO_VALIDATE="$legacy_token" bun -e '
+              import { DatabaseCredentialPattern } from "./src/hosted/token-secret.ts";
+              const token = process.env.MURMUR_LEGACY_TOKEN_TO_VALIDATE;
+              if (token === undefined || !DatabaseCredentialPattern.test(token)) {
+                throw new Error("MURMUR_API_TOKEN cannot be adopted by strict authentication");
+              }
+            '
+            unset legacy_token
+          fi
+          current_runtime_version=''
+          fallback_runtime_version=''
+          runtime_role_ready=false
+          while IFS= read -r candidate_version; do
+            if candidate_url="$(gcloud secrets versions access "${candidate_version##*/}" \
+              --project "$PROJECT_ID" \
+              --secret MURMUR_DATABASE_URL)"; then
+              echo "::add-mask::$candidate_url"
+              candidate_url="$(MURMUR_DATABASE_URL_TO_VERIFY="$candidate_url" \
+                bun scripts/require-verified-database-url.ts)"
+              echo "::add-mask::$candidate_url"
+              if runtime_role_probe="$(psql "$candidate_url" --tuples-only --no-align \
+                --command "select current_user = 'murmur_app'" 2>/dev/null)"; then
+                if [ "$runtime_role_probe" = 't' ]; then
+                  current_runtime_version="${candidate_version##*/}"
+                  runtime_role_ready=true
+                  unset candidate_url runtime_role_probe
+                  break
+                fi
+                if [ -z "$fallback_runtime_version" ]; then
+                  fallback_runtime_version="${candidate_version##*/}"
+                fi
+                unset candidate_url runtime_role_probe
+              fi
+              unset candidate_url
+            fi
+          done < <(gcloud secrets versions list MURMUR_DATABASE_URL \
+            --project "$PROJECT_ID" \
+            --filter 'state=ENABLED' \
+            --sort-by '~createTime' \
+            --format 'value(name)')
+          if [ -z "$current_runtime_version" ]; then
+            current_runtime_version="$fallback_runtime_version"
+          fi
+          if [ -z "$current_runtime_version" ]; then
+            echo 'MURMUR_DATABASE_URL has no enabled version that can connect' >&2
+            exit 1
+          fi
+          echo "RUNTIME_DATABASE_SECRET_VERSION=$current_runtime_version" >> "$GITHUB_ENV"
+          if [ "$has_operator" = 't' ]; then
+            echo 'BOOTSTRAP_REQUIRED=false' >> "$GITHUB_ENV"
+            if ! gcloud secrets describe MURMUR_OPERATOR_TOKEN \
+              --project "$PROJECT_ID" >/dev/null 2>&1; then
+              echo 'An operator exists but MURMUR_OPERATOR_TOKEN is unavailable' >&2
+              exit 1
+            fi
+          else
+            echo 'BOOTSTRAP_REQUIRED=true' >> "$GITHUB_ENV"
+            if ! gcloud secrets describe MURMUR_OPERATOR_TOKEN \
+              --project "$PROJECT_ID" >/dev/null 2>&1; then
+              gcloud secrets create MURMUR_OPERATOR_TOKEN \
+                --project "$PROJECT_ID" \
+                --replication-policy automatic
+            fi
+          fi
+          if [ "$legacy_adopted" = 't' ]; then
+            echo 'ADOPTION_REQUIRED=false' >> "$GITHUB_ENV"
+          else
+            echo 'ADOPTION_REQUIRED=true' >> "$GITHUB_ENV"
+          fi
+          if [ "$runtime_role_ready" = 'true' ]; then
+            if [ "$runtime_provisioned" != 't' ]; then
+              psql "$database_url" --set ON_ERROR_STOP=1 \
+                --command 'update murmur.platform_state set runtime_role_provisioned_at = statement_timestamp() where singleton_id = 1'
+            fi
+            echo 'RUNTIME_PROVISION_REQUIRED=false' >> "$GITHUB_ENV"
+          else
+            echo 'RUNTIME_PROVISION_REQUIRED=true' >> "$GITHUB_ENV"
+          fi
+          case "$tenant_contract_version" in
+            1)
+              echo 'TENANT_CONTRACT_FINALIZE_REQUIRED=true' >> "$GITHUB_ENV"
+              ;;
+            2)
+              echo 'TENANT_CONTRACT_FINALIZE_REQUIRED=false' >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "Unsupported tenant contract version: $tenant_contract_version" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$legacy_adopted" = 't' ] && [ "$has_operator" != 't' ]; then
+            echo 'Legacy adoption cannot be complete without an active operator' >&2
+            exit 1
+          fi
           MURMUR_TEST_DATABASE_URL="$database_url" bun run test:cloud
+          unset bootstrap_database_credential
 
       - name: Build production image
         shell: bash
@@ -95,7 +244,8 @@ jobs:
           service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
 
-      - name: Deploy Cloud Run revision
+      - name: Deploy compatibility revision before runtime credential rotation
+        if: env.RUNTIME_PROVISION_REQUIRED == 'true' && env.ADOPTION_REQUIRED == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -104,13 +254,152 @@ jobs:
             --region "$REGION" \
             --image "$IMAGE" \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
-            --set-secrets MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:latest,MURMUR_API_TOKEN=MURMUR_API_TOKEN:latest \
+            --update-env-vars MURMUR_AUTH_MODE=legacy,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_CONCURRENT_AUTHENTICATIONS=4 \
+            --set-secrets MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:"$RUNTIME_DATABASE_SECRET_VERSION",MURMUR_API_TOKEN=MURMUR_API_TOKEN:latest,/etc/murmur/secrets/database-ca.pem=MURMUR_DATABASE_CA:latest \
             --concurrency 80 \
             --max-instances 1 \
             --memory 512Mi \
             --port 8080 \
             --timeout 3600 \
             --quiet
+          curl --fail --silent --show-error "$PRODUCTION_URL/health" >/dev/null
+
+      - name: Rotate least-privilege runtime database credential
+        if: env.RUNTIME_PROVISION_REQUIRED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          admin_database_url="$(gcloud secrets versions access latest \
+            --project "$PROJECT_ID" \
+            --secret MURMUR_CI_DATABASE_URL)"
+          echo "::add-mask::$admin_database_url"
+          admin_database_url="$(MURMUR_DATABASE_URL_TO_VERIFY="$admin_database_url" \
+            bun scripts/require-verified-database-url.ts)"
+          echo "::add-mask::$admin_database_url"
+          runtime_password="$(bun -e 'import { randomBytes } from "node:crypto"; process.stdout.write(randomBytes(36).toString("base64url"))')"
+          echo "::add-mask::$runtime_password"
+          runtime_template_url="$(gcloud secrets versions access "$RUNTIME_DATABASE_SECRET_VERSION" \
+            --project "$PROJECT_ID" \
+            --secret MURMUR_DATABASE_URL)"
+          echo "::add-mask::$runtime_template_url"
+          runtime_database_url="$(MURMUR_RUNTIME_ADMIN_DATABASE_URL="$admin_database_url" \
+            MURMUR_RUNTIME_DATABASE_TEMPLATE_URL="$runtime_template_url" \
+            MURMUR_RUNTIME_PASSWORD="$runtime_password" \
+            bun scripts/provision-runtime-database.ts)"
+          echo "::add-mask::$runtime_database_url"
+          new_version="$(printf '%s' "$runtime_database_url" | gcloud secrets versions add MURMUR_DATABASE_URL \
+            --project "$PROJECT_ID" \
+            --data-file=- \
+            --format 'value(name)')"
+          test -n "$new_version"
+          MURMUR_RUNTIME_ADMIN_DATABASE_URL="$admin_database_url" \
+            MURMUR_RUNTIME_PASSWORD="$runtime_password" \
+            MURMUR_RUNTIME_APPLY=1 \
+            bun scripts/provision-runtime-database.ts
+          echo "RUNTIME_DATABASE_SECRET_VERSION=${new_version##*/}" >> "$GITHUB_ENV"
+          unset admin_database_url runtime_password runtime_database_url runtime_template_url new_version
+
+      - name: Deploy Cloud Run revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$ADOPTION_REQUIRED" = 'true' ]; then
+            auth_mode='hybrid'
+            if [ "$BOOTSTRAP_REQUIRED" = 'true' ]; then
+              allow_bootstrap='1'
+            else
+              allow_bootstrap='0'
+            fi
+          else
+            auth_mode='multi-tenant'
+            allow_bootstrap='0'
+          fi
+          if [ "$ADOPTION_REQUIRED" = 'true' ]; then
+            secret_mapping="MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:$RUNTIME_DATABASE_SECRET_VERSION,MURMUR_API_TOKEN=MURMUR_API_TOKEN:latest,/etc/murmur/secrets/database-ca.pem=MURMUR_DATABASE_CA:latest"
+          else
+            secret_mapping="MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:$RUNTIME_DATABASE_SECRET_VERSION,/etc/murmur/secrets/database-ca.pem=MURMUR_DATABASE_CA:latest"
+          fi
+          gcloud run deploy "$SERVICE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --image "$IMAGE" \
+            --service-account "$RUNTIME_SERVICE_ACCOUNT" \
+            --update-env-vars MURMUR_AUTH_MODE="$auth_mode",MURMUR_ALLOW_BOOTSTRAP="$allow_bootstrap",MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_CONCURRENT_AUTHENTICATIONS=4 \
+            --set-secrets "$secret_mapping" \
+            --concurrency 80 \
+            --max-instances 1 \
+            --memory 512Mi \
+            --port 8080 \
+            --timeout 3600 \
+            --quiet
+          unset secret_mapping
+
+      - name: Complete one-time operator bootstrap and strict cutover
+        if: env.ADOPTION_REQUIRED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          database_url="$(gcloud secrets versions access latest \
+            --project "$PROJECT_ID" \
+            --secret MURMUR_CI_DATABASE_URL)"
+          echo "::add-mask::$database_url"
+          bootstrap_database_credential="$database_url"
+          database_url="$(MURMUR_DATABASE_URL_TO_VERIFY="$database_url" \
+            bun scripts/require-verified-database-url.ts)"
+          echo "::add-mask::$database_url"
+          bootstrap_token=''
+          if [ "$BOOTSTRAP_REQUIRED" = 'true' ]; then
+            bootstrap_token="$(MURMUR_BOOTSTRAP_DATABASE_CREDENTIAL="$bootstrap_database_credential" \
+              bun scripts/derive-operator-bootstrap-token.ts)"
+            operator_token="$(bun scripts/generate-operator-token.ts)"
+            printf '%s' "$operator_token" | gcloud secrets versions add MURMUR_OPERATOR_TOKEN \
+              --project "$PROJECT_ID" \
+              --data-file=-
+          else
+            operator_token="$(gcloud secrets versions access latest \
+              --project "$PROJECT_ID" \
+              --secret MURMUR_OPERATOR_TOKEN)"
+          fi
+          echo "::add-mask::$bootstrap_token"
+          echo "::add-mask::$operator_token"
+          legacy_token="$(gcloud secrets versions access latest \
+            --project "$PROJECT_ID" \
+            --secret MURMUR_API_TOKEN)"
+          echo "::add-mask::$legacy_token"
+          MURMUR_BOOTSTRAP_URL="$PRODUCTION_URL/mcp" \
+            MURMUR_BOOTSTRAP_TOKEN="$bootstrap_token" \
+            MURMUR_INITIAL_OPERATOR_TOKEN="$operator_token" \
+            MURMUR_LEGACY_TOKEN="$legacy_token" \
+            bun scripts/bootstrap-production.ts
+          gcloud run services update "$SERVICE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --update-env-vars MURMUR_AUTH_MODE=multi-tenant,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_CONCURRENT_AUTHENTICATIONS=4 \
+            --set-secrets MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:"$RUNTIME_DATABASE_SECRET_VERSION",/etc/murmur/secrets/database-ca.pem=MURMUR_DATABASE_CA:latest \
+            --quiet
+          unset bootstrap_database_credential database_url bootstrap_token legacy_token operator_token
+
+      - name: Revoke runtime access to the adopted legacy token
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime_binding=''
+          if gcloud secrets describe MURMUR_API_TOKEN \
+            --project "$PROJECT_ID" >/dev/null 2>&1; then
+            runtime_binding="$(gcloud secrets get-iam-policy MURMUR_API_TOKEN \
+              --project "$PROJECT_ID" \
+              --flatten 'bindings[].members' \
+              --filter "bindings.role=roles/secretmanager.secretAccessor AND bindings.members=serviceAccount:$RUNTIME_SERVICE_ACCOUNT" \
+              --format 'value(bindings.role)' | head -1)"
+            if [ -n "$runtime_binding" ]; then
+              gcloud secrets remove-iam-policy-binding MURMUR_API_TOKEN \
+                --project "$PROJECT_ID" \
+                --member "serviceAccount:$RUNTIME_SERVICE_ACCOUNT" \
+                --role roles/secretmanager.secretAccessor \
+                --quiet
+            fi
+          fi
+          unset runtime_binding
 
       - name: Verify production health
         shell: bash
@@ -127,3 +416,170 @@ jobs:
             fi
             sleep 5
           done
+
+      - name: Drain superseded Cloud Run revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest_revision="$(gcloud run services describe "$SERVICE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --format 'value(status.latestReadyRevisionName)')"
+          if [ -z "$latest_revision" ]; then
+            echo 'Cloud Run did not report a latest ready revision' >&2
+            exit 1
+          fi
+          gcloud run services update-traffic "$SERVICE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --to-latest \
+            --quiet
+          if [ "$ADOPTION_REQUIRED" = 'true' ] || [ "$TENANT_CONTRACT_FINALIZE_REQUIRED" = 'true' ]; then
+            while IFS= read -r revision; do
+              if [ -n "$revision" ] && [ "$revision" != "$latest_revision" ]; then
+                gcloud run revisions delete "$revision" \
+                  --project "$PROJECT_ID" \
+                  --region "$REGION" \
+                  --quiet
+              fi
+            done < <(gcloud run revisions list \
+              --project "$PROJECT_ID" \
+              --region "$REGION" \
+              --service "$SERVICE" \
+              --format 'value(metadata.name)')
+            unexpected_revision="$(gcloud run revisions list \
+              --project "$PROJECT_ID" \
+              --region "$REGION" \
+              --service "$SERVICE" \
+              --filter "metadata.name!=$latest_revision" \
+              --format 'value(metadata.name)' | head -1)"
+            if [ -n "$unexpected_revision" ]; then
+              echo "Prior incompatible revision remained active: $unexpected_revision" >&2
+              exit 1
+            fi
+          fi
+          curl --fail --silent --show-error "$PRODUCTION_URL/health" >/dev/null
+
+      - name: Finalize tenant-qualified database keys
+        if: env.TENANT_CONTRACT_FINALIZE_REQUIRED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          database_url="$(gcloud secrets versions access latest \
+            --project "$PROJECT_ID" \
+            --secret MURMUR_CI_DATABASE_URL)"
+          echo "::add-mask::$database_url"
+          database_url="$(MURMUR_DATABASE_URL_TO_VERIFY="$database_url" \
+            bun scripts/require-verified-database-url.ts)"
+          echo "::add-mask::$database_url"
+          changed=''
+          for attempt in {1..12}; do
+            if changed="$(psql "$database_url" \
+              --set ON_ERROR_STOP=1 \
+              --tuples-only \
+              --no-align \
+              --command 'select murmur.finalize_tenant_contract()')"; then
+              break
+            fi
+            if [ "$attempt" -eq 12 ]; then
+              echo 'Tenant contract finalization could not acquire its DDL locks' >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          if [ "$changed" != 't' ]; then
+            echo 'Tenant contract was not finalized by this deployment' >&2
+            exit 1
+          fi
+          unset database_url changed
+
+      - name: Validate tenant-qualified foreign keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          database_url="$(gcloud secrets versions access latest \
+            --project "$PROJECT_ID" \
+            --secret MURMUR_CI_DATABASE_URL)"
+          echo "::add-mask::$database_url"
+          database_url="$(MURMUR_DATABASE_URL_TO_VERIFY="$database_url" \
+            bun scripts/require-verified-database-url.ts)"
+          echo "::add-mask::$database_url"
+          psql "$database_url" \
+            --set ON_ERROR_STOP=1 \
+            --command 'select murmur.validate_tenant_contract()'
+          unset database_url
+
+      - name: Restart the strict revision on tenant contract v2
+        if: env.TENANT_CONTRACT_FINALIZE_REQUIRED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run services update "$SERVICE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --update-env-vars MURMUR_AUTH_MODE=multi-tenant,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_CONCURRENT_AUTHENTICATIONS=4,MURMUR_TENANT_CONTRACT_VERSION=2 \
+            --set-secrets MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:"$RUNTIME_DATABASE_SECRET_VERSION",/etc/murmur/secrets/database-ca.pem=MURMUR_DATABASE_CA:latest \
+            --quiet
+
+      - name: Verify production tenant contract and final health
+        shell: bash
+        run: |
+          set -euo pipefail
+          database_url="$(gcloud secrets versions access latest \
+            --project "$PROJECT_ID" \
+            --secret MURMUR_CI_DATABASE_URL)"
+          echo "::add-mask::$database_url"
+          database_url="$(MURMUR_DATABASE_URL_TO_VERIFY="$database_url" \
+            bun scripts/require-verified-database-url.ts)"
+          echo "::add-mask::$database_url"
+          tenant_contract_version="$(psql "$database_url" \
+            --set ON_ERROR_STOP=1 \
+            --tuples-only \
+            --no-align \
+            --command 'select tenant_contract_version from murmur.platform_state where singleton_id = 1')"
+          if [ "$tenant_contract_version" != '2' ]; then
+            echo "Expected tenant contract version 2, found $tenant_contract_version" >&2
+            exit 1
+          fi
+          unvalidated_foreign_keys="$(psql "$database_url" \
+            --set ON_ERROR_STOP=1 \
+            --tuples-only \
+            --no-align \
+            --command "select count(*)
+              from pg_constraint
+              where connamespace = 'murmur'::regnamespace
+                and contype = 'f'
+                and not convalidated")"
+          if [ "$unvalidated_foreign_keys" != '0' ]; then
+            echo "Expected all tenant-qualified foreign keys to be validated, found $unvalidated_foreign_keys pending" >&2
+            exit 1
+          fi
+          health_url="${{ vars.PRODUCTION_URL }}/health"
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error "$health_url" | grep --fixed-strings '"status":"ok"'; then
+              unset database_url tenant_contract_version unvalidated_foreign_keys
+              exit 0
+            fi
+            if [ "$attempt" -eq 12 ]; then
+              echo "Production health check failed after tenant contract finalization" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Disable superseded runtime database credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r candidate_version; do
+            candidate_version="${candidate_version##*/}"
+            if [ "$candidate_version" != "$RUNTIME_DATABASE_SECRET_VERSION" ]; then
+              gcloud secrets versions disable "$candidate_version" \
+                --project "$PROJECT_ID" \
+                --secret MURMUR_DATABASE_URL \
+                --quiet
+            fi
+          done < <(gcloud secrets versions list MURMUR_DATABASE_URL \
+            --project "$PROJECT_ID" \
+            --filter 'state=ENABLED' \
+            --format 'value(name)')
