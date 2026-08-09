@@ -158,7 +158,8 @@ not add a value manually.
 
 ```bash
 export GOOGLE_CLOUD_PROJECT='your-project-id'
-export MURMUR_DEPLOY_SERVICE_ACCOUNT='murmur-github-deploy@your-project-id.iam.gserviceaccount.com'
+export MURMUR_DEPLOY_SERVICE_ACCOUNT_NAME='murmur-github-deploy'
+MURMUR_DEPLOY_SERVICE_ACCOUNT="$MURMUR_DEPLOY_SERVICE_ACCOUNT_NAME@$GOOGLE_CLOUD_PROJECT.iam.gserviceaccount.com"
 deploy_member="serviceAccount:$MURMUR_DEPLOY_SERVICE_ACCOUNT"
 
 gcloud secrets describe MURMUR_OPERATOR_TOKEN \
