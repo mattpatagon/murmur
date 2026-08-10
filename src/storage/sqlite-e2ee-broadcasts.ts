@@ -27,8 +27,8 @@ import {
 import {
   e2eeEnvelopeJson,
   encryptedCiphertextBytes,
-  senderChainFromBundle,
   type StoredEncryptionClaim,
+  senderChainFromBundle,
   validateEnvelopeForClaim,
 } from "./e2ee-store-validation.js";
 import { claimSqliteEncryptionPrekeyInTransaction } from "./sqlite-e2ee-keys.js";
@@ -366,14 +366,25 @@ export function putSqliteEncryptedBroadcastDelivery(
   database.exec("BEGIN IMMEDIATE");
   try {
     const broadcast: SqliteE2eeBroadcastRow = readSqliteE2eeBroadcast(database, input.broadcast_id);
-    if (broadcast.state !== "pending" || broadcast.expires_at <= now.toISOString()) {
-      throw new Error("Encrypted broadcast is unavailable or expired");
-    }
     const delivery: SqliteE2eeDeliveryRow = deliveryRow(
       database,
       input.broadcast_id,
       input.claim_id,
     );
+    if (broadcast.state === "committed") {
+      if (delivery.envelope_json !== envelopeJson) {
+        throw new IdempotencyConflictError(input.envelope.header.idempotency_key);
+      }
+      database.exec("COMMIT");
+      return PutEncryptedBroadcastDeliveryOutputSchema.parse({
+        accepted: true,
+        duplicate: true,
+        recipient_id: delivery.recipient_id,
+      });
+    }
+    if (broadcast.state !== "pending" || broadcast.expires_at <= now.toISOString()) {
+      throw new Error("Encrypted broadcast is unavailable or expired");
+    }
     if (delivery.envelope_json !== null) {
       if (delivery.envelope_json !== envelopeJson) {
         throw new IdempotencyConflictError(input.envelope.header.idempotency_key);

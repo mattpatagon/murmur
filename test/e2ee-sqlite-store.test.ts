@@ -30,6 +30,7 @@ import { envelopeToDto, publicBundleToDto } from "../src/e2ee/wire-contracts.js"
 import type {
   ClaimEncryptionPrekeyOutput,
   PrepareEncryptedBroadcastOutput,
+  PutEncryptedBroadcastDeliveryInput,
   PutEncryptedMessageInput,
 } from "../src/e2ee/wire-tools.js";
 import type { E2eeMessageStore } from "../src/storage/e2ee-message-store.js";
@@ -380,6 +381,7 @@ test("SQLite keeps encrypted broadcasts invisible until complete atomic commit",
       prepared.claims.map((claim: ClaimEncryptionPrekeyOutput): string => claim.recipient_id),
     ).toEqual(["bob", "charlie"]);
     let pairCounter: number = 1;
+    let firstDelivery: PutEncryptedBroadcastDeliveryInput | null = null;
     for (const claim of prepared.claims) {
       const recipient: Identity | undefined = identities.get(claim.recipient_id);
       if (recipient === undefined) throw new Error("Missing recipient test identity");
@@ -393,12 +395,14 @@ test("SQLite keeps encrypted broadcasts invisible until complete atomic commit",
         pairCounter,
         threadId: prepared.thread_id,
       });
-      await encrypted.putEncryptedBroadcastDelivery({
+      const delivery: PutEncryptedBroadcastDeliveryInput = {
         broadcast_id: prepared.broadcast_id,
         claim_id: claim.claim_id,
         envelope: put.envelope,
-      });
+      };
+      await encrypted.putEncryptedBroadcastDelivery(delivery);
       if (pairCounter === 1) {
+        firstDelivery = delivery;
         expect(
           (): ReturnType<E2eeMessageStore["commitEncryptedBroadcast"]> =>
             encrypted.commitEncryptedBroadcast({ broadcast_id: prepared.broadcast_id }),
@@ -417,6 +421,12 @@ test("SQLite keeps encrypted broadcasts invisible until complete atomic commit",
     const committed: Awaited<ReturnType<E2eeMessageStore["commitEncryptedBroadcast"]>> =
       await encrypted.commitEncryptedBroadcast({ broadcast_id: prepared.broadcast_id });
     expect(committed).toMatchObject({ duplicate: false, recipient_count: 2, status: "stored" });
+    if (firstDelivery === null) throw new Error("Expected first encrypted broadcast delivery");
+    expect(await encrypted.putEncryptedBroadcastDelivery(firstDelivery)).toMatchObject({
+      accepted: true,
+      duplicate: true,
+      recipient_id: "bob",
+    });
     expect(
       await encrypted.getEncryptedMessages({
         after_sequence: 0,
