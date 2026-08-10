@@ -23,6 +23,7 @@ git clone https://github.com/mattpatagon/murmur.git
 cd murmur
 bun install --frozen-lockfile
 bun run verify
+bun run test
 bun run test:portability
 ```
 
@@ -34,8 +35,9 @@ hosted verifier creates isolated roles and databases; never aim it at production
 | Command | Contract |
 | --- | --- |
 | `bun run verify` | Strict types, zero-warning Biome, safety AST, 500-line, dependency, and format gates |
+| `bun run test` | Environment-independent full suite; hosted and cross-machine cases report explicit skips when their external fixtures are absent |
 | `bun run test:portability` | Platform-safe unit and integration suite used on Linux, macOS, and Windows |
-| `bun run test:coverage` | Local source coverage with global >90% and per-file line coverage >80% |
+| `bun run test:coverage` | Strict coverage for an already-provisioned hosted-test environment; fails early instead of auditing skipped hosted code |
 | `MURMUR_VERIFY_COVERAGE=1 bash scripts/verify-hosted-postgres.sh` | Authoritative PostgreSQL 17, RLS, upgrade, and hosted coverage gate |
 | `bun run build` | Bundles the stdio MCP entry point |
 | `bun run build:http` | Bundles the hosted HTTP entry point |

@@ -74,9 +74,14 @@ For a repository checkout:
 ```bash
 bun install --frozen-lockfile
 bun run verify
+bun run test
 bun run test:portability
-bun run test:coverage
 ```
+
+Strict coverage includes the hosted control plane and PostgreSQL adapters. Run
+`MURMUR_VERIFY_COVERAGE=1 bash scripts/verify-hosted-postgres.sh` against disposable PostgreSQL 17;
+the direct `bun run test:coverage` command fails closed unless that verifier has supplied the full
+hosted-test environment.
 
 Committed project configurations live in `.mcp.json` and
 `.codex/config.toml`. They authenticate with `MURMUR_API_TOKEN` and contain no

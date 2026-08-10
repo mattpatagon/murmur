@@ -13,8 +13,9 @@ dependency ranges or packages published in the previous 72 hours.
    every new transitive package has cleared `bunfig.toml`'s 259,200-second release-age quarantine.
 4. Search for changed APIs, defaults, environment variables, generated output, and compatibility
    constraints. Update code and documentation explicitly; do not hide changes behind assertions.
-5. Run `bun run verify`, `bun run test:portability`, `bun run test:coverage`, both builds, and the
-   hosted PostgreSQL gate for runtime, database, MCP, HTTP, or telemetry dependencies.
+5. Run `bun run verify`, `bun run test`, `bun run test:portability`, both builds, and the hosted
+   PostgreSQL coverage gate for runtime, database, MCP, HTTP, or telemetry dependencies. Direct
+   `bun run test:coverage` is only valid after the hosted-test environment is provisioned.
 6. Record user-visible or operational impact under `[Unreleased]` in `CHANGELOG.md`.
 
 The dependency policy script rejects `^`, `~`, inequality ranges, tags, aliases, workspace links,

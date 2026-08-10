@@ -9,11 +9,11 @@
 ## Verification
 
 - [ ] `bun run verify`
+- [ ] `bun run test`
 - [ ] `bun run test:portability`
-- [ ] `bun run test:coverage`
 - [ ] `bun run build`
 - [ ] `bun run build:http`
-- [ ] Hosted PostgreSQL/RLS/upgrade gate, or not applicable with reason below
+- [ ] Hosted PostgreSQL/RLS/upgrade/coverage gate, or not applicable with reason below
 - [ ] New behavior and failure paths have regression tests
 
 Commands and results:

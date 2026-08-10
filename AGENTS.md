@@ -34,10 +34,12 @@ Run `bun run verify` before requesting review. It enforces:
   72-hour minimum dependency release age;
 - deterministic formatting.
 
-Run `bun run test:coverage` for local source coverage. The authoritative hosted gate is
-`bash scripts/verify-hosted-postgres.sh` with `MURMUR_VERIFY_COVERAGE=1`; every metric must exceed
-90%, every included source file's line coverage must exceed 80%, and no source file may disappear
-from the report.
+Run `bun run test` for the environment-independent contributor suite. Strict coverage includes the
+hosted control plane and PostgreSQL adapters, so `bun run test:coverage` deliberately refuses to run
+without its provisioned hosted-test environment. The authoritative gate is
+`MURMUR_VERIFY_COVERAGE=1 bash scripts/verify-hosted-postgres.sh`; every metric must exceed 90%,
+every included source file's line coverage must exceed 80%, and no source file may disappear from
+the report.
 Run `bun run test:portability` when changing paths, configuration, storage, entry points, or HTTP
 behavior. See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete command table.
 

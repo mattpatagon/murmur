@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { expect, test } from "bun:test";
 import { z } from "zod";
 
+import { validateHostedCoverageEnvironment } from "../scripts/require-hosted-coverage.js";
 import { validateCrossPlatformTestEnvironment } from "../scripts/require-cross-platform-test.js";
 
 const projectRoot: string = resolve(".");
@@ -41,6 +42,10 @@ const PackageManifestSchema: z.ZodType<{
     readonly "murmur-mcp": string;
   };
   readonly engines: { readonly bun: string };
+  readonly scripts: {
+    readonly test: string;
+    readonly "test:coverage": string;
+  };
 }> = z
   .object({
     bin: z.strictObject({
@@ -49,6 +54,12 @@ const PackageManifestSchema: z.ZodType<{
       "murmur-mcp": z.string(),
     }),
     engines: z.strictObject({ bun: z.string() }),
+    scripts: z
+      .object({
+        test: z.string(),
+        "test:coverage": z.string(),
+      })
+      .loose(),
   })
   .loose();
 
@@ -98,6 +109,8 @@ test("the package exposes a location-independent MCP executable", (): void => {
   expect(manifest.bin["murmur-hook"]).toBe("./src/hook.ts");
   expect(manifest.bin["murmur-mcp"]).toBe("./src/server.ts");
   expect(manifest.engines.bun).toBe(">=1.3.11");
+  expect(manifest.scripts.test).toBe("bun run verify && bun test");
+  expect(manifest.scripts["test:coverage"]).toContain("require-hosted-coverage.ts");
 });
 
 test("CI enforces the portable contract on Linux, macOS, and Windows", (): void => {
@@ -135,5 +148,34 @@ test("the Linux-container command cannot silently skip its required environment"
       { MURMUR_TEST_DATABASE_URL: "postgresql://database.example/murmur" },
       "/usr/bin/docker",
     ),
+  ).not.toThrow();
+});
+
+test("strict coverage cannot silently skip its hosted PostgreSQL environment", (): void => {
+  expect((): void => validateHostedCoverageEnvironment({})).toThrow(
+    "MURMUR_TEST_APP_DATABASE_URL is required",
+  );
+  expect((): void =>
+    validateHostedCoverageEnvironment({
+      MURMUR_TEST_APP_DATABASE_URL: "sqlite:///tmp/murmur.db",
+    }),
+  ).toThrow("must use postgres: or postgresql:");
+  expect((): void =>
+    validateHostedCoverageEnvironment({
+      MURMUR_TEST_APP_DATABASE_URL: "postgresql://database.example/murmur",
+    }),
+  ).toThrow("MURMUR_TEST_ADMIN_DATABASE_URL is required");
+  expect((): void =>
+    validateHostedCoverageEnvironment({
+      MURMUR_TEST_ADMIN_DATABASE_URL: "postgresql://database.example/postgres",
+      MURMUR_TEST_APP_DATABASE_URL: "postgresql://database.example/murmur",
+    }),
+  ).toThrow("MURMUR_TEST_BOOTSTRAP_LEGACY_TOKEN is required");
+  expect((): void =>
+    validateHostedCoverageEnvironment({
+      MURMUR_TEST_ADMIN_DATABASE_URL: "postgresql://database.example/postgres",
+      MURMUR_TEST_APP_DATABASE_URL: "postgresql://database.example/murmur",
+      MURMUR_TEST_BOOTSTRAP_LEGACY_TOKEN: "synthetic-test-token",
+    }),
   ).not.toThrow();
 });
