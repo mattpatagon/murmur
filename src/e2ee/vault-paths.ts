@@ -1,6 +1,6 @@
 import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
-import { dirname } from "node:path";
+import { posix, win32 } from "node:path";
 import process from "node:process";
 
 import {
@@ -40,7 +40,7 @@ export function defaultE2eeVaultPath(
 
 export function prepareVaultDirectory(path: string, platform: NodeJS.Platform): void {
   if (path === ":memory:") return;
-  const directory: string = dirname(path);
+  const directory: string = vaultDirectoryPath(path, platform);
   mkdirSync(directory, { mode: 0o700, recursive: true });
   if (platform === "win32") {
     runIcacls(windowsVaultDirectoryAclArguments(directory));
@@ -48,6 +48,16 @@ export function prepareVaultDirectory(path: string, platform: NodeJS.Platform): 
     return;
   }
   chmodSync(directory, 0o700);
+}
+
+export function vaultDirectoryPath(path: string, platform: NodeJS.Platform): string {
+  const pathApi: typeof posix = platform === "win32" ? win32 : posix;
+  if (!pathApi.isAbsolute(path)) throw new Error("The E2E vault path must be absolute");
+  const directory: string = pathApi.dirname(path);
+  if (directory === pathApi.parse(path).root) {
+    throw new Error("The E2E vault must use a dedicated non-root directory");
+  }
+  return directory;
 }
 
 export function windowsVaultAclArguments(

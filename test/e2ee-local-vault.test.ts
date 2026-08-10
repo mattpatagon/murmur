@@ -17,6 +17,7 @@ import type {
 } from "../src/e2ee/local-vault-rows.js";
 import {
   defaultE2eeVaultPath,
+  vaultDirectoryPath,
   windowsVaultAclArguments,
   windowsVaultDirectoryAclArguments,
 } from "../src/e2ee/vault-paths.js";
@@ -47,6 +48,14 @@ test("derives portable user-scoped vault paths", (): void => {
   );
   expect(defaultE2eeVaultPath({ LOCALAPPDATA: "C:\\Users\\alice\\AppData\\Local" }, "win32")).toBe(
     "C:\\Users\\alice\\AppData\\Local\\murmur\\e2ee-vault.sqlite",
+  );
+  expect(vaultDirectoryPath("C:\\Users\\alice\\vault\\e2ee.sqlite", "win32")).toBe(
+    "C:\\Users\\alice\\vault",
+  );
+  expect(vaultDirectoryPath("/home/alice/vault/e2ee.sqlite", "linux")).toBe("/home/alice/vault");
+  expect((): string => vaultDirectoryPath("relative.sqlite", "linux")).toThrow("must be absolute");
+  expect((): string => vaultDirectoryPath("/vault.sqlite", "linux")).toThrow(
+    "dedicated non-root directory",
   );
   expect(
     windowsVaultAclArguments("C:\\vault.sqlite", {
