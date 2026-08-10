@@ -6,9 +6,9 @@ All notable changes to Murmur are documented in this file.
 
 ### Added
 
-- Add strict source coverage, per-file line coverage, 500-line, dependency pinning, ELv2 metadata, and 72-hour package quarantine gates.
+- Add strict source coverage, per-file line coverage, 500-line, exact dependency, canonical ELv2 license, synchronized Bun pin, and 72-hour package quarantine gates.
 - Add structured redacted request-completion logs and optional bounded OTLP HTTP/protobuf tracing with server-owned correlation.
-- Add Linux, macOS, and Windows verification, portable tests, and production-entry-point build coverage.
+- Add Linux, macOS, and Windows verification, portable tests, production-entry-point build coverage, and a required host-to-Linux-container MCP test.
 - Add contributor, security, support, architecture, observability, platform, upgrade, agent, pull-request, and issue documentation.
 
 ### Changed
@@ -16,6 +16,11 @@ All notable changes to Murmur are documented in this file.
 - Split storage, hosted control-plane, MCP, HTTP admission, lifecycle, deployment, and integration-test responsibilities into focused modules under 500 lines.
 - Promote all Biome warnings to failures and enable additional security, correctness, performance, and mutation-safety rules.
 - Make path discovery, configuration writes, coverage paths, package entry points, and test harnesses deterministic across operating systems.
+- Classify startup configuration failures with stable, safe operational error classes instead of generic exception names or rejected values.
+
+### Fixed
+
+- Resolve concurrent cross-process SQLite sends through the unique-key winner so identical retries return the stored message and conflicting retries return `IdempotencyConflictError` instead of leaking a raw constraint failure.
 
 ### Security
 
