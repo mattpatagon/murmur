@@ -15,6 +15,7 @@ import {
   type InboxSummary,
 } from "../src/hook.js";
 import { startHttpServer, type MurmurHttpServer } from "../src/http-server.js";
+import { defaultHookCacheDirectory } from "../src/platform-paths.js";
 import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
 import {
   AgentClient,
@@ -53,6 +54,30 @@ test("derives a stable agent ID from machine, client, and workspace", (): void =
   expect(first.branch).toBe("feature/broadcast-hook");
   expect(first.repository).toBe("mattpatagon/murmur");
   expect(claude.agentId).not.toBe(first.agentId);
+});
+
+test("resolves hook cache roots consistently across operating systems", (): void => {
+  const expectedWindowsCachePath: string =
+    // biome-ignore lint/security/noSecrets: This is a synthetic Windows path, not a credential.
+    "C:\\Users\\test\\AppData\\Local\\murmur\\hooks";
+  expect(defaultHookCacheDirectory({ XDG_CACHE_HOME: "/var/cache/test" }, "linux")).toBe(
+    "/var/cache/test/murmur/hooks",
+  );
+  expect(
+    defaultHookCacheDirectory({ LOCALAPPDATA: "C:\\Users\\test\\AppData\\Local" }, "win32"),
+  ).toBe(expectedWindowsCachePath);
+  expect(defaultHookCacheDirectory({ USERPROFILE: "C:\\Users\\test" }, "win32")).toBe(
+    expectedWindowsCachePath,
+  );
+  expect(defaultHookCacheDirectory({ HOME: "/home/test" }, "linux")).toBe(
+    "/home/test/.cache/murmur/hooks",
+  );
+  expect(
+    defaultHookCacheDirectory(
+      { LOCALAPPDATA: "", USERPROFILE: "C:\\Users\\test", XDG_CACHE_HOME: " " },
+      "win32",
+    ),
+  ).toBe(expectedWindowsCachePath);
 });
 
 test("builds metadata-only notification output and a Claude terminal signal", (): void => {
@@ -179,6 +204,7 @@ test("checks a real Streamable HTTP Murmur inbox", async (): Promise<void> => {
     MURMUR_API_TOKEN: token,
     MURMUR_DB_PATH: databasePath,
     MURMUR_HTTP_HOST: "127.0.0.1",
+    MURMUR_LOG_LEVEL: "off",
     PORT: "0",
   });
   try {

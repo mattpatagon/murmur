@@ -11,6 +11,9 @@ import {
   type JsonObject,
 } from "../src/domain/value-objects.js";
 import {
+  ConflictingDatabaseTlsConfigurationError,
+  DatabaseCertificateAuthorityReadError,
+  InvalidDatabaseTlsModeError,
   postgresSslOptions,
   postgresTlsConfiguration,
   type PostgresTlsConfiguration,
@@ -48,7 +51,9 @@ test("production adoption rejects a legacy token that strict auth cannot parse",
   const exitCode: number = await child.exited;
   const stderr: string = await new Response(child.stderr).text();
   expect(exitCode).not.toBe(0);
-  expect(stderr).toContain("strict authentication does not accept its format");
+  expect(stderr).toContain('"context":"Murmur production bootstrap failed"');
+  expect(stderr).toContain('"error_class":"LegacyTokenFormatError"');
+  expect(stderr).not.toContain("legacy-token-with-an-unsupported-wire-format");
 });
 
 test("operator token parsing preserves base64url key identifiers", (): void => {
@@ -122,7 +127,7 @@ test("database TLS verifies peers unless insecure mode is explicit", (): void =>
   expect(
     (): PostgresTlsConfiguration =>
       postgresTlsConfiguration({ MURMUR_DATABASE_TLS_INSECURE: "yes" }),
-  ).toThrow("must be 0 or 1");
+  ).toThrow(InvalidDatabaseTlsModeError);
   expect(
     postgresTlsConfiguration({ MURMUR_DATABASE_CA_PATH: "", MURMUR_DATABASE_TLS_INSECURE: "1" }),
   ).toEqual({ mode: "insecure" });
@@ -132,7 +137,11 @@ test("database TLS verifies peers unless insecure mode is explicit", (): void =>
         MURMUR_DATABASE_CA_PATH: "/tmp/not-read-because-conflict.pem",
         MURMUR_DATABASE_TLS_INSECURE: "1",
       }),
-  ).toThrow("cannot be combined");
+  ).toThrow(ConflictingDatabaseTlsConfigurationError);
+  expect(
+    (): PostgresTlsConfiguration =>
+      postgresTlsConfiguration({ MURMUR_DATABASE_CA_PATH: "/definitely/missing/murmur-ca.pem" }),
+  ).toThrow(DatabaseCertificateAuthorityReadError);
 
   expect(
     postgresSslOptions(databaseUrl("database.example.com"), {

@@ -2,6 +2,31 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.5.0.0] - 2026-08-10
+
+### Added
+
+- Catch quality regressions before review with strict source and per-file coverage, a 500-line cap, exact dependency checks, canonical ELv2 license verification, synchronized Bun pins, and a 72-hour package quarantine.
+- Diagnose hosted requests through one redacted completion event and optional bounded OTLP HTTP/protobuf tracing with server-owned correlation.
+- Verify Linux, macOS, and Windows behavior in CI through portable tests, production-entry-point builds, and a required host-to-Linux-container MCP test.
+- Find dedicated contributor and operator guides for security, support, architecture, observability, platform support, upgrades, agent rules, pull requests, and issue reporting.
+
+### Changed
+
+- Keep storage, hosted control-plane, MCP, HTTP admission, lifecycle, deployment, and integration-test responsibilities in focused modules under 500 lines.
+- Treat every Biome warning as a failure and enforce additional security, correctness, performance, and mutation-safety rules.
+- Run path discovery, configuration writes, coverage, package entry points, and test harnesses deterministically across operating systems.
+- Diagnose startup configuration failures through stable, safe operational error classes instead of generic exception names or rejected values.
+
+### Fixed
+
+- Retry concurrent cross-process SQLite sends safely: identical retries return the stored winner, while conflicting retries return `IdempotencyConflictError` instead of leaking a raw constraint failure.
+
+### Security
+
+- Correlate authentication, admission, capacity, rate, and session outcomes without recording hosted token formats, database URLs, sessions, message bodies, or exception text.
+- Start each request with a server-owned root span, preventing clients from forging audit correlation or remote sampling decisions through untrusted inbound trace context.
+
 ## [0.4.4.0] - 2026-08-10
 
 ### Added

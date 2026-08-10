@@ -1,0 +1,372 @@
+import type { Tool, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
+
+import {
+  ACTIVE_AGENT_WINDOW_MINUTES,
+  BroadcastMessageInputSchema,
+  BroadcastMessageOutputSchema,
+  GetMessagesInputSchema,
+  InboxOutputSchema,
+  ListAgentsInputSchema,
+  ListAgentsOutputSchema,
+  MarkMessagesReadInputSchema,
+  MarkMessagesReadOutputSchema,
+  RegisterAgentInputSchema,
+  RegisterAgentOutputSchema,
+  SendMessageInputSchema,
+  SendMessageOutputSchema,
+  WaitForMessagesInputSchema,
+  WaitForMessagesOutputSchema,
+} from "../domain/contracts.js";
+import {
+  BootstrapOperatorInputSchema,
+  CreateOperatorTokenInputSchema,
+  CreateTenantInputSchema,
+  CreateTenantOutputSchema,
+  CreateTokenInputSchema,
+  IssuedOperatorTokenOutputSchema,
+  IssuedTokenOutputSchema,
+  ListAdminAuditInputSchema,
+  ListAdminAuditOutputSchema,
+  ListOperatorTokensInputSchema,
+  ListOperatorTokensOutputSchema,
+  ListTenantsInputSchema,
+  ListTenantsOutputSchema,
+  ListTokensInputSchema,
+  ListTokensOutputSchema,
+  MintTenantAdminTokenInputSchema,
+  RevokeTokenInputSchema,
+  RevokeTokenOutputSchema,
+  TenantIdInputSchema,
+  TenantStatusOutputSchema,
+} from "../hosted/contracts.js";
+import type { HostedPrincipal } from "../hosted/control-plane.js";
+
+export type ToolExposure = {
+  readonly bootstrapEnabled: boolean;
+  readonly legacyAdoptionEnabled: boolean;
+  readonly principal: HostedPrincipal | null;
+  readonly tenantOnboardingEnabled: boolean;
+};
+
+function toolDefinition<Input, Output>(
+  name: string,
+  title: string,
+  description: string,
+  inputSchema: z.ZodType<Input>,
+  outputSchema: z.ZodType<Output>,
+  annotations: ToolAnnotations,
+): Tool {
+  const generatedInput: unknown = z.toJSONSchema(inputSchema);
+  const generatedOutput: unknown = z.toJSONSchema(outputSchema);
+  const validatedInput: Tool["inputSchema"] = ToolSchema.shape.inputSchema.parse(generatedInput);
+  const validatedOutput: NonNullable<Tool["outputSchema"]> = ToolSchema.shape.outputSchema
+    .unwrap()
+    .parse(generatedOutput);
+  return {
+    annotations,
+    description,
+    inputSchema: validatedInput,
+    name,
+    outputSchema: validatedOutput,
+    title,
+  };
+}
+
+function dataTools(): Tool[] {
+  return [
+    toolDefinition(
+      "register_agent",
+      "Register agent",
+      "Register or refresh an agent identity before sending or receiving messages.",
+      RegisterAgentInputSchema,
+      RegisterAgentOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: false,
+        title: "Register agent",
+      },
+    ),
+    toolDefinition(
+      "list_agents",
+      "List agents",
+      "List registered agents that can participate in Murmur conversations.",
+      ListAgentsInputSchema,
+      ListAgentsOutputSchema,
+      { destructiveHint: false, idempotentHint: true, readOnlyHint: true, title: "List agents" },
+    ),
+    toolDefinition(
+      "send_message",
+      "Send agent message",
+      "Persist a message in another agent's inbox and trigger its subscribed MCP resource update. Repository, branch, and client context are filled from the call or launching agent; all three are required.",
+      SendMessageInputSchema,
+      SendMessageOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: false,
+        readOnlyHint: false,
+        title: "Send agent message",
+      },
+    ),
+    toolDefinition(
+      "broadcast_message",
+      "Broadcast agent message",
+      `Persist one durable inbox delivery for every agent refreshed in the last ${ACTIVE_AGENT_WINDOW_MINUTES} minutes that matches the optional audience filters. Repository and machine filters combine with AND; omit both to broadcast globally. The sender is excluded, and idempotent retries preserve the original recipient snapshot.`,
+      BroadcastMessageInputSchema,
+      BroadcastMessageOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: false,
+        readOnlyHint: false,
+        title: "Broadcast agent message",
+      },
+    ),
+    toolDefinition(
+      "get_messages",
+      "Read agent inbox",
+      "Read an agent's durable inbox. Reading does not mark messages as read.",
+      GetMessagesInputSchema,
+      InboxOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: true,
+        title: "Read agent inbox",
+      },
+    ),
+    toolDefinition(
+      "wait_for_messages",
+      "Wait for agent messages",
+      "Compatibility fallback for hosts that do not surface resource subscriptions. Wait for inbox messages for up to 25 seconds.",
+      WaitForMessagesInputSchema,
+      WaitForMessagesOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: true,
+        title: "Wait for agent messages",
+      },
+    ),
+    toolDefinition(
+      "mark_messages_read",
+      "Mark messages read",
+      "Mark specific messages as read, only when they belong to the supplied recipient agent.",
+      MarkMessagesReadInputSchema,
+      MarkMessagesReadOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: false,
+        title: "Mark messages read",
+      },
+    ),
+  ];
+}
+
+function tenantAdminTools(): Tool[] {
+  return [
+    toolDefinition(
+      "create_access_token",
+      "Create tenant access token",
+      "Create an agent or tenant-administrator token for the authenticated tenant. The secret is returned exactly once; store it securely.",
+      CreateTokenInputSchema,
+      IssuedTokenOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: false,
+        readOnlyHint: false,
+        title: "Create tenant access token",
+      },
+    ),
+    toolDefinition(
+      "list_access_tokens",
+      "List tenant access tokens",
+      "List one cursor-paginated page of token identifiers and lifecycle timestamps for the authenticated tenant. Token secrets are never returned.",
+      ListTokensInputSchema,
+      ListTokensOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: true,
+        title: "List tenant access tokens",
+      },
+    ),
+    toolDefinition(
+      "revoke_access_token",
+      "Revoke tenant access token",
+      "Immediately revoke one access token in the authenticated tenant and close its live MCP sessions.",
+      RevokeTokenInputSchema,
+      RevokeTokenOutputSchema,
+      {
+        destructiveHint: true,
+        idempotentHint: true,
+        readOnlyHint: false,
+        title: "Revoke tenant access token",
+      },
+    ),
+  ];
+}
+
+function bootstrapTools(): Tool[] {
+  return [
+    toolDefinition(
+      "bootstrap_operator",
+      "Bootstrap hosted operator",
+      "One-time hosted bootstrap. Install the caller-generated first operator credential and permanently close the bootstrap gate. Retain the secret before calling so an ambiguous response cannot cause lockout.",
+      BootstrapOperatorInputSchema,
+      IssuedOperatorTokenOutputSchema,
+      {
+        destructiveHint: true,
+        idempotentHint: false,
+        readOnlyHint: false,
+        title: "Bootstrap hosted operator",
+      },
+    ),
+  ];
+}
+
+function operatorTools(exposure: ToolExposure): Tool[] {
+  const tools: Tool[] = [
+    toolDefinition(
+      "adopt_legacy_founding_token",
+      "Adopt founding tenant token",
+      "One-time transition: adopt the configured legacy bearer as a database-backed administrator token for the founding tenant before strict authentication is enabled.",
+      z.strictObject({}),
+      TenantStatusOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: false,
+        title: "Adopt founding tenant token",
+      },
+    ),
+    toolDefinition(
+      "create_operator_token",
+      "Create operator token",
+      "Create a named hosted-operator credential for rotation or another authorized operator. The secret is returned exactly once.",
+      CreateOperatorTokenInputSchema,
+      IssuedOperatorTokenOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: false,
+        readOnlyHint: false,
+        title: "Create operator token",
+      },
+    ),
+    toolDefinition(
+      "list_operator_tokens",
+      "List operator tokens",
+      "List one cursor-paginated page of operator credential identifiers and lifecycle timestamps. Token secrets are never returned.",
+      ListOperatorTokensInputSchema,
+      ListOperatorTokensOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: true,
+        title: "List operator tokens",
+      },
+    ),
+    toolDefinition(
+      "revoke_operator_token",
+      "Revoke operator token",
+      "Revoke one operator credential and close its live sessions. The last active operator credential cannot be revoked.",
+      RevokeTokenInputSchema,
+      RevokeTokenOutputSchema,
+      {
+        destructiveHint: true,
+        idempotentHint: true,
+        readOnlyHint: false,
+        title: "Revoke operator token",
+      },
+    ),
+    toolDefinition(
+      "list_admin_audit",
+      "List administration audit",
+      "Read the append-only audit trail for hosted operator actions. Secrets and credential hashes are never recorded.",
+      ListAdminAuditInputSchema,
+      ListAdminAuditOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: true,
+        title: "List administration audit",
+      },
+    ),
+    toolDefinition(
+      "create_tenant",
+      "Create tenant",
+      "Create an isolated tenant and its first tenant-administrator token. The token secret is returned exactly once.",
+      CreateTenantInputSchema,
+      CreateTenantOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: false,
+        readOnlyHint: false,
+        title: "Create tenant",
+      },
+    ),
+    toolDefinition(
+      "list_tenants",
+      "List tenants",
+      "List one cursor-paginated page of hosted tenants and their active or suspended status.",
+      ListTenantsInputSchema,
+      ListTenantsOutputSchema,
+      { destructiveHint: false, idempotentHint: true, readOnlyHint: true, title: "List tenants" },
+    ),
+    toolDefinition(
+      "mint_tenant_admin_token",
+      "Mint tenant administrator token",
+      "Create a tenant-administrator token for one active tenant. The token secret is returned exactly once.",
+      MintTenantAdminTokenInputSchema,
+      IssuedTokenOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: false,
+        readOnlyHint: false,
+        title: "Mint tenant administrator token",
+      },
+    ),
+    toolDefinition(
+      "suspend_tenant",
+      "Suspend tenant",
+      "Suspend a tenant so all of its access tokens fail authentication immediately.",
+      TenantIdInputSchema,
+      TenantStatusOutputSchema,
+      { destructiveHint: true, idempotentHint: true, readOnlyHint: false, title: "Suspend tenant" },
+    ),
+    toolDefinition(
+      "restore_tenant",
+      "Restore tenant",
+      "Restore a suspended tenant so its unexpired, unrevoked tokens authenticate again.",
+      TenantIdInputSchema,
+      TenantStatusOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: false,
+        title: "Restore tenant",
+      },
+    ),
+  ];
+  return tools.filter((tool: Tool): boolean => {
+    if (!exposure.tenantOnboardingEnabled && tool.name === "create_tenant") return false;
+    if (!exposure.legacyAdoptionEnabled && tool.name === "adopt_legacy_founding_token")
+      return false;
+    return true;
+  });
+}
+
+export function toolsForPrincipal(exposure: ToolExposure): Tool[] {
+  const principal: HostedPrincipal | null = exposure.principal;
+  if (principal !== null && principal.kind === "bootstrap") {
+    return exposure.bootstrapEnabled ? bootstrapTools() : [];
+  }
+  if (principal !== null && principal.kind === "operator") return operatorTools(exposure);
+  const tools: Tool[] = dataTools();
+  if (principal !== null && principal.kind === "tenant" && principal.role === "tenant_admin") {
+    tools.push(...tenantAdminTools());
+  }
+  return tools;
+}

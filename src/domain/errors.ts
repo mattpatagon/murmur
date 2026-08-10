@@ -12,6 +12,13 @@ export class IdempotencyConflictError extends Error {
   }
 }
 
+export class IdempotencyWinnerMissingError extends Error {
+  public constructor() {
+    super("Idempotent message conflict had no stored winner");
+    this.name = "IdempotencyWinnerMissingError";
+  }
+}
+
 export class StorageCorruptionError extends Error {
   public constructor(entity: string, cause: unknown) {
     super(`Stored ${entity} failed runtime validation`, { cause });
