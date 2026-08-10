@@ -46,6 +46,7 @@ export type VerifiedClaim = {
 function availablePrekeys(
   vault: LocalE2eeVault,
   agentId: string,
+  agentSigningKeyId: string,
   prekeyClass: "fallback" | "one_time",
   now: Instant,
 ): readonly StoredPrekey[] {
@@ -54,7 +55,9 @@ function availablePrekeys(
     .listPrekeys(agentId, prekeyClass)
     .filter(
       (prekey: StoredPrekey): boolean =>
-        prekey.privateKey !== null && Date.parse(prekey.certificate.expiresAt) > nowMillis,
+        prekey.privateKey !== null &&
+        prekey.certificate.agentSigningKeyId === agentSigningKeyId &&
+        Date.parse(prekey.certificate.expiresAt) > nowMillis,
     );
 }
 
@@ -87,7 +90,13 @@ export async function publishLocalIdentity(
     now.toISOString(),
     now.addDays(AGENT_KEY_DAYS).toISOString(),
   );
-  let fallbackKeys: readonly StoredPrekey[] = availablePrekeys(vault, agentId, "fallback", now);
+  let fallbackKeys: readonly StoredPrekey[] = availablePrekeys(
+    vault,
+    agentId,
+    agent.certificate.signingKeyId,
+    "fallback",
+    now,
+  );
   if (fallbackKeys.length === 0) {
     fallbackKeys = await vault.keys.replenishPrekeys(
       agentId,
@@ -97,7 +106,13 @@ export async function publishLocalIdentity(
       now.addDays(PREKEY_DAYS).toISOString(),
     );
   }
-  let oneTimePrekeys: readonly StoredPrekey[] = availablePrekeys(vault, agentId, "one_time", now);
+  let oneTimePrekeys: readonly StoredPrekey[] = availablePrekeys(
+    vault,
+    agentId,
+    agent.certificate.signingKeyId,
+    "one_time",
+    now,
+  );
   if (oneTimePrekeys.length < ONE_TIME_PREKEY_TARGET) {
     await vault.keys.replenishPrekeys(
       agentId,
@@ -106,7 +121,13 @@ export async function publishLocalIdentity(
       now.toISOString(),
       now.addDays(PREKEY_DAYS).toISOString(),
     );
-    oneTimePrekeys = availablePrekeys(vault, agentId, "one_time", now);
+    oneTimePrekeys = availablePrekeys(
+      vault,
+      agentId,
+      agent.certificate.signingKeyId,
+      "one_time",
+      now,
+    );
   }
   const fallback: StoredPrekey | undefined = fallbackKeys[0];
   const root: StoredRootKey | null = vault.keys.getRoot();

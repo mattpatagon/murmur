@@ -89,8 +89,7 @@ function validateRecipient(
   if (
     envelope.header.tenantId !== tenantId ||
     envelope.header.recipientId !== recipientId ||
-    envelope.header.recipientRootKeyId !== identity.root.rootKeyId ||
-    envelope.header.recipientAgentKeyId !== identity.agent.certificate.signingKeyId
+    envelope.header.recipientRootKeyId !== identity.root.rootKeyId
   ) {
     throw new Error("Encrypted message verification failed");
   }
@@ -190,6 +189,7 @@ async function decryptOne(
       prekey === null ||
       prekey.privateKey === null ||
       prekey.certificate.agentId !== recipientId ||
+      prekey.certificate.agentSigningKeyId !== envelope.header.recipientAgentKeyId ||
       prekey.certificate.prekeyClass !== envelope.header.recipientPrekeyClass
     ) {
       throw new Error("Encrypted message verification failed");

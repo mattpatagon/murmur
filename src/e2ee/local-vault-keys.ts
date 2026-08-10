@@ -96,7 +96,18 @@ export class LocalVaultKeys {
     expiresAt: string,
   ): Promise<StoredAgentKey> {
     const existing: StoredAgentKey | null = this.getAgent(agentId);
-    if (existing !== null) return existing;
+    const createdMillis: number = Date.parse(createdAt);
+    const expiresMillis: number = Date.parse(expiresAt);
+    if (
+      !Number.isFinite(createdMillis) ||
+      !Number.isFinite(expiresMillis) ||
+      expiresMillis <= createdMillis
+    ) {
+      throw new Error("Agent key validity window is invalid");
+    }
+    if (existing !== null && Date.parse(existing.certificate.expiresAt) > createdMillis) {
+      return existing;
+    }
     const root: StoredRootKey = await this.getOrCreateRoot(createdAt);
     const pair: SigningKeyPair = await createSigningKeyPair(null);
     const fields: AgentKeyCertificateFields = {
@@ -111,35 +122,70 @@ export class LocalVaultKeys {
       fields,
       root.privateKey,
     );
-    const statement: Statement<
-      unknown,
-      [string, string, string, Uint8Array, Uint8Array, string, string, Uint8Array]
-    > = this.#database.query(`
-      INSERT OR IGNORE INTO agent_keys(
-        agent_id, root_key_id, signing_key_id, public_key, private_key,
-        created_at, expires_at, certificate_signature
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const result: Changes = statement.run(
-      agentId,
-      fields.rootKeyId,
-      fields.signingKeyId,
-      pair.publicKey,
-      pair.privateKey,
-      createdAt,
-      expiresAt,
-      certificate.signature,
-    );
-    if (result.changes === 1) return { certificate, privateKey: pair.privateKey };
-    sodium.memzero(pair.privateKey);
-    const winner: StoredAgentKey | null = this.getAgent(agentId);
-    if (winner === null) throw new Error("E2E agent key creation lost its concurrent winner");
-    return winner;
+    this.#database.exec("BEGIN IMMEDIATE");
+    try {
+      const current: StoredAgentKey | null = this.getAgent(agentId);
+      if (current !== null && Date.parse(current.certificate.expiresAt) > createdMillis) {
+        this.#database.exec("COMMIT");
+        sodium.memzero(pair.privateKey);
+        return current;
+      }
+      let result: Changes;
+      if (current === null) {
+        const insert: Statement<
+          unknown,
+          [string, string, string, Uint8Array, Uint8Array, string, string, Uint8Array]
+        > = this.#database.query(`
+          INSERT INTO agent_keys(
+            agent_id, root_key_id, signing_key_id, public_key, private_key,
+            created_at, expires_at, certificate_signature
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        result = insert.run(
+          agentId,
+          fields.rootKeyId,
+          fields.signingKeyId,
+          pair.publicKey,
+          pair.privateKey,
+          createdAt,
+          expiresAt,
+          certificate.signature,
+        );
+      } else {
+        const rotate: Statement<
+          unknown,
+          [string, Uint8Array, Uint8Array, string, string, Uint8Array, string, string]
+        > = this.#database.query(`
+          UPDATE agent_keys SET
+            signing_key_id = ?, public_key = ?, private_key = ?,
+            created_at = ?, expires_at = ?, certificate_signature = ?
+          WHERE agent_id = ? AND signing_key_id = ?
+        `);
+        result = rotate.run(
+          fields.signingKeyId,
+          pair.publicKey,
+          pair.privateKey,
+          createdAt,
+          expiresAt,
+          certificate.signature,
+          agentId,
+          current.certificate.signingKeyId,
+        );
+      }
+      if (result.changes !== 1)
+        throw new Error("E2E agent key rotation lost its current generation");
+      this.#database.exec("COMMIT");
+      return { certificate, privateKey: pair.privateKey };
+    } catch (error: unknown) {
+      this.#database.exec("ROLLBACK");
+      sodium.memzero(pair.privateKey);
+      throw error;
+    }
   }
 
   public listPrekeys(agentId: string, prekeyClass: PrekeyClass): readonly StoredPrekey[] {
     const statement: Statement<unknown, [string, PrekeyClass]> = this.#database.query(`
-      SELECT p.agent_id, a.signing_key_id AS agent_signing_key_id,
+      SELECT p.agent_id, p.agent_signing_key_id,
              p.prekey_id, p.prekey_class, p.public_key, p.private_key,
              p.created_at, p.expires_at, p.consumed_at, p.certificate_signature
       FROM prekeys p
@@ -152,7 +198,7 @@ export class LocalVaultKeys {
 
   public getPrekey(prekeyIdValue: string): StoredPrekey | null {
     const statement: Statement<unknown, [string]> = this.#database.query(`
-      SELECT p.agent_id, a.signing_key_id AS agent_signing_key_id,
+      SELECT p.agent_id, p.agent_signing_key_id,
              p.prekey_id, p.prekey_class, p.public_key, p.private_key,
              p.created_at, p.expires_at, p.consumed_at, p.certificate_signature
       FROM prekeys p
@@ -196,12 +242,12 @@ export class LocalVaultKeys {
     try {
       const insert: Statement<
         unknown,
-        [string, string, PrekeyClass, Uint8Array, Uint8Array, string, string, Uint8Array]
+        [string, string, string, PrekeyClass, Uint8Array, Uint8Array, string, string, Uint8Array]
       > = this.#database.query(`
         INSERT INTO prekeys(
-          prekey_id, agent_id, prekey_class, public_key, private_key,
+          prekey_id, agent_id, agent_signing_key_id, prekey_class, public_key, private_key,
           created_at, expires_at, certificate_signature
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       generated.forEach((item: StoredPrekey): void => {
         const privateKey: Uint8Array | null = item.privateKey;
@@ -209,6 +255,7 @@ export class LocalVaultKeys {
         insert.run(
           item.certificate.prekeyId,
           agentId,
+          agent.certificate.signingKeyId,
           prekeyClass,
           item.certificate.prekeyPublicKey,
           privateKey,
@@ -226,6 +273,14 @@ export class LocalVaultKeys {
       });
       throw error;
     }
+  }
+
+  public purgeExpiredPrivatePrekeys(now: string): number {
+    const statement: Statement<unknown, [string]> = this.#database.query(`
+      UPDATE prekeys SET private_key = NULL
+      WHERE expires_at <= ? AND private_key IS NOT NULL
+    `);
+    return statement.run(now).changes;
   }
 
   public getPin(tenantId: string, agentId: string): PeerPin | null {

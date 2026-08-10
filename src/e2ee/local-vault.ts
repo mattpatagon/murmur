@@ -428,6 +428,7 @@ export class LocalE2eeVault {
 
   public purgeExpired(now: string): number {
     this.#ensureOpen();
+    this.keys.purgeExpiredPrivatePrekeys(now);
     const statement: Statement<unknown, [string]> = this.#database.query(
       "DELETE FROM decrypted_cache WHERE expires_at <= ?",
     );

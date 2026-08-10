@@ -124,6 +124,50 @@ test("persists certified agent keys, bounded prekeys, and strict peer pins", asy
   });
 });
 
+test("rotates expired agent keys while retaining prekey generation identity through expiry", async (): Promise<void> => {
+  await withTempDirectory(async (directory: string): Promise<void> => {
+    const vault: LocalE2eeVault = new LocalE2eeVault(join(directory, "vault.sqlite"), "linux");
+    try {
+      const first: StoredAgentKey = await vault.keys.getOrCreateAgent(
+        "alice",
+        "2026-08-10T17:00:00.000Z",
+        "2026-08-11T17:00:00.000Z",
+      );
+      const prekeys: readonly StoredPrekey[] = await vault.keys.replenishPrekeys(
+        "alice",
+        "fallback",
+        1,
+        "2026-08-10T17:00:00.000Z",
+        "2026-08-11T17:00:00.000Z",
+      );
+      const beforeExpiry: StoredAgentKey = await vault.keys.getOrCreateAgent(
+        "alice",
+        "2026-08-11T16:59:59.000Z",
+        "2026-11-09T16:59:59.000Z",
+      );
+      expect(beforeExpiry.certificate.signingKeyId).toBe(first.certificate.signingKeyId);
+      const rotated: StoredAgentKey = await vault.keys.getOrCreateAgent(
+        "alice",
+        "2026-08-11T17:00:00.000Z",
+        "2026-11-09T17:00:00.000Z",
+      );
+      expect(rotated.certificate.signingKeyId).not.toBe(first.certificate.signingKeyId);
+      const oldPrekey: StoredPrekey | undefined = prekeys[0];
+      if (oldPrekey === undefined) throw new Error("Expected old fallback prekey");
+      const retained: StoredPrekey | null = vault.keys.getPrekey(oldPrekey.certificate.prekeyId);
+      if (retained === null) throw new Error("Expected retained old fallback prekey");
+      expect(retained.certificate.agentSigningKeyId).toBe(first.certificate.signingKeyId);
+      expect(retained.privateKey).not.toBeNull();
+      expect(vault.keys.purgeExpiredPrivatePrekeys("2026-08-11T17:00:00.000Z")).toBe(1);
+      const purged: StoredPrekey | null = vault.keys.getPrekey(oldPrekey.certificate.prekeyId);
+      if (purged === null) throw new Error("Expected purged fallback prekey row");
+      expect(purged.privateKey).toBeNull();
+    } finally {
+      vault.close();
+    }
+  });
+});
+
 test("serializes each sender-recipient outbox and preserves exact retry bytes", async (): Promise<void> => {
   await withTempDirectory((directory: string): void => {
     const vault: LocalE2eeVault = new LocalE2eeVault(join(directory, "vault.sqlite"), "linux");
@@ -269,12 +313,50 @@ test("atomically caches plaintext, records replay state, and deletes a one-time 
   });
 });
 
+test("upgrades version-four prekeys with their original signing generation", async (): Promise<void> => {
+  await withTempDirectory(async (directory: string): Promise<void> => {
+    const path: string = join(directory, "upgrade.sqlite");
+    const original: LocalE2eeVault = new LocalE2eeVault(path, "linux");
+    const agent: StoredAgentKey = await original.keys.getOrCreateAgent(
+      "alice",
+      "2026-08-10T17:00:00.000Z",
+      "2026-11-08T17:00:00.000Z",
+    );
+    const prekeys: readonly StoredPrekey[] = await original.keys.replenishPrekeys(
+      "alice",
+      "one_time",
+      1,
+      "2026-08-10T17:00:00.000Z",
+      "2026-09-09T17:00:00.000Z",
+    );
+    original.close();
+    const prekey: StoredPrekey | undefined = prekeys[0];
+    if (prekey === undefined) throw new Error("Expected upgrade prekey");
+    const legacy: Database = new Database(path, { create: false, readwrite: true });
+    legacy.exec(`
+      DROP INDEX prekeys_signing_generation;
+      ALTER TABLE prekeys DROP COLUMN agent_signing_key_id;
+      PRAGMA user_version = 4;
+    `);
+    legacy.close(false);
+    const upgraded: LocalE2eeVault = new LocalE2eeVault(path, "linux");
+    try {
+      const restored: StoredPrekey | null = upgraded.keys.getPrekey(prekey.certificate.prekeyId);
+      if (restored === null) throw new Error("Expected upgraded prekey");
+      expect(restored.certificate.agentSigningKeyId).toBe(agent.certificate.signingKeyId);
+      expect(restored.privateKey).toEqual(prekey.privateKey);
+    } finally {
+      upgraded.close();
+    }
+  });
+});
+
 test("rejects a vault schema newer than the running binary", async (): Promise<void> => {
   await withTempDirectory((directory: string): void => {
     const path: string = join(directory, "future.sqlite");
     mkdirSync(directory, { recursive: true });
     const database: Database = new Database(path, { create: true, readwrite: true });
-    database.exec("PRAGMA user_version = 5");
+    database.exec("PRAGMA user_version = 6");
     database.close(false);
     expect((): LocalE2eeVault => new LocalE2eeVault(path, "linux")).toThrow("newer");
   });
