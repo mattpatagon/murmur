@@ -8,4 +8,6 @@ coverage/
 *.log
 .DS_Store
 .gstack/
+.context/
+*.tgz
 gha-creds-*.json

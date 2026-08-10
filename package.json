@@ -21,7 +21,7 @@
     "build:http": "bun build ./src/http-server.ts --target bun --outdir dist",
     "format": "biome format --write .",
     "format:check": "biome format .",
-    "lint": "biome lint . && bun run scripts/check-safety.ts",
+    "lint": "biome lint . && bun run scripts/check-safety.ts && bun run scripts/check-file-lines.ts",
     "start": "bun run src/server.ts",
     "start:http": "bun run src/http-server.ts",
     "test": "bun run verify && bun run test:coverage",
