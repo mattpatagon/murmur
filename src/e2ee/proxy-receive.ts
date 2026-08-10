@@ -7,7 +7,7 @@ import {
   MarkMessagesReadOutputSchema,
 } from "../domain/contracts.js";
 import type { Clock, Instant } from "../domain/value-objects.js";
-import { verifyAgentKeyCertificate } from "./certificates.js";
+import { verifyAgentKeyCertificate, verifyAgentKeyRevocation } from "./certificates.js";
 import { decryptEnvelope, verifyEnvelopeSignature } from "./envelope.js";
 import type { LocalE2eeVault } from "./local-vault.js";
 import type { CachedMessage, ExpectedPeerRoot, PeerPin, StoredPrekey } from "./local-vault-rows.js";
@@ -124,6 +124,14 @@ async function verifySender(
     envelope.header.senderId,
     new Date(now.toISOString()),
   );
+  for (const revocation of chain.agentKeyRevocations) {
+    await verifyAgentKeyRevocation(
+      revocation,
+      chain.rootPublicKey,
+      envelope.header.senderId,
+      new Date(now.toISOString()),
+    );
+  }
   let pin: PeerPin | null = vault.keys.getUsablePin(
     tenantId,
     envelope.header.senderId,

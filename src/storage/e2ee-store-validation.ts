@@ -1,6 +1,7 @@
 import { RETENTION_DAYS } from "../domain/contracts.js";
 import type {
   EncryptedEnvelopeDto,
+  PrekeyCertificateDto,
   PublicAgentKeyBundleDto,
   PublicAgentSigningChainDto,
 } from "../e2ee/wire-contracts.js";
@@ -13,7 +14,6 @@ import type {
   ClaimEncryptionPrekeyInput,
   ClaimEncryptionPrekeyOutput,
 } from "../e2ee/wire-tools.js";
-import type { PrekeyCertificateDto } from "../e2ee/wire-contracts.js";
 
 const AUTH_TAG_BYTES: number = 16;
 
@@ -48,6 +48,7 @@ export function senderChainFromBundle(bundleInput: unknown): PublicAgentSigningC
   const bundle: PublicAgentKeyBundleDto = PublicAgentKeyBundleDtoSchema.parse(bundleInput);
   return PublicAgentSigningChainDtoSchema.parse({
     agent_certificate: bundle.agent_certificate,
+    agent_key_revocations: bundle.agent_key_revocations,
     root_key_id: bundle.root_key_id,
     root_public_key: bundle.root_public_key,
   });

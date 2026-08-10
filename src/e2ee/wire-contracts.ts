@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { AgentKeyCertificate, PrekeyCertificate } from "./certificates.js";
+import type { AgentKeyCertificate, AgentKeyRevocation, PrekeyCertificate } from "./certificates.js";
 import {
   E2EE_CIPHER_SUITE,
   E2EE_PADDING_SCHEME,
@@ -8,6 +8,16 @@ import {
   type EncryptedEnvelope,
   type EnvelopeHeader,
 } from "./protocol.js";
+import {
+  type AgentKeyRevocationDto,
+  AgentKeyRevocationDtoSchema,
+  agentKeyRevocationToDto,
+  revocationsFromDto,
+  validateRevocationSet,
+} from "./wire-revocations.js";
+
+export type { AgentKeyRevocationDto } from "./wire-revocations.js";
+export { AgentKeyRevocationDtoSchema, agentKeyRevocationToDto } from "./wire-revocations.js";
 
 const KEY_BYTES: number = 32;
 const SIGNATURE_BYTES: number = 64;
@@ -57,6 +67,7 @@ export type PrekeyCertificateDto = {
 
 export type PublicAgentKeyBundleDto = {
   readonly agent_certificate: AgentKeyCertificateDto;
+  readonly agent_key_revocations?: readonly AgentKeyRevocationDto[] | undefined;
   readonly fallback_prekey: PrekeyCertificateDto;
   readonly one_time_prekeys: readonly PrekeyCertificateDto[];
   readonly root_key_id: string;
@@ -65,6 +76,7 @@ export type PublicAgentKeyBundleDto = {
 
 export type PublicAgentKeyBundle = {
   readonly agentCertificate: AgentKeyCertificate;
+  readonly agentKeyRevocations: readonly AgentKeyRevocation[];
   readonly fallbackPrekey: PrekeyCertificate;
   readonly oneTimePrekeys: readonly PrekeyCertificate[];
   readonly rootKeyId: string;
@@ -73,12 +85,14 @@ export type PublicAgentKeyBundle = {
 
 export type PublicAgentSigningChainDto = {
   readonly agent_certificate: AgentKeyCertificateDto;
+  readonly agent_key_revocations?: readonly AgentKeyRevocationDto[] | undefined;
   readonly root_key_id: string;
   readonly root_public_key: string;
 };
 
 export type PublicAgentSigningChain = {
   readonly agentCertificate: AgentKeyCertificate;
+  readonly agentKeyRevocations: readonly AgentKeyRevocation[];
   readonly rootKeyId: string;
   readonly rootPublicKey: Uint8Array;
 };
@@ -142,6 +156,7 @@ export const PrekeyCertificateDtoSchema: z.ZodType<PrekeyCertificateDto> = z.str
 export const PublicAgentKeyBundleDtoSchema: z.ZodType<PublicAgentKeyBundleDto> = z
   .strictObject({
     agent_certificate: AgentKeyCertificateDtoSchema,
+    agent_key_revocations: z.array(AgentKeyRevocationDtoSchema).max(100).optional(),
     fallback_prekey: PrekeyCertificateDtoSchema,
     one_time_prekeys: z.array(PrekeyCertificateDtoSchema).max(100),
     root_key_id: RootKeyIdSchema,
@@ -150,6 +165,8 @@ export const PublicAgentKeyBundleDtoSchema: z.ZodType<PublicAgentKeyBundleDto> =
   .superRefine((bundle: PublicAgentKeyBundleDto, context: z.core.$RefinementCtx): void => {
     const agentId: string = bundle.agent_certificate.agent_id;
     const agentKeyId: string = bundle.agent_certificate.signing_key_id;
+    const revocations: readonly AgentKeyRevocationDto[] =
+      bundle.agent_key_revocations === undefined ? [] : bundle.agent_key_revocations;
     if (bundle.root_key_id !== bundle.agent_certificate.root_key_id) {
       context.addIssue({ code: "custom", message: "Bundle root identifiers do not match" });
     }
@@ -177,10 +194,12 @@ export const PublicAgentKeyBundleDtoSchema: z.ZodType<PublicAgentKeyBundleDto> =
     ) {
       context.addIssue({ code: "custom", message: "Bundle one-time prekey has the wrong class" });
     }
+    validateRevocationSet(revocations, agentId, bundle.root_key_id, agentKeyId, context);
   });
 export const PublicAgentSigningChainDtoSchema: z.ZodType<PublicAgentSigningChainDto> = z
   .strictObject({
     agent_certificate: AgentKeyCertificateDtoSchema,
+    agent_key_revocations: z.array(AgentKeyRevocationDtoSchema).max(100).optional(),
     root_key_id: RootKeyIdSchema,
     root_public_key: Base64UrlSchema.length(43),
   })
@@ -188,6 +207,15 @@ export const PublicAgentSigningChainDtoSchema: z.ZodType<PublicAgentSigningChain
     if (chain.root_key_id !== chain.agent_certificate.root_key_id) {
       context.addIssue({ code: "custom", message: "Signing chain root identifiers do not match" });
     }
+    const revocations: readonly AgentKeyRevocationDto[] =
+      chain.agent_key_revocations === undefined ? [] : chain.agent_key_revocations;
+    validateRevocationSet(
+      revocations,
+      chain.agent_certificate.agent_id,
+      chain.root_key_id,
+      chain.agent_certificate.signing_key_id,
+      context,
+    );
   });
 const EnvelopeHeaderDtoSchema: z.ZodType<EnvelopeHeaderDto> = z
   .strictObject({
@@ -398,9 +426,11 @@ export function publicBundleToDto(
   agentCertificate: AgentKeyCertificate,
   fallbackPrekey: PrekeyCertificate,
   oneTimePrekeys: readonly PrekeyCertificate[],
+  agentKeyRevocations: readonly AgentKeyRevocation[] = [],
 ): PublicAgentKeyBundleDto {
   return {
     agent_certificate: agentCertificateToDto(agentCertificate),
+    agent_key_revocations: agentKeyRevocations.map(agentKeyRevocationToDto),
     fallback_prekey: prekeyCertificateToDto(fallbackPrekey),
     one_time_prekeys: oneTimePrekeys.map(prekeyCertificateToDto),
     root_key_id: agentCertificate.rootKeyId,
@@ -412,6 +442,7 @@ export function parsePublicBundleDto(input: unknown): PublicAgentKeyBundle {
   const dto: PublicAgentKeyBundleDto = PublicAgentKeyBundleDtoSchema.parse(input);
   return {
     agentCertificate: dtoToAgentCertificate(dto.agent_certificate),
+    agentKeyRevocations: revocationsFromDto(dto.agent_key_revocations),
     fallbackPrekey: dtoToPrekeyCertificate(dto.fallback_prekey),
     oneTimePrekeys: dto.one_time_prekeys.map(dtoToPrekeyCertificate),
     rootKeyId: dto.root_key_id,
@@ -422,9 +453,11 @@ export function parsePublicBundleDto(input: unknown): PublicAgentKeyBundle {
 export function signingChainToDto(
   rootPublicKey: Uint8Array,
   agentCertificate: AgentKeyCertificate,
+  agentKeyRevocations: readonly AgentKeyRevocation[] = [],
 ): PublicAgentSigningChainDto {
   return {
     agent_certificate: agentCertificateToDto(agentCertificate),
+    agent_key_revocations: agentKeyRevocations.map(agentKeyRevocationToDto),
     root_key_id: agentCertificate.rootKeyId,
     root_public_key: encodeBytes(rootPublicKey),
   };
@@ -434,6 +467,7 @@ export function parseSigningChainDto(input: unknown): PublicAgentSigningChain {
   const dto: PublicAgentSigningChainDto = PublicAgentSigningChainDtoSchema.parse(input);
   return {
     agentCertificate: dtoToAgentCertificate(dto.agent_certificate),
+    agentKeyRevocations: revocationsFromDto(dto.agent_key_revocations),
     rootKeyId: dto.root_key_id,
     rootPublicKey: decodeBytes(dto.root_public_key, KEY_BYTES, "Root public key"),
   };

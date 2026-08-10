@@ -10,14 +10,15 @@ import {
   localE2eeFingerprint,
   localE2eeStatus,
   replenishLocalPrekeys,
+  revokeLocalAgentKey,
   rotateLocalAgentKey,
   trustPeerFingerprint,
 } from "./local-commands.js";
+import { LocalE2eeVault } from "./local-vault.js";
 import type { StoredAgentKey } from "./local-vault-rows.js";
 import type { ActiveTenantBinding } from "./local-vault-settings.js";
-import { LocalE2eeVault } from "./local-vault.js";
-import { defaultE2eeVaultPath } from "./vault-paths.js";
 import { type OrganizationTrustPolicy, parseSerializedTrustPolicy } from "./trust-policy.js";
+import { defaultE2eeVaultPath } from "./vault-paths.js";
 
 const MAX_TRUST_FILE_BYTES: number = 1024 * 1024;
 
@@ -30,6 +31,7 @@ Usage:
   murmur e2ee trust --agent ID --fingerprint FULL
   murmur e2ee trust-file --path FILE [--issuer-fingerprint FULL]
   murmur e2ee rotate-agent-key [--agent ID]
+  murmur e2ee revoke-agent-key [--agent ID] --reason REASON
   murmur e2ee replenish [--agent ID]
   murmur e2ee export-public
 
@@ -198,6 +200,13 @@ async function execute(
       exactOptions(parsed.options, ["--agent"]);
       const agentId: string = selectedAgent(vault, parsed.options.get("--agent"));
       return json(await rotateLocalAgentKey(vault, agentId, now));
+    }
+    case "revoke-agent-key": {
+      exactOptions(parsed.options, ["--agent", "--reason"]);
+      const agentId: string = selectedAgent(vault, parsed.options.get("--agent"));
+      return json(
+        await revokeLocalAgentKey(vault, agentId, requiredOption(parsed.options, "--reason"), now),
+      );
     }
     case "replenish": {
       exactOptions(parsed.options, ["--agent"]);

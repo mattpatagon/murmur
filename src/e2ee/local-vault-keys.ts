@@ -1,10 +1,10 @@
 import type { Changes, Database, Statement } from "bun:sqlite";
 import sodium from "libsodium-wrappers";
 import { z } from "zod";
-
 import {
   type AgentKeyCertificate,
   type AgentKeyCertificateFields,
+  type AgentKeyRevocation,
   agentSigningKeyId,
   createAgentKeyCertificate,
   createBoxKeyPair,
@@ -15,36 +15,25 @@ import {
   prekeyId,
   rootKeyId,
 } from "./certificates.js";
+import { parseExpectedPeerRoot, peerPinRank } from "./local-vault-peer-validation.js";
 import {
+  isLocalAgentKeyRevoked,
+  listLocalAgentKeyRevocations,
+  revokeLocalCurrentAgentKey,
+} from "./local-vault-revocations.js";
+import {
+  type ExpectedPeerRoot,
   mapAgentKeyRow,
   mapExpectedPeerRootRow,
   mapPeerPinRow,
   mapPrekeyRow,
   mapRootKeyRow,
-  type ExpectedPeerRoot,
   type PeerPin,
   type StoredAgentKey,
   type StoredPrekey,
   type StoredRootKey,
 } from "./local-vault-rows.js";
 import type { BoxKeyPair, PrekeyClass, SigningKeyPair } from "./protocol.js";
-
-const ExpectedPeerRootSchema: z.ZodType<ExpectedPeerRoot> = z.strictObject({
-  agentId: z
-    .string()
-    .min(1)
-    .max(200)
-    .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
-  rootKeyId: z.string().regex(/^mrk_[A-Za-z0-9_-]{43}$/u),
-  tenantId: z.string().uuid(),
-  verifiedAt: z.iso.datetime({ offset: true }),
-});
-
-function pinRank(mode: PeerPin["verificationMode"]): number {
-  if (mode === "tofu") return 0;
-  if (mode === "strict") return 1;
-  return 2;
-}
 
 export class LocalVaultKeys {
   readonly #database: Database;
@@ -114,6 +103,10 @@ export class LocalVaultKeys {
     return agents;
   }
 
+  public listAgentKeyRevocations(agentId: string): readonly AgentKeyRevocation[] {
+    return listLocalAgentKeyRevocations(this.#database, agentId);
+  }
+
   public async getOrCreateAgent(
     agentId: string,
     createdAt: string,
@@ -134,8 +127,12 @@ export class LocalVaultKeys {
     ) {
       throw new Error("Agent key validity window is invalid");
     }
+    const revoked: boolean =
+      existing !== null &&
+      isLocalAgentKeyRevoked(this.#database, agentId, existing.certificate.signingKeyId);
+    const rotateRequired: boolean = forceRotation || revoked;
     if (
-      !forceRotation &&
+      !rotateRequired &&
       existing !== null &&
       Date.parse(existing.certificate.expiresAt) > minimumValidMillis
     ) {
@@ -159,13 +156,13 @@ export class LocalVaultKeys {
     try {
       const current: StoredAgentKey | null = this.getAgent(agentId);
       const concurrentRotationWon: boolean =
-        forceRotation &&
+        rotateRequired &&
         current !== null &&
         (existing === null ||
           current.certificate.signingKeyId !== existing.certificate.signingKeyId);
       if (
         concurrentRotationWon ||
-        (!forceRotation &&
+        (!rotateRequired &&
           current !== null &&
           Date.parse(current.certificate.expiresAt) > minimumValidMillis)
       ) {
@@ -225,6 +222,21 @@ export class LocalVaultKeys {
       sodium.memzero(pair.privateKey);
       throw error;
     }
+  }
+
+  public async revokeCurrentAgentKey(
+    agentId: string,
+    reason: string,
+    revokedAt: string,
+  ): Promise<AgentKeyRevocation> {
+    return await revokeLocalCurrentAgentKey(
+      this.#database,
+      agentId,
+      reason,
+      revokedAt,
+      this.getAgent(agentId),
+      this.getRoot(),
+    );
   }
 
   public listPrekeys(agentId: string, prekeyClass: PrekeyClass): readonly StoredPrekey[] {
@@ -366,7 +378,7 @@ export class LocalVaultKeys {
   }
 
   public expectPeerRoot(input: ExpectedPeerRoot): ExpectedPeerRoot {
-    const expected: ExpectedPeerRoot = ExpectedPeerRootSchema.parse(input);
+    const expected: ExpectedPeerRoot = parseExpectedPeerRoot(input);
     const existingPin: PeerPin | null = this.getPin(expected.tenantId, expected.agentId);
     if (existingPin !== null) {
       if (existingPin.rootKeyId !== expected.rootKeyId) {
@@ -437,7 +449,7 @@ export class LocalVaultKeys {
         ) {
           throw new Error("Peer root changed and requires an audited reset");
         }
-        if (pinRank(pin.verificationMode) < pinRank(existing.verificationMode)) {
+        if (peerPinRank(pin.verificationMode) < peerPinRank(existing.verificationMode)) {
           throw new Error("Peer verification mode cannot be downgraded");
         }
       }

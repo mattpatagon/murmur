@@ -4,6 +4,7 @@ import type { Instant } from "../domain/value-objects.js";
 import {
   type PrekeyCertificate,
   verifyAgentKeyCertificate,
+  verifyAgentKeyRevocation,
   verifyPrekeyCertificate,
 } from "./certificates.js";
 import type { LocalE2eeVault } from "./local-vault.js";
@@ -151,6 +152,7 @@ export async function publishLocalIdentity(
         agent.certificate,
         fallback.certificate,
         oneTimePrekeys.map((prekey: StoredPrekey): PrekeyCertificate => prekey.certificate),
+        vault.keys.listAgentKeyRevocations(agentId),
       ),
     }),
   );
@@ -213,6 +215,14 @@ export async function verifyClaimedPeer(
     expectedRecipientId,
     new Date(now.toISOString()),
   );
+  for (const revocation of recipient.agentKeyRevocations) {
+    await verifyAgentKeyRevocation(
+      revocation,
+      recipient.rootPublicKey,
+      expectedRecipientId,
+      new Date(now.toISOString()),
+    );
+  }
   const prekey: PrekeyCertificate = selectedPrekey(recipient, claim);
   await verifyPrekeyCertificate(
     prekey,

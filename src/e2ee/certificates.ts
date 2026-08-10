@@ -4,6 +4,7 @@ import { BinaryWriter } from "./encoding.js";
 import type { BoxKeyPair, PrekeyClass, SigningKeyPair } from "./protocol.js";
 
 const AGENT_CERTIFICATE_DOMAIN: string = "murmur-e2ee-v1/agent-certificate";
+const AGENT_KEY_REVOCATION_DOMAIN: string = "murmur-e2ee-v1/agent-key-revocation";
 const PREKEY_CERTIFICATE_DOMAIN: string = "murmur-e2ee-v1/prekey-certificate";
 const FINGERPRINT_BYTES: number = 32;
 
@@ -17,6 +18,18 @@ export type AgentKeyCertificateFields = {
 };
 
 export type AgentKeyCertificate = AgentKeyCertificateFields & {
+  readonly signature: Uint8Array;
+};
+
+export type AgentKeyRevocationFields = {
+  readonly agentId: string;
+  readonly reason: string;
+  readonly revokedAt: string;
+  readonly revokedSigningKeyId: string;
+  readonly rootKeyId: string;
+};
+
+export type AgentKeyRevocation = AgentKeyRevocationFields & {
   readonly signature: Uint8Array;
 };
 
@@ -59,6 +72,17 @@ function encodeAgentCertificateFields(fields: AgentKeyCertificateFields): Uint8A
   writer.writeBytes(fields.signingPublicKey);
   writer.writeString(fields.createdAt);
   writer.writeString(fields.expiresAt);
+  return writer.finish();
+}
+
+function encodeAgentKeyRevocationFields(fields: AgentKeyRevocationFields): Uint8Array {
+  const writer: BinaryWriter = new BinaryWriter();
+  writer.writeString(AGENT_KEY_REVOCATION_DOMAIN);
+  writer.writeString(fields.rootKeyId);
+  writer.writeString(fields.agentId);
+  writer.writeString(fields.revokedSigningKeyId);
+  writer.writeString(fields.revokedAt);
+  writer.writeString(fields.reason);
   return writer.finish();
 }
 
@@ -179,6 +203,51 @@ export async function verifyAgentKeyCertificate(
   );
   sodium.memzero(canonical);
   if (!valid) throw new Error("Agent certificate signature is invalid");
+}
+
+export async function createAgentKeyRevocation(
+  fields: AgentKeyRevocationFields,
+  rootPrivateKey: Uint8Array,
+): Promise<AgentKeyRevocation> {
+  await sodium.ready;
+  requireLength(rootPrivateKey, sodium.crypto_sign_SECRETKEYBYTES, "Root private key");
+  const canonical: Uint8Array = encodeAgentKeyRevocationFields(fields);
+  const signature: Uint8Array = sodium.crypto_sign_detached(canonical, rootPrivateKey);
+  sodium.memzero(canonical);
+  return { ...fields, signature };
+}
+
+export async function verifyAgentKeyRevocation(
+  revocation: AgentKeyRevocation,
+  rootPublicKey: Uint8Array,
+  expectedAgentId: string,
+  now: Date,
+): Promise<void> {
+  await sodium.ready;
+  requireLength(rootPublicKey, sodium.crypto_sign_PUBLICKEYBYTES, "Root public key");
+  requireLength(revocation.signature, sodium.crypto_sign_BYTES, "Agent revocation signature");
+  if (revocation.agentId !== expectedAgentId) throw new Error("Agent revocation identity mismatch");
+  if (revocation.rootKeyId !== keyId("mrk", rootPublicKey)) {
+    throw new Error("Agent revocation root mismatch");
+  }
+  if (!/^mak_[A-Za-z0-9_-]{43}$/u.test(revocation.revokedSigningKeyId)) {
+    throw new Error("Agent revocation signing key is invalid");
+  }
+  const revokedAt: number = Date.parse(revocation.revokedAt);
+  if (!Number.isFinite(revokedAt) || revokedAt > now.getTime()) {
+    throw new Error("Agent revocation time is invalid");
+  }
+  if (revocation.reason.length < 1 || revocation.reason.length > 500) {
+    throw new Error("Agent revocation reason is invalid");
+  }
+  const canonical: Uint8Array = encodeAgentKeyRevocationFields(revocation);
+  const valid: boolean = sodium.crypto_sign_verify_detached(
+    revocation.signature,
+    canonical,
+    rootPublicKey,
+  );
+  sodium.memzero(canonical);
+  if (!valid) throw new Error("Agent revocation signature is invalid");
 }
 
 export async function createPrekeyCertificate(

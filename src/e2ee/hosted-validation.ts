@@ -1,4 +1,8 @@
-import { verifyAgentKeyCertificate, verifyPrekeyCertificate } from "./certificates.js";
+import {
+  verifyAgentKeyCertificate,
+  verifyAgentKeyRevocation,
+  verifyPrekeyCertificate,
+} from "./certificates.js";
 import { verifyEnvelopeSignature } from "./envelope.js";
 import type { EncryptedEnvelope } from "./protocol.js";
 import {
@@ -55,6 +59,16 @@ function verifyClaimWindow(claim: ClaimEncryptionPrekeyOutput, now: Date): void 
   }
 }
 
+async function verifyRevocations(
+  chain: PublicAgentSigningChain,
+  agentId: string,
+  now: Date,
+): Promise<void> {
+  for (const revocation of chain.agentKeyRevocations) {
+    await verifyAgentKeyRevocation(revocation, chain.rootPublicKey, agentId, now);
+  }
+}
+
 export async function verifyHostedPublicBundle(
   agentId: string,
   input: unknown,
@@ -65,6 +79,7 @@ export async function verifyHostedPublicBundle(
     const bundle: PublicAgentKeyBundle = parsePublicBundleDto(input);
     if (bundle.oneTimePrekeys.length > maxOneTimePrekeys) throw new Error("prekey count");
     await verifyAgentKeyCertificate(bundle.agentCertificate, bundle.rootPublicKey, agentId, now);
+    await verifyRevocations(bundle, agentId, now);
     await verifyPrekeyCertificate(bundle.fallbackPrekey, bundle.agentCertificate, agentId, now);
     for (const prekey of bundle.oneTimePrekeys) {
       await verifyPrekeyCertificate(prekey, bundle.agentCertificate, agentId, now);
@@ -213,6 +228,7 @@ export async function verifyHostedEncryptedEnvelope(
       request.sender_id,
       input.now,
     );
+    await verifyRevocations(sender, request.sender_id, input.now);
     verifyEnvelopeWindow(envelope, input.now);
     if (
       !deliveryMatches(

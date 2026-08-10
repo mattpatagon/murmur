@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { AgentKeyCertificate, PrekeyCertificate } from "./certificates.js";
+import type { AgentKeyCertificate, AgentKeyRevocation, PrekeyCertificate } from "./certificates.js";
 import type { PrekeyClass } from "./protocol.js";
 
 const BytesSchema: z.ZodType<Uint8Array> = z
@@ -102,6 +102,15 @@ type AgentKeyRow = {
   readonly signing_key_id: string;
 };
 
+type AgentKeyRevocationRow = {
+  readonly agent_id: string;
+  readonly reason: string;
+  readonly revoked_at: string;
+  readonly revoked_signing_key_id: string;
+  readonly root_key_id: string;
+  readonly signature: Uint8Array;
+};
+
 type PrekeyRow = {
   readonly agent_id: string;
   readonly agent_signing_key_id: string;
@@ -183,6 +192,14 @@ const AgentKeyRowSchema: z.ZodType<AgentKeyRow> = z.strictObject({
   public_key: BytesSchema,
   root_key_id: z.string(),
   signing_key_id: z.string(),
+});
+const AgentKeyRevocationRowSchema: z.ZodType<AgentKeyRevocationRow> = z.strictObject({
+  agent_id: z.string(),
+  reason: z.string(),
+  revoked_at: z.string(),
+  revoked_signing_key_id: z.string(),
+  root_key_id: z.string(),
+  signature: BytesSchema,
 });
 const PrekeyRowSchema: z.ZodType<PrekeyRow> = z.strictObject({
   agent_id: z.string(),
@@ -269,6 +286,18 @@ export function mapAgentKeyRow(input: unknown): StoredAgentKey {
       signingPublicKey: row.public_key,
     },
     privateKey: row.private_key,
+  };
+}
+
+export function mapAgentKeyRevocationRow(input: unknown): AgentKeyRevocation {
+  const row: AgentKeyRevocationRow = AgentKeyRevocationRowSchema.parse(input);
+  return {
+    agentId: row.agent_id,
+    reason: row.reason,
+    revokedAt: row.revoked_at,
+    revokedSigningKeyId: row.revoked_signing_key_id,
+    rootKeyId: row.root_key_id,
+    signature: row.signature,
   };
 }
 

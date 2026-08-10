@@ -1,7 +1,7 @@
 import type { Database, Statement } from "bun:sqlite";
 import { z } from "zod";
 
-const VAULT_SCHEMA_VERSION: number = 7;
+const VAULT_SCHEMA_VERSION: number = 8;
 const UserVersionRowSchema: z.ZodType<{ readonly user_version: number }> = z.object({
   user_version: z
     .union([z.number().int(), z.bigint()])
@@ -187,6 +187,22 @@ export function migrateLocalVault(database: Database): void {
           bound_at TEXT NOT NULL
         );
         PRAGMA user_version = 7;
+      `);
+    }
+    if (version <= 7) {
+      database.exec(`
+        CREATE TABLE agent_key_revocations (
+          agent_id TEXT NOT NULL,
+          revoked_signing_key_id TEXT NOT NULL,
+          root_key_id TEXT NOT NULL REFERENCES root_keys(root_key_id),
+          revoked_at TEXT NOT NULL,
+          reason TEXT NOT NULL CHECK(length(reason) BETWEEN 1 AND 500),
+          signature BLOB NOT NULL CHECK(length(signature) = 64),
+          PRIMARY KEY(agent_id, revoked_signing_key_id)
+        );
+        CREATE INDEX agent_key_revocations_order
+          ON agent_key_revocations(agent_id, revoked_signing_key_id);
+        PRAGMA user_version = 8;
       `);
     }
     database.exec("COMMIT");

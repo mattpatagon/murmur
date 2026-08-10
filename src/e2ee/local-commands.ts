@@ -1,12 +1,20 @@
 import type { Instant } from "../domain/value-objects.js";
+import type { AgentKeyRevocation } from "./certificates.js";
 import type { LocalE2eeVault } from "./local-vault.js";
-import type { ExpectedPeerRoot, PeerPin, StoredRootKey } from "./local-vault-rows.js";
-import type { StoredAgentKey, StoredPrekey } from "./local-vault-rows.js";
+import type {
+  ExpectedPeerRoot,
+  PeerPin,
+  StoredAgentKey,
+  StoredPrekey,
+  StoredRootKey,
+} from "./local-vault-rows.js";
 import type { StoredTrustPolicyState } from "./local-vault-trust.js";
 import { type OrganizationTrustPolicy, parseSerializedTrustPolicy } from "./trust-policy.js";
 import {
   type AgentKeyCertificateDto,
+  type AgentKeyRevocationDto,
   agentCertificateToDto,
+  agentKeyRevocationToDto,
   type PrekeyCertificateDto,
   prekeyCertificateToDto,
 } from "./wire-contracts.js";
@@ -33,6 +41,7 @@ export type TrustPeerFingerprintInput = {
 
 export type LocalPublicAgentIdentity = {
   readonly agent_certificate: AgentKeyCertificateDto;
+  readonly agent_key_revocations: readonly AgentKeyRevocationDto[];
   readonly prekeys: readonly PrekeyCertificateDto[];
 };
 
@@ -47,6 +56,11 @@ export type LocalPrekeyReplenishment = {
   readonly agent_key_id: string;
   readonly fallback_available: number;
   readonly one_time_available: number;
+};
+
+export type LocalAgentKeyRevocation = {
+  readonly replacement_agent_certificate: AgentKeyCertificateDto;
+  readonly revocation: AgentKeyRevocationDto;
 };
 
 function pinSummary(pin: PeerPin): LocalPeerTrustSummary {
@@ -116,6 +130,9 @@ export function exportLocalPublicIdentity(vault: LocalE2eeVault): LocalPublicIde
       );
       return {
         agent_certificate: agentCertificateToDto(agent.certificate),
+        agent_key_revocations: vault.keys
+          .listAgentKeyRevocations(agent.certificate.agentId)
+          .map(agentKeyRevocationToDto),
         prekeys: prekeys.map(
           (prekey: StoredPrekey): PrekeyCertificateDto =>
             prekeyCertificateToDto(prekey.certificate),
@@ -146,6 +163,32 @@ export async function rotateLocalAgentKey(
     true,
   );
   return agentCertificateToDto(rotated.certificate);
+}
+
+export async function revokeLocalAgentKey(
+  vault: LocalE2eeVault,
+  agentId: string,
+  reason: string,
+  now: Instant,
+): Promise<LocalAgentKeyRevocation> {
+  const revocation: AgentKeyRevocation = await vault.keys.revokeCurrentAgentKey(
+    agentId,
+    reason,
+    now.toISOString(),
+  );
+  const replacement: StoredAgentKey = await vault.keys.getOrCreateAgent(
+    agentId,
+    now.toISOString(),
+    now.addDays(90).toISOString(),
+    now.toISOString(),
+  );
+  if (replacement.certificate.signingKeyId === revocation.revokedSigningKeyId) {
+    throw new Error("Revoked E2E agent key remained active");
+  }
+  return {
+    replacement_agent_certificate: agentCertificateToDto(replacement.certificate),
+    revocation: agentKeyRevocationToDto(revocation),
+  };
 }
 
 function availableCurrentPrekeys(

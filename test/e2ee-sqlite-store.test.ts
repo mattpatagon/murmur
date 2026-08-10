@@ -1,9 +1,17 @@
 import { expect, test } from "bun:test";
-
+import {
+  AgentId,
+  type Clock,
+  DisplayName,
+  Instant,
+  TenantId,
+} from "../src/domain/value-objects.js";
 import {
   type AgentKeyCertificate,
+  type AgentKeyRevocation,
   agentSigningKeyId,
   createAgentKeyCertificate,
+  createAgentKeyRevocation,
   createBoxKeyPair,
   createPrekeyCertificate,
   createSigningKeyPair,
@@ -24,13 +32,6 @@ import type {
   PrepareEncryptedBroadcastOutput,
   PutEncryptedMessageInput,
 } from "../src/e2ee/wire-tools.js";
-import {
-  AgentId,
-  type Clock,
-  DisplayName,
-  Instant,
-  TenantId,
-} from "../src/domain/value-objects.js";
 import type { E2eeMessageStore } from "../src/storage/e2ee-message-store.js";
 import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
 
@@ -260,6 +261,75 @@ test("SQLite stores verified direct ciphertext with atomic retry and inbox seman
       sender_id: "alice",
     });
     expect(fallbackClaim.prekey_class).toBe("fallback");
+  } finally {
+    store.close();
+  }
+});
+
+test("SQLite preserves verified agent-key revocations across bundle rotation", async (): Promise<void> => {
+  const store: SqliteMessageStore = new SqliteMessageStore(":memory:", new FixedClock());
+  try {
+    register(store, "alice", "mattpatagon/murmur");
+    const original: Identity = await identity("alice", 61);
+    const encrypted: E2eeMessageStore = store.scopeE2ee(TenantId.founding());
+    await encrypted.publishAgentKeyBundle({ agent_id: "alice", bundle: bundle(original) });
+
+    const replacementAgent: SigningKeyPair = await createSigningKeyPair(seed(70));
+    const replacementCertificate: AgentKeyCertificate = await createAgentKeyCertificate(
+      {
+        agentId: "alice",
+        createdAt: CREATED,
+        expiresAt: AGENT_EXPIRES,
+        rootKeyId: original.agentCertificate.rootKeyId,
+        signingKeyId: await agentSigningKeyId(replacementAgent.publicKey),
+        signingPublicKey: replacementAgent.publicKey,
+      },
+      original.root.privateKey,
+    );
+    const replacementFallback: BoxKeyPair = await createBoxKeyPair(seed(71));
+    const replacementFallbackCertificate: PrekeyCertificate = await createPrekeyCertificate(
+      {
+        agentId: "alice",
+        agentSigningKeyId: replacementCertificate.signingKeyId,
+        createdAt: CREATED,
+        expiresAt: KEY_EXPIRES,
+        prekeyClass: "fallback",
+        prekeyId: await prekeyId(replacementFallback.publicKey),
+        prekeyPublicKey: replacementFallback.publicKey,
+      },
+      replacementAgent.privateKey,
+    );
+    const revocation: AgentKeyRevocation = await createAgentKeyRevocation(
+      {
+        agentId: "alice",
+        reason: "Compromise response",
+        revokedAt: "2026-08-10T19:30:00.000Z",
+        revokedSigningKeyId: original.agentCertificate.signingKeyId,
+        rootKeyId: original.agentCertificate.rootKeyId,
+      },
+      original.root.privateKey,
+    );
+    const replacementBundle: ReturnType<typeof publicBundleToDto> = publicBundleToDto(
+      original.root.publicKey,
+      replacementCertificate,
+      replacementFallbackCertificate,
+      [],
+      [revocation],
+    );
+    await expect(
+      encrypted.publishAgentKeyBundle({ agent_id: "alice", bundle: replacementBundle }),
+    ).resolves.toMatchObject({ agent_id: "alice" });
+    await expect(
+      encrypted.publishAgentKeyBundle({
+        agent_id: "alice",
+        bundle: publicBundleToDto(
+          original.root.publicKey,
+          replacementCertificate,
+          replacementFallbackCertificate,
+          [],
+        ),
+      }),
+    ).rejects.toThrow("revocations cannot be removed or changed");
   } finally {
     store.close();
   }

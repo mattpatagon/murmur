@@ -5,14 +5,18 @@ import { z } from "zod";
 
 import { UnknownAgentError } from "../domain/errors.js";
 import type { Instant } from "../domain/value-objects.js";
-import type { PrekeyCertificateDto, PublicAgentKeyBundleDto } from "../e2ee/wire-contracts.js";
+import type {
+  AgentKeyRevocationDto,
+  PrekeyCertificateDto,
+  PublicAgentKeyBundleDto,
+} from "../e2ee/wire-contracts.js";
 import { PublicAgentKeyBundleDtoSchema } from "../e2ee/wire-contracts.js";
 import {
-  type ClaimedProvenanceDto,
   type ClaimEncryptionPrekeyInput,
   ClaimEncryptionPrekeyInputSchema,
   type ClaimEncryptionPrekeyOutput,
   ClaimEncryptionPrekeyOutputSchema,
+  type ClaimedProvenanceDto,
   type PublishAgentKeyBundleInput,
   PublishAgentKeyBundleInputSchema,
   type PublishAgentKeyBundleOutput,
@@ -154,6 +158,36 @@ function publicationOutput(
   });
 }
 
+function revocations(bundle: PublicAgentKeyBundleDto): readonly AgentKeyRevocationDto[] {
+  return bundle.agent_key_revocations === undefined ? [] : bundle.agent_key_revocations;
+}
+
+function requireMonotonicIdentity(
+  previous: PublicAgentKeyBundleDto,
+  next: PublicAgentKeyBundleDto,
+): void {
+  if (previous.root_key_id !== next.root_key_id) {
+    throw new Error("Published E2E root key cannot change");
+  }
+  const nextByKey: ReadonlyMap<string, AgentKeyRevocationDto> = new Map<
+    string,
+    AgentKeyRevocationDto
+  >(
+    revocations(next).map(
+      (item: AgentKeyRevocationDto): readonly [string, AgentKeyRevocationDto] => [
+        item.revoked_signing_key_id,
+        item,
+      ],
+    ),
+  );
+  for (const prior of revocations(previous)) {
+    const current: AgentKeyRevocationDto | undefined = nextByKey.get(prior.revoked_signing_key_id);
+    if (current === undefined || JSON.stringify(current) !== JSON.stringify(prior)) {
+      throw new Error("Published E2E agent revocations cannot be removed or changed");
+    }
+  }
+}
+
 export function publishSqliteAgentKeyBundle(
   database: Database,
   inputValue: unknown,
@@ -177,6 +211,10 @@ export function publishSqliteAgentKeyBundle(
         database.exec("COMMIT");
         return publicationOutput(input, existing.published_at);
       }
+      requireMonotonicIdentity(
+        PublicAgentKeyBundleDtoSchema.parse(JSON.parse(existing.bundle_json)),
+        input.bundle,
+      );
     }
     const priorCount: number = activePrekeyCount(database, input.agent_id);
     database

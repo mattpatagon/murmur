@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import type { Clock, Instant } from "../src/domain/value-objects.js";
 import { Instant as InstantValue } from "../src/domain/value-objects.js";
-import { runE2eeCli, type E2eeCliRuntime } from "../src/e2ee/cli.js";
+import { type E2eeCliRuntime, runE2eeCli } from "../src/e2ee/cli.js";
 import { LocalE2eeVault } from "../src/e2ee/local-vault.js";
 import type { StoredRootKey } from "../src/e2ee/local-vault-rows.js";
 
@@ -83,10 +83,22 @@ test("local E2E CLI binds trust to the authenticated tenant and exports public d
       await runE2eeCli(["replenish", "--agent", AGENT_ID], cliRuntime),
     );
     expect(replenished).toMatchObject({ fallback_available: 1, one_time_available: 20 });
+    const revoked: unknown = JSON.parse(
+      await runE2eeCli(
+        ["revoke-agent-key", "--agent", AGENT_ID, "--reason", "Operator-declared compromise"],
+        cliRuntime,
+      ),
+    );
+    expect(revoked).toMatchObject({
+      replacement_agent_certificate: { agent_id: AGENT_ID },
+      revocation: { agent_id: AGENT_ID, reason: "Operator-declared compromise" },
+    });
 
     const exported: string = await runE2eeCli(["export-public"], cliRuntime);
     expect(exported).toContain('"protocol": "murmur-e2ee-v1"');
     expect(exported).toContain('"root_public_key"');
+    expect(exported).toContain('"agent_key_revocations"');
+    expect(exported).toContain('"Operator-declared compromise"');
     expect(exported).not.toContain(privateRoot);
     expect(exported).not.toContain("private_key");
   } finally {
