@@ -1,280 +1,46 @@
-import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
-import process from "node:process";
-
 import { expect, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type {
-  CallToolResult,
-  ResourceUpdatedNotification,
-} from "@modelcontextprotocol/sdk/types.js";
-import {
-  CallToolResultSchema,
-  ResourceUpdatedNotificationSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { ResourceUpdatedNotification } from "@modelcontextprotocol/sdk/types.js";
+import { ResourceUpdatedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import postgres, { type Sql, type TransactionSql } from "postgres";
-import type { z } from "zod";
 
 import {
-  BroadcastMessageOutputSchema,
-  InboxOutputSchema,
-  ListAgentsOutputSchema,
-  MarkMessagesReadOutputSchema,
-  RegisterAgentOutputSchema,
-  SendMessageOutputSchema,
-  WaitForMessagesOutputSchema,
   type BroadcastMessageOutput,
+  BroadcastMessageOutputSchema,
   type InboxOutput,
+  InboxOutputSchema,
   type ListAgentsOutput,
+  ListAgentsOutputSchema,
   type MarkMessagesReadOutput,
+  MarkMessagesReadOutputSchema,
   type RegisterAgentOutput,
+  RegisterAgentOutputSchema,
   type SendMessageOutput,
+  SendMessageOutputSchema,
   type WaitForMessagesOutput,
+  WaitForMessagesOutputSchema,
 } from "../src/domain/contracts.js";
 import { FOUNDING_TENANT_ID } from "../src/domain/value-objects.js";
 import { postgresSslOptions, postgresTlsConfiguration } from "../src/postgres-tls.js";
 import { POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED } from "../src/storage/postgres-message-store.js";
-
-const cloudDatabaseUrl: string | undefined = process.env["MURMUR_TEST_DATABASE_URL"];
-const dockerImage: string | undefined = process.env["MURMUR_TEST_DOCKER_IMAGE"];
-const projectRoot: string = resolve(".");
-const repositoryName: string = "mattpatagon/murmur";
-const branchName: string = "feature/cloud-context";
-const clientName: "codex" = "codex";
-
-type ClientHarness = {
-  readonly client: Client;
-  readonly transport: StdioClientTransport;
-};
-
-type AdvisoryWaiterCountRow = {
-  readonly count: number | string;
-};
-
-type DeferredSignal = {
-  readonly promise: Promise<void>;
-  readonly resolve: () => void;
-};
-
-function deferredSignal(): DeferredSignal {
-  let resolver: (() => void) | null = null;
-  const promise: Promise<void> = new Promise((resolvePromise: () => void): void => {
-    resolver = resolvePromise;
-  });
-  return {
-    promise,
-    resolve: (): void => {
-      const currentResolver: (() => void) | null = resolver;
-      if (currentResolver === null) throw new Error("Deferred signal was not initialized");
-      currentResolver();
-    },
-  };
-}
-
-function runCommand(
-  command: string,
-  args: readonly string[],
-  cwd: string,
-  environment: NodeJS.ProcessEnv = process.env,
-): string {
-  const result: SpawnSyncReturns<string> = spawnSync(command, args, {
-    cwd,
-    encoding: "utf8",
-    env: environment,
-  });
-  if (result.error !== undefined) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(
-      `Command '${command}' failed with status ${String(result.status)}:\n${result.stderr}`,
-    );
-  }
-  return result.stdout.trim();
-}
-
-function packMurmur(packageDirectory: string): string {
-  mkdirSync(packageDirectory, { recursive: true });
-  runCommand(
-    process.execPath,
-    ["pm", "pack", "--destination", packageDirectory, "--ignore-scripts"],
-    projectRoot,
-  );
-  const archives: string[] = readdirSync(packageDirectory).filter((fileName: string): boolean =>
-    fileName.endsWith(".tgz"),
-  );
-  const archiveName: string | undefined = archives[0];
-  if (archiveName === undefined) throw new Error("Murmur package archive was not created");
-  return join(packageDirectory, archiveName);
-}
-
-function installMurmur(packageArchive: string, machineRoot: string): string {
-  mkdirSync(machineRoot, { recursive: true });
-  const environment: NodeJS.ProcessEnv = {
-    ...process.env,
-    BUN_INSTALL: machineRoot,
-  };
-  runCommand(process.execPath, ["install", "--global", packageArchive], machineRoot, environment);
-  return join(machineRoot, "bin");
-}
-
-function cloudChildEnvironment(
-  databaseUrl: string,
-  binaryDirectory: string,
-): Record<string, string> {
-  const environment: Record<string, string> = hostChildEnvironment(databaseUrl);
-  const hostPath: string = environment["PATH"] ?? "";
-  environment["PATH"] =
-    `${binaryDirectory}${delimiter}${dirname(process.execPath)}${delimiter}${hostPath}`;
-  return environment;
-}
-
-function hostChildEnvironment(databaseUrl: string): Record<string, string> {
-  const environment: Record<string, string> = {};
-  const hostPath: string | undefined = process.env["PATH"];
-  if (hostPath === undefined) throw new Error("PATH is required for the portability test");
-  environment["PATH"] = hostPath;
-  environment["MURMUR_DATABASE_URL"] = databaseUrl;
-  environment["MURMUR_BRANCH"] = branchName;
-  environment["MURMUR_CLIENT"] = clientName;
-  environment["MURMUR_REPOSITORY"] = repositoryName;
-  const databaseCaPath: string | undefined = process.env["MURMUR_DATABASE_CA_PATH"];
-  if (databaseCaPath !== undefined) environment["MURMUR_DATABASE_CA_PATH"] = databaseCaPath;
-  const insecureDatabaseTls: string | undefined = process.env["MURMUR_DATABASE_TLS_INSECURE"];
-  if (insecureDatabaseTls !== undefined) {
-    environment["MURMUR_DATABASE_TLS_INSECURE"] = insecureDatabaseTls;
-  }
-  return environment;
-}
-
-async function connectClient(
-  name: string,
-  databaseUrl: string,
-  binaryDirectory: string,
-  workspace: string,
-): Promise<ClientHarness> {
-  const client: Client = new Client({ name, version: "1.0.0" }, { capabilities: {} });
-  const transport: StdioClientTransport = new StdioClientTransport({
-    args: [],
-    command: "murmur-mcp",
-    cwd: workspace,
-    env: cloudChildEnvironment(databaseUrl, binaryDirectory),
-    stderr: "inherit",
-  });
-  await client.connect(transport);
-  return { client, transport };
-}
-
-async function connectProjectClient(name: string, databaseUrl: string): Promise<ClientHarness> {
-  const client: Client = new Client({ name, version: "1.0.0" }, { capabilities: {} });
-  const transport: StdioClientTransport = new StdioClientTransport({
-    args: ["run", "src/server.ts"],
-    command: "bun",
-    cwd: projectRoot,
-    env: hostChildEnvironment(databaseUrl),
-    stderr: "inherit",
-  });
-  await client.connect(transport);
-  return { client, transport };
-}
-
-async function connectDockerClient(
-  name: string,
-  databaseUrl: string,
-  imageName: string,
-): Promise<ClientHarness> {
-  const client: Client = new Client({ name, version: "1.0.0" }, { capabilities: {} });
-  const transport: StdioClientTransport = new StdioClientTransport({
-    args: [
-      "run",
-      "--rm",
-      "--interactive",
-      "--mount",
-      `type=bind,source=${projectRoot},target=/workspace,readonly`,
-      "--workdir",
-      "/workspace",
-      "--env",
-      "MURMUR_DATABASE_URL",
-      "--env",
-      "MURMUR_DATABASE_TLS_INSECURE",
-      "--env",
-      "MURMUR_BRANCH",
-      "--env",
-      "MURMUR_CLIENT",
-      "--env",
-      "MURMUR_REPOSITORY",
-      imageName,
-      "bun",
-      "run",
-      "src/server.ts",
-    ],
-    command: "docker",
-    env: hostChildEnvironment(databaseUrl),
-    stderr: "inherit",
-  });
-  await client.connect(transport);
-  return { client, transport };
-}
-
-async function callValidated<T>(
-  client: Client,
-  name: string,
-  argumentsValue: Record<string, unknown>,
-  schema: z.ZodType<T>,
-): Promise<T> {
-  const rawResult: unknown = await client.callTool({
-    arguments: argumentsValue,
-    name,
-  });
-  const result: CallToolResult = CallToolResultSchema.parse(rawResult);
-  if (result.isError === true) {
-    throw new Error(`MCP tool '${name}' failed: ${JSON.stringify(result.content)}`);
-  }
-  return schema.parse(result.structuredContent);
-}
-
-async function notificationTimeout(): Promise<never> {
-  await Bun.sleep(8_000);
-  throw new Error("Cloud push notification timed out");
-}
-
-async function waitForMessageCommitLockWaiters(
-  database: Sql,
-  recipientId: string,
-  expected: number,
-): Promise<void> {
-  const tenantRecipientId: string = `${FOUNDING_TENANT_ID}:${recipientId}`;
-  let attempt: number = 0;
-  while (attempt < 200) {
-    const rows: AdvisoryWaiterCountRow[] = await database<AdvisoryWaiterCountRow[]>`
-      SELECT COUNT(*) AS count
-      FROM pg_catalog.pg_locks
-      WHERE locktype = 'advisory'
-        AND classid = (
-          pg_catalog.hashtextextended(
-            ${tenantRecipientId},
-            ${POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED}::bigint
-          ) >> 32 & 4294967295::bigint
-        )::oid
-        AND objid = (
-          pg_catalog.hashtextextended(
-            ${tenantRecipientId},
-            ${POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED}::bigint
-          ) & 4294967295::bigint
-        )::oid
-        AND objsubid = 1
-        AND NOT granted
-    `;
-    const row: AdvisoryWaiterCountRow | undefined = rows[0];
-    if (row === undefined) throw new Error("Postgres did not return an advisory lock count");
-    if (Number(row.count) >= expected) return;
-    await Bun.sleep(10);
-    attempt += 1;
-  }
-  throw new Error(`Timed out waiting for ${String(expected)} message commit lock waiters`);
-}
+import {
+  branchName,
+  type ClientHarness,
+  callValidated,
+  clientName,
+  cloudDatabaseUrl,
+  connectClient,
+  type DeferredSignal,
+  deferredSignal,
+  installMurmur,
+  notificationTimeout,
+  packMurmur,
+  repositoryName,
+  waitForMessageCommitLockWaiters,
+} from "./support/cloud-mcp-harness.js";
 
 test.skipIf(cloudDatabaseUrl === undefined)(
   "agents installed in isolated machine roots communicate through one Postgres URL",
@@ -623,130 +389,6 @@ test.skipIf(cloudDatabaseUrl === undefined)(
       }
     } finally {
       rmSync(portabilityRoot, { force: true, recursive: true });
-    }
-  },
-  60_000,
-);
-
-test.skipIf(cloudDatabaseUrl === undefined || dockerImage === undefined)(
-  "macOS and Linux MCP processes communicate through one Postgres URL",
-  async (): Promise<void> => {
-    const databaseUrl: string | undefined = cloudDatabaseUrl;
-    const imageName: string | undefined = dockerImage;
-    if (databaseUrl === undefined) throw new Error("MURMUR_TEST_DATABASE_URL is required");
-    if (imageName === undefined) throw new Error("MURMUR_TEST_DOCKER_IMAGE is required");
-    const uniqueSuffix: string = randomUUID().replaceAll("-", "").slice(0, 12);
-    const macAgentId: string = `mac-agent-${uniqueSuffix}`;
-    const linuxAgentId: string = `linux-agent-${uniqueSuffix}`;
-    const macClient: ClientHarness = await connectProjectClient("macos-host", databaseUrl);
-    try {
-      const linuxClient: ClientHarness = await connectDockerClient(
-        "linux-vm-host",
-        databaseUrl,
-        imageName,
-      );
-      try {
-        await callValidated(
-          macClient.client,
-          "register_agent",
-          { agent_id: macAgentId, display_name: "macOS Agent" },
-          RegisterAgentOutputSchema,
-        );
-        await callValidated(
-          linuxClient.client,
-          "register_agent",
-          { agent_id: linuxAgentId, display_name: "Linux Agent" },
-          RegisterAgentOutputSchema,
-        );
-
-        const macPeers: ListAgentsOutput = await callValidated(
-          macClient.client,
-          "list_agents",
-          {},
-          ListAgentsOutputSchema,
-        );
-        const linuxPeers: ListAgentsOutput = await callValidated(
-          linuxClient.client,
-          "list_agents",
-          {},
-          ListAgentsOutputSchema,
-        );
-        expect(
-          macPeers.agents.some(
-            (agent: ListAgentsOutput["agents"][number]): boolean => agent.agent_id === linuxAgentId,
-          ),
-        ).toBe(true);
-        expect(
-          linuxPeers.agents.some(
-            (agent: ListAgentsOutput["agents"][number]): boolean => agent.agent_id === macAgentId,
-          ),
-        ).toBe(true);
-
-        const linuxWait: Promise<WaitForMessagesOutput> = callValidated(
-          linuxClient.client,
-          "wait_for_messages",
-          { after_sequence: 0, agent_id: linuxAgentId, timeout_seconds: 12 },
-          WaitForMessagesOutputSchema,
-        );
-        const sentToLinux: SendMessageOutput = await callValidated(
-          macClient.client,
-          "send_message",
-          {
-            content: "hello from macOS to Linux",
-            idempotency_key: `mac-linux-${uniqueSuffix}`,
-            recipient_id: linuxAgentId,
-            sender_id: macAgentId,
-          },
-          SendMessageOutputSchema,
-        );
-        const receivedOnLinux: WaitForMessagesOutput = await linuxWait;
-        expect(sentToLinux.message.context.repository).toBe(repositoryName);
-        expect(sentToLinux.message.context.branch).toBe(branchName);
-        expect(sentToLinux.message.context.client).toBe(clientName);
-        expect(receivedOnLinux.timed_out).toBe(false);
-        expect(
-          receivedOnLinux.messages.some(
-            (message: WaitForMessagesOutput["messages"][number]): boolean =>
-              message.message_id === sentToLinux.message.message_id &&
-              message.context.repository === repositoryName,
-          ),
-        ).toBe(true);
-
-        const macWait: Promise<WaitForMessagesOutput> = callValidated(
-          macClient.client,
-          "wait_for_messages",
-          { after_sequence: 0, agent_id: macAgentId, timeout_seconds: 12 },
-          WaitForMessagesOutputSchema,
-        );
-        const sentToMac: SendMessageOutput = await callValidated(
-          linuxClient.client,
-          "send_message",
-          {
-            content: "reply from Linux to macOS",
-            idempotency_key: `linux-mac-${uniqueSuffix}`,
-            recipient_id: macAgentId,
-            sender_id: linuxAgentId,
-            thread_id: sentToLinux.message.thread_id,
-          },
-          SendMessageOutputSchema,
-        );
-        const receivedOnMac: WaitForMessagesOutput = await macWait;
-        expect(sentToMac.message.context.repository).toBe(repositoryName);
-        expect(sentToMac.message.context.branch).toBe(branchName);
-        expect(sentToMac.message.context.client).toBe(clientName);
-        expect(receivedOnMac.timed_out).toBe(false);
-        expect(
-          receivedOnMac.messages.some(
-            (message: WaitForMessagesOutput["messages"][number]): boolean =>
-              message.message_id === sentToMac.message.message_id &&
-              message.context.repository === repositoryName,
-          ),
-        ).toBe(true);
-      } finally {
-        await Promise.allSettled([linuxClient.client.close()]);
-      }
-    } finally {
-      await Promise.allSettled([macClient.client.close()]);
     }
   },
   60_000,
