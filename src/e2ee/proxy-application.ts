@@ -10,11 +10,13 @@ import packageMetadata from "../../package.json" with { type: "json" };
 
 import { logSafeError } from "../safe-errors.js";
 import { toolError } from "../mcp/murmur-tool-results.js";
+import { E2eeProxyResources } from "./proxy-resources.js";
 import type { E2eeProxyOperations } from "./proxy-service.js";
 import { callE2eeProxyTool, e2eeProxyTools } from "./proxy-tools.js";
 
 export class E2eeProxyApplication {
   readonly #operations: E2eeProxyOperations;
+  readonly #resources: E2eeProxyResources;
   readonly #tools: readonly Tool[];
   public readonly server: Server;
 
@@ -24,7 +26,10 @@ export class E2eeProxyApplication {
     this.server = new Server(
       { name: "murmur-e2ee-proxy", version: packageMetadata.version },
       {
-        capabilities: { tools: {} },
+        capabilities: {
+          resources: { listChanged: true, subscribe: true },
+          tools: {},
+        },
         instructions:
           "Murmur end-to-end encryption runs at this local endpoint. Use the familiar register_agent, list_agents, send_message, broadcast_message, get_messages, wait_for_messages, and mark_messages_read tools. Message plaintext and private keys never leave this proxy; hosted Murmur receives ciphertext and bounded routing metadata only. Verify peer root fingerprints before exchanging sensitive content.",
       },
@@ -37,8 +42,10 @@ export class E2eeProxyApplication {
       CallToolRequestSchema,
       async (request: CallToolRequest): Promise<CallToolResult> => await this.callTool(request),
     );
+    this.#resources = new E2eeProxyResources(this.server, operations);
+    this.#resources.registerHandlers();
     this.server.onclose = (): void => {
-      void this.#operations.close().catch((error: unknown): void => {
+      void this.closeLocalResources().catch((error: unknown): void => {
         logSafeError("Murmur E2E proxy shutdown failed", error);
       });
     };
@@ -51,6 +58,9 @@ export class E2eeProxyApplication {
         request.params.arguments,
         this.#operations,
       );
+      if (result !== null && result.isError !== true && request.params.name === "register_agent") {
+        await this.server.sendResourceListChanged();
+      }
       return result === null
         ? toolError(new Error(`Unknown tool '${request.params.name}'`))
         : result;
@@ -59,8 +69,13 @@ export class E2eeProxyApplication {
     }
   }
 
-  public async close(): Promise<void> {
+  private async closeLocalResources(): Promise<void> {
+    await this.#resources.close();
     await this.#operations.close();
+  }
+
+  public async close(): Promise<void> {
+    await this.closeLocalResources();
     await this.server.close();
   }
 }

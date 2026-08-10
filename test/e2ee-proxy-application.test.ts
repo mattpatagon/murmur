@@ -2,8 +2,15 @@ import { expect, test } from "bun:test";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import type {
+  CallToolResult,
+  ReadResourceResult,
+  ResourceUpdatedNotification,
+} from "@modelcontextprotocol/sdk/types.js";
+import {
+  CallToolResultSchema,
+  ResourceUpdatedNotificationSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 
 import type {
   BroadcastMessageInput,
@@ -86,6 +93,7 @@ function registration(): RegisterAgentOutput {
 
 class FakeProxyOperations implements E2eeProxyOperations {
   public readonly calls: string[] = [];
+  #backgroundDelivered: boolean = false;
   #closed: boolean = false;
 
   public async registerAgent(_input: RegisterAgentInput): Promise<RegisterAgentOutput> {
@@ -95,7 +103,10 @@ class FakeProxyOperations implements E2eeProxyOperations {
 
   public async listAgents(): Promise<ListAgentsOutput> {
     this.calls.push("list_agents");
-    return { agents: [registration().agent] };
+    const sender: RegisterAgentOutput["agent"] = registration().agent;
+    return {
+      agents: [sender, { ...sender, agent_id: RECIPIENT_ID, display_name: "Receiver" }],
+    };
   }
 
   public async sendMessage(_input: SendMessageInput): Promise<ProxySendMessageOutput> {
@@ -132,8 +143,16 @@ class FakeProxyOperations implements E2eeProxyOperations {
     return { agent_id: RECIPIENT_ID, inbox_version: 1, messages: [proxyMessage()] };
   }
 
-  public async waitForMessages(_input: WaitForMessagesInput): Promise<ProxyWaitForMessagesOutput> {
+  public async waitForMessages(input: WaitForMessagesInput): Promise<ProxyWaitForMessagesOutput> {
     this.calls.push("wait_for_messages");
+    if (input.timeout_seconds === 5) {
+      if (!this.#backgroundDelivered) {
+        this.#backgroundDelivered = true;
+        return { agent_id: RECIPIENT_ID, messages: [proxyMessage()], timed_out: false };
+      }
+      await Bun.sleep(10);
+      return { agent_id: RECIPIENT_ID, messages: [], timed_out: true };
+    }
     return { agent_id: RECIPIENT_ID, messages: [proxyMessage()], timed_out: false };
   }
 
@@ -240,6 +259,54 @@ test("local E2E MCP proxy preserves familiar data tools and verified plaintext o
       "wait_for_messages",
       "mark_messages_read",
     ]);
+
+    const resources: Awaited<ReturnType<Client["listResources"]>> = await client.listResources();
+    const inboxUri: string = `murmur://inbox/${encodeURIComponent(SENDER_ID)}`;
+    expect(resources.resources).toEqual([
+      {
+        description: `End-to-end encrypted inbox for ${SENDER_ID}`,
+        mimeType: "application/json",
+        name: "Sender encrypted inbox",
+        uri: inboxUri,
+      },
+      {
+        description: `End-to-end encrypted inbox for ${RECIPIENT_ID}`,
+        mimeType: "application/json",
+        name: "Receiver encrypted inbox",
+        uri: `murmur://inbox/${encodeURIComponent(RECIPIENT_ID)}`,
+      },
+    ]);
+    let resolveUpdated: ((notification: ResourceUpdatedNotification) => void) | null = null;
+    const updated: Promise<ResourceUpdatedNotification> = new Promise(
+      (resolvePromise: (notification: ResourceUpdatedNotification) => void): void => {
+        resolveUpdated = resolvePromise;
+      },
+    );
+    client.setNotificationHandler(
+      ResourceUpdatedNotificationSchema,
+      (notification: ResourceUpdatedNotification): void => {
+        const resolver: ((value: ResourceUpdatedNotification) => void) | null = resolveUpdated;
+        if (resolver !== null) resolver(notification);
+      },
+    );
+    const recipientUri: string = `murmur://inbox/${encodeURIComponent(RECIPIENT_ID)}`;
+    await client.subscribeResource({ uri: recipientUri });
+    const notification: ResourceUpdatedNotification = await Promise.race([
+      updated,
+      Bun.sleep(1_000).then((): never => {
+        throw new Error("Timed out waiting for the local encrypted inbox notification");
+      }),
+    ]);
+    expect(notification.params.uri).toBe(recipientUri);
+    const resource: ReadResourceResult = await client.readResource({ uri: recipientUri });
+    const content: ReadResourceResult["contents"][number] | undefined = resource.contents[0];
+    if (content === undefined || !("text" in content)) {
+      throw new Error("Expected a decrypted local inbox resource");
+    }
+    expect(ProxyInboxOutputSchema.parse(JSON.parse(content.text)).messages[0]).toEqual(
+      proxyMessage(),
+    );
+    await client.unsubscribeResource({ uri: recipientUri });
 
     const invalid: CallToolResult = await callTool(client, "send_message", {
       content: "",
