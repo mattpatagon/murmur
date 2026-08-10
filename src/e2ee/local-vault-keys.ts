@@ -305,6 +305,16 @@ export class LocalVaultKeys {
     return row === null ? null : mapPeerPinRow(row);
   }
 
+  public listPins(): readonly PeerPin[] {
+    const statement: Statement<unknown, []> = this.#database.query(`
+      SELECT tenant_id, agent_id, root_key_id, public_key, verification_mode, verified_at
+      FROM peer_pins ORDER BY tenant_id, agent_id LIMIT 10001
+    `);
+    const pins: readonly PeerPin[] = statement.all().map(mapPeerPinRow);
+    if (pins.length > 10_000) throw new Error("Local peer pin limit exceeded");
+    return pins;
+  }
+
   public getExpectedPeerRoot(tenantId: string, agentId: string): ExpectedPeerRoot | null {
     const statement: Statement<unknown, [string, string]> = this.#database.query(`
       SELECT tenant_id, agent_id, root_key_id, verified_at
@@ -312,6 +322,16 @@ export class LocalVaultKeys {
     `);
     const row: unknown = statement.get(tenantId, agentId);
     return row === null ? null : mapExpectedPeerRootRow(row);
+  }
+
+  public listExpectedPeerRoots(): readonly ExpectedPeerRoot[] {
+    const statement: Statement<unknown, []> = this.#database.query(`
+      SELECT tenant_id, agent_id, root_key_id, verified_at
+      FROM peer_root_expectations ORDER BY tenant_id, agent_id LIMIT 10001
+    `);
+    const roots: readonly ExpectedPeerRoot[] = statement.all().map(mapExpectedPeerRootRow);
+    if (roots.length > 10_000) throw new Error("Local peer expectation limit exceeded");
+    return roots;
   }
 
   public expectPeerRoot(input: ExpectedPeerRoot): ExpectedPeerRoot {
