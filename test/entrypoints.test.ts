@@ -55,6 +55,16 @@ test("CLI setup parsing fails before mutation for incomplete or unsafe input", (
   expect((): readonly string[] =>
     setup(["--user", "--hook-executable", "/definitely/missing/murmur-hook"]),
   ).toThrow("Hook executable not found");
+  expect((): readonly string[] =>
+    setup([
+      "--user",
+      "--e2ee",
+      "--hook-executable",
+      import.meta.path,
+      "--proxy-executable",
+      "/definitely/missing/murmur-e2ee-proxy",
+    ]),
+  ).toThrow("E2E proxy executable not found");
 });
 
 test("stdio entrypoint installs deterministic signal shutdown handlers", async (): Promise<void> => {

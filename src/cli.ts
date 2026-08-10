@@ -12,7 +12,9 @@ import {
 
 type SetupArguments = {
   readonly clients: readonly MurmurClient[];
+  readonly e2ee: boolean;
   readonly hookExecutable: string | null;
+  readonly proxyExecutable: string | null;
   readonly replace: boolean;
   readonly url: string;
 };
@@ -22,7 +24,7 @@ export type SetupAction = (arguments_: readonly string[]) => readonly string[];
 const HELP: string = `Murmur user-level setup
 
 Usage:
-  murmur setup --user [--codex] [--claude] [--replace] [--url URL]
+  murmur setup --user [--codex] [--claude] [--e2ee] [--replace] [--url URL]
 
 The default is to configure both Codex and Claude. The command adds the remote
 Murmur MCP server and passive SessionStart, UserPromptSubmit, PostToolUse, and
@@ -32,6 +34,7 @@ do not wake an idle agent.
 Options:
   --codex               Configure Codex
   --claude              Configure Claude Code
+  --e2ee                Use the local end-to-end encryption proxy
   --replace             Replace a conflicting Murmur MCP entry
   --url URL             MCP endpoint (default: ${DEFAULT_MURMUR_URL})
   --user                Required acknowledgement of user-level scope
@@ -53,6 +56,8 @@ function nextArgument(arguments_: readonly string[], index: number, option: stri
 function parseSetupArguments(arguments_: readonly string[]): SetupArguments {
   const clients: MurmurClient[] = [];
   let hookExecutable: string | null = null;
+  let proxyExecutable: string | null = null;
+  let e2ee: boolean = false;
   let replace: boolean = false;
   let url: string = DEFAULT_MURMUR_URL;
   let userScope: boolean = false;
@@ -66,12 +71,19 @@ function parseSetupArguments(arguments_: readonly string[]): SetupArguments {
       case "--codex":
         clients.push("codex");
         break;
+      case "--e2ee":
+        e2ee = true;
+        break;
       case "--hook-executable":
         hookExecutable = nextArgument(arguments_, index, argument);
         index += 1;
         break;
       case "--replace":
         replace = true;
+        break;
+      case "--proxy-executable":
+        proxyExecutable = nextArgument(arguments_, index, argument);
+        index += 1;
         break;
       case "--url":
         url = nextArgument(arguments_, index, argument);
@@ -94,10 +106,26 @@ function parseSetupArguments(arguments_: readonly string[]): SetupArguments {
   }
   return {
     clients: clients.length === 0 ? ["codex", "claude"] : [...new Set(clients)],
+    e2ee,
     hookExecutable,
+    proxyExecutable,
     replace,
     url: parsedUrl.toString(),
   };
+}
+
+function resolveProxyExecutable(configured: string | null): string {
+  if (configured !== null) {
+    if (!existsSync(configured)) throw new Error(`E2E proxy executable not found: ${configured}`);
+    return configured;
+  }
+  const executable: string | null = Bun.which("murmur-e2ee-proxy");
+  if (executable === null) {
+    throw new Error(
+      "murmur-e2ee-proxy is not on PATH. Install Murmur globally, then run setup again.",
+    );
+  }
+  return executable;
 }
 
 function resolveHookExecutable(configured: string | null): string {
@@ -117,8 +145,13 @@ function resolveHookExecutable(configured: string | null): string {
 export function setup(arguments_: readonly string[]): readonly string[] {
   const parsed: SetupArguments = parseSetupArguments(arguments_);
   const hookExecutable: string = resolveHookExecutable(parsed.hookExecutable);
+  const proxyExecutable: string | undefined = parsed.e2ee
+    ? resolveProxyExecutable(parsed.proxyExecutable)
+    : undefined;
   return installUserConfiguration({
     clients: parsed.clients,
+    e2ee: parsed.e2ee,
+    e2eeProxyExecutable: proxyExecutable,
     hookExecutable,
     replace: parsed.replace,
     url: parsed.url,
