@@ -80,9 +80,21 @@ test("replenishes bounded prekeys and rotates one agent generation concurrently"
       Instant.parse("2026-08-10T19:00:00.000Z"),
     );
     expect(replenished).toMatchObject({ fallback_available: 1, one_time_available: 20 });
+    const expired: readonly StoredPrekey[] = await first.keys.replenishPrekeys(
+      agentId,
+      "one_time",
+      1,
+      "2026-08-01T19:00:00.000Z",
+      "2026-08-05T19:00:00.000Z",
+    );
     expect(
       await replenishLocalPrekeys(second, agentId, Instant.parse("2026-08-10T19:01:00.000Z")),
     ).toEqual(replenished);
+    const expiredFixture: StoredPrekey | undefined = expired[0];
+    if (expiredFixture === undefined) throw new Error("Expected an expired prekey fixture");
+    const purged: StoredPrekey | null = first.keys.getPrekey(expiredFixture.certificate.prekeyId);
+    if (purged === null) throw new Error("Expected the expired public prekey to remain");
+    expect(purged.privateKey).toBeNull();
     const previousKeyId: string = replenished.agent_key_id;
     const rotations: readonly [
       Awaited<ReturnType<typeof rotateLocalAgentKey>>,

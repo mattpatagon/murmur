@@ -93,6 +93,7 @@ export async function publishLocalIdentity(
   agentId: string,
   now: Instant,
 ): Promise<LocalPublishedIdentity> {
+  vault.purgeExpired(now.toISOString());
   await getE2eeCapability(remote, true);
   const agent: StoredAgentKey = await vault.keys.getOrCreateAgent(
     agentId,

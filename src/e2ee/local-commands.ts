@@ -171,6 +171,7 @@ export async function replenishLocalPrekeys(
   agentId: string,
   now: Instant,
 ): Promise<LocalPrekeyReplenishment> {
+  vault.purgeExpired(now.toISOString());
   const agent: StoredAgentKey = await vault.keys.getOrCreateAgent(
     agentId,
     now.toISOString(),
