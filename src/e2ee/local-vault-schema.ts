@@ -1,7 +1,7 @@
 import type { Database, Statement } from "bun:sqlite";
 import { z } from "zod";
 
-const VAULT_SCHEMA_VERSION: number = 3;
+const VAULT_SCHEMA_VERSION: number = 4;
 const UserVersionRowSchema: z.ZodType<{ readonly user_version: number }> = z.object({
   user_version: z
     .union([z.number().int(), z.bigint()])
@@ -129,6 +129,28 @@ export function migrateLocalVault(database: Database): void {
       database.exec(`
         ALTER TABLE outbox ADD COLUMN claim_id TEXT;
         PRAGMA user_version = 3;
+      `);
+    }
+    if (version <= 3) {
+      database.exec(`
+        ALTER TABLE outbox ADD COLUMN thread_id TEXT;
+        UPDATE outbox SET thread_id = logical_id WHERE thread_id IS NULL;
+        CREATE TABLE sent_receipts (
+          logical_id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL,
+          sender_id TEXT NOT NULL,
+          recipient_id TEXT NOT NULL,
+          pair_counter INTEGER NOT NULL CHECK(pair_counter > 0),
+          plaintext_digest BLOB NOT NULL CHECK(length(plaintext_digest) = 32),
+          claim_id TEXT NOT NULL,
+          envelope_json TEXT NOT NULL CHECK(length(envelope_json) <= 1048576),
+          verification_mode TEXT NOT NULL
+            CHECK(verification_mode IN ('strict', 'organization', 'tofu')),
+          expires_at TEXT NOT NULL,
+          UNIQUE(tenant_id, sender_id, recipient_id, pair_counter)
+        );
+        CREATE INDEX sent_receipts_expiration ON sent_receipts(expires_at);
+        PRAGMA user_version = 4;
       `);
     }
     database.exec("COMMIT");

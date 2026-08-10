@@ -24,11 +24,14 @@ import {
   envelopeToDto,
   type PublicAgentKeyBundle,
   type PublicAgentKeyBundleDto,
+  type PublicAgentSigningChain,
   parseEnvelopeDto,
   parsePublicBundleDto,
   parseSerializedEnvelope,
+  parseSigningChainDto,
   publicBundleToDto,
   serializeEnvelope,
+  signingChainToDto,
 } from "../src/e2ee/wire-contracts.js";
 
 function bytes(length: number, start: number): Uint8Array {
@@ -209,6 +212,18 @@ test("round trips a public-only certified agent bundle", async (): Promise<void>
           { length: 101 },
           (): PublicAgentKeyBundleDto["fallback_prekey"] => dto.fallback_prekey,
         ),
+      }),
+  ).toThrow();
+  const signingChain: PublicAgentSigningChain = parseSigningChainDto(
+    signingChainToDto(root.publicKey, agentCertificate),
+  );
+  expect(signingChain.rootPublicKey).toEqual(root.publicKey);
+  expect(signingChain.agentCertificate).toEqual(agentCertificate);
+  expect(
+    (): PublicAgentSigningChain =>
+      parseSigningChainDto({
+        ...signingChainToDto(root.publicKey, agentCertificate),
+        private_key: "forbidden",
       }),
   ).toThrow();
 });

@@ -8,7 +8,9 @@ import {
   type CachedMessage,
   mapCachedMessageRow,
   mapOutboxRow,
+  mapSentReceiptRow,
   type OutboxItem,
+  type SentReceipt,
   type StoredPrekey,
   safeSqlCount,
 } from "./local-vault-rows.js";
@@ -27,6 +29,7 @@ export type BeginOutboxInput = {
   readonly recipientId: string;
   readonly senderId: string;
   readonly tenantId: string;
+  readonly threadId: string;
 };
 
 export type CacheDecryptedInput = {
@@ -50,6 +53,7 @@ function outboxMatches(existing: OutboxItem, input: BeginOutboxInput): boolean {
     existing.tenantId === input.tenantId &&
     existing.senderId === input.senderId &&
     existing.recipientId === input.recipientId &&
+    existing.threadId === input.threadId &&
     existing.plaintext === input.plaintext &&
     sameDigest(existing.plaintextDigest, input.plaintextDigest)
   );
@@ -63,6 +67,18 @@ function cachedMessageMatches(existing: CachedMessage, input: CacheDecryptedInpu
     existing.pairCounter === input.pairCounter &&
     existing.plaintext === input.plaintext &&
     existing.expiresAt === input.expiresAt
+  );
+}
+
+function receiptMatchesOutbox(receipt: SentReceipt, outbox: OutboxItem): boolean {
+  return (
+    receipt.tenantId === outbox.tenantId &&
+    receipt.senderId === outbox.senderId &&
+    receipt.recipientId === outbox.recipientId &&
+    receipt.pairCounter === outbox.pairCounter &&
+    receipt.claimId === outbox.claimId &&
+    receipt.envelopeJson === outbox.envelopeJson &&
+    sameDigest(receipt.plaintextDigest, outbox.plaintextDigest)
   );
 }
 
@@ -97,7 +113,7 @@ export class LocalE2eeVault {
     this.#ensureOpen();
     const statement: Statement<unknown, [string]> = this.#database.query(`
       SELECT logical_id, tenant_id, sender_id, recipient_id, pair_counter,
-             plaintext, plaintext_digest, claim_id, envelope_json, created_at
+             plaintext, plaintext_digest, claim_id, envelope_json, created_at, thread_id
       FROM outbox WHERE logical_id = ?
     `);
     const row: unknown = statement.get(logicalId);
@@ -154,12 +170,12 @@ export class LocalE2eeVault {
       upsertCounter.run(input.tenantId, input.senderId, input.recipientId, pairCounter);
       const insert: Statement<
         unknown,
-        [string, string, string, string, number, string, Uint8Array, string]
+        [string, string, string, string, number, string, Uint8Array, string, string]
       > = this.#database.query(`
         INSERT INTO outbox(
           logical_id, tenant_id, sender_id, recipient_id, pair_counter,
-          plaintext, plaintext_digest, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          plaintext, plaintext_digest, created_at, thread_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       insert.run(
         input.logicalId,
@@ -170,6 +186,7 @@ export class LocalE2eeVault {
         input.plaintext,
         input.plaintextDigest,
         input.createdAt,
+        input.threadId,
       );
       this.#database.exec("COMMIT");
       const created: OutboxItem | null = this.getOutbox(input.logicalId);
@@ -254,6 +271,73 @@ export class LocalE2eeVault {
       "DELETE FROM outbox WHERE logical_id = ?",
     );
     return statement.run(logicalId).changes === 1;
+  }
+
+  public getSentReceipt(logicalId: string): SentReceipt | null {
+    this.#ensureOpen();
+    const statement: Statement<unknown, [string]> = this.#database.query(`
+      SELECT logical_id, tenant_id, sender_id, recipient_id, pair_counter,
+             plaintext_digest, claim_id, envelope_json, verification_mode, expires_at
+      FROM sent_receipts WHERE logical_id = ?
+    `);
+    const row: unknown = statement.get(logicalId);
+    return row === null ? null : mapSentReceiptRow(row);
+  }
+
+  public commitOutbox(
+    logicalId: string,
+    expiresAt: string,
+    verificationMode: "organization" | "strict" | "tofu",
+  ): SentReceipt {
+    this.#ensureOpen();
+    this.#database.exec("BEGIN IMMEDIATE");
+    try {
+      const outbox: OutboxItem | null = this.getOutbox(logicalId);
+      if (outbox === null || outbox.claimId === null || outbox.envelopeJson === null) {
+        const existing: SentReceipt | null = this.getSentReceipt(logicalId);
+        if (existing === null) throw new Error("Complete outbox item does not exist");
+        this.#database.exec("COMMIT");
+        return existing;
+      }
+      const insert: Statement<
+        unknown,
+        [string, string, string, string, number, Uint8Array, string, string, string, string]
+      > = this.#database.query(`
+        INSERT OR IGNORE INTO sent_receipts(
+          logical_id, tenant_id, sender_id, recipient_id, pair_counter,
+          plaintext_digest, claim_id, envelope_json, verification_mode, expires_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      insert.run(
+        outbox.logicalId,
+        outbox.tenantId,
+        outbox.senderId,
+        outbox.recipientId,
+        outbox.pairCounter,
+        outbox.plaintextDigest,
+        outbox.claimId,
+        outbox.envelopeJson,
+        verificationMode,
+        expiresAt,
+      );
+      const receipt: SentReceipt | null = this.getSentReceipt(logicalId);
+      if (
+        receipt === null ||
+        !receiptMatchesOutbox(receipt, outbox) ||
+        receipt.verificationMode !== verificationMode
+      ) {
+        throw new Error("Sent receipt idempotency conflict");
+      }
+      const remove: Statement<unknown, [string]> = this.#database.query(
+        "DELETE FROM outbox WHERE logical_id = ?",
+      );
+      if (remove.run(logicalId).changes !== 1) throw new Error("Committed outbox did not resolve");
+      this.#database.exec("COMMIT");
+      return receipt;
+    } catch (error: unknown) {
+      this.#database.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   public getCachedMessage(messageId: string): CachedMessage | null {
@@ -347,7 +431,12 @@ export class LocalE2eeVault {
     const statement: Statement<unknown, [string]> = this.#database.query(
       "DELETE FROM decrypted_cache WHERE expires_at <= ?",
     );
-    return statement.run(now).changes;
+    const deleted: number = statement.run(now).changes;
+    const receipts: Statement<unknown, [string]> = this.#database.query(
+      "DELETE FROM sent_receipts WHERE expires_at <= ?",
+    );
+    receipts.run(now);
+    return deleted;
   }
 
   public purgeCachedMessages(messageIds: readonly string[]): number {

@@ -71,6 +71,18 @@ export type PublicAgentKeyBundle = {
   readonly rootPublicKey: Uint8Array;
 };
 
+export type PublicAgentSigningChainDto = {
+  readonly agent_certificate: AgentKeyCertificateDto;
+  readonly root_key_id: string;
+  readonly root_public_key: string;
+};
+
+export type PublicAgentSigningChain = {
+  readonly agentCertificate: AgentKeyCertificate;
+  readonly rootKeyId: string;
+  readonly rootPublicKey: Uint8Array;
+};
+
 export type EnvelopeHeaderDto = {
   readonly branch_name: string | null;
   readonly broadcast_id: string | null;
@@ -108,7 +120,7 @@ export type EncryptedEnvelopeDto = {
   readonly signature: string;
 };
 
-const AgentKeyCertificateDtoSchema: z.ZodType<AgentKeyCertificateDto> = z.strictObject({
+export const AgentKeyCertificateDtoSchema: z.ZodType<AgentKeyCertificateDto> = z.strictObject({
   agent_id: AgentIdSchema,
   created_at: InstantSchema,
   expires_at: InstantSchema,
@@ -164,6 +176,17 @@ export const PublicAgentKeyBundleDtoSchema: z.ZodType<PublicAgentKeyBundleDto> =
       )
     ) {
       context.addIssue({ code: "custom", message: "Bundle one-time prekey has the wrong class" });
+    }
+  });
+export const PublicAgentSigningChainDtoSchema: z.ZodType<PublicAgentSigningChainDto> = z
+  .strictObject({
+    agent_certificate: AgentKeyCertificateDtoSchema,
+    root_key_id: RootKeyIdSchema,
+    root_public_key: Base64UrlSchema.length(43),
+  })
+  .superRefine((chain: PublicAgentSigningChainDto, context: z.core.$RefinementCtx): void => {
+    if (chain.root_key_id !== chain.agent_certificate.root_key_id) {
+      context.addIssue({ code: "custom", message: "Signing chain root identifiers do not match" });
     }
   });
 const EnvelopeHeaderDtoSchema: z.ZodType<EnvelopeHeaderDto> = z.strictObject({
@@ -379,6 +402,26 @@ export function parsePublicBundleDto(input: unknown): PublicAgentKeyBundle {
     agentCertificate: dtoToAgentCertificate(dto.agent_certificate),
     fallbackPrekey: dtoToPrekeyCertificate(dto.fallback_prekey),
     oneTimePrekeys: dto.one_time_prekeys.map(dtoToPrekeyCertificate),
+    rootKeyId: dto.root_key_id,
+    rootPublicKey: decodeBytes(dto.root_public_key, KEY_BYTES, "Root public key"),
+  };
+}
+
+export function signingChainToDto(
+  rootPublicKey: Uint8Array,
+  agentCertificate: AgentKeyCertificate,
+): PublicAgentSigningChainDto {
+  return {
+    agent_certificate: agentCertificateToDto(agentCertificate),
+    root_key_id: agentCertificate.rootKeyId,
+    root_public_key: encodeBytes(rootPublicKey),
+  };
+}
+
+export function parseSigningChainDto(input: unknown): PublicAgentSigningChain {
+  const dto: PublicAgentSigningChainDto = PublicAgentSigningChainDtoSchema.parse(input);
+  return {
+    agentCertificate: dtoToAgentCertificate(dto.agent_certificate),
     rootKeyId: dto.root_key_id,
     rootPublicKey: decodeBytes(dto.root_public_key, KEY_BYTES, "Root public key"),
   };

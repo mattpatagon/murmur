@@ -9,6 +9,7 @@ import type {
   CachedMessage,
   OutboxItem,
   PeerPin,
+  SentReceipt,
   StoredAgentKey,
   StoredPrekey,
   StoredRootKey,
@@ -135,6 +136,7 @@ test("serializes each sender-recipient outbox and preserves exact retry bytes", 
         recipientId: "bob",
         senderId: "alice",
         tenantId: "11111111-1111-4111-8111-111111111111",
+        threadId: "thread-1",
       });
       expect(first.pairCounter).toBe(1);
       expect(
@@ -146,6 +148,7 @@ test("serializes each sender-recipient outbox and preserves exact retry bytes", 
           recipientId: first.recipientId,
           senderId: first.senderId,
           tenantId: first.tenantId,
+          threadId: first.threadId,
         }).pairCounter,
       ).toBe(1);
       expect(
@@ -158,6 +161,7 @@ test("serializes each sender-recipient outbox and preserves exact retry bytes", 
             recipientId: first.recipientId,
             senderId: first.senderId,
             tenantId: first.tenantId,
+            threadId: "thread-2",
           }),
       ).toThrow("Resolve the existing pair outbox");
       const claimId: string = "11111111-1111-4111-8111-111111111111";
@@ -185,7 +189,16 @@ test("serializes each sender-recipient outbox and preserves exact retry bytes", 
       expect(
         vault.replaceExpiredOutboxClaim(first.logicalId, "2026-08-10T17:00:31.000Z").pairCounter,
       ).toBe(2);
-      expect(vault.resolveOutbox(first.logicalId)).toBe(true);
+      const finalClaimId: string = "22222222-2222-4222-8222-222222222222";
+      vault.setOutboxEnvelope(first.logicalId, finalClaimId, '{"ciphertext":"replacement"}');
+      const receipt: SentReceipt = vault.commitOutbox(
+        first.logicalId,
+        "2026-09-09T17:00:00.000Z",
+        "strict",
+      );
+      expect(receipt.claimId).toBe(finalClaimId);
+      expect(vault.getOutbox(first.logicalId)).toBeNull();
+      expect(vault.getSentReceipt(first.logicalId)).toEqual(receipt);
       const second: OutboxItem = vault.beginOutbox({
         createdAt: "2026-08-10T17:01:00.000Z",
         logicalId: "logical-2",
@@ -194,6 +207,7 @@ test("serializes each sender-recipient outbox and preserves exact retry bytes", 
         recipientId: first.recipientId,
         senderId: first.senderId,
         tenantId: first.tenantId,
+        threadId: "thread-2",
       });
       expect(second.pairCounter).toBe(3);
     } finally {
@@ -260,7 +274,7 @@ test("rejects a vault schema newer than the running binary", async (): Promise<v
     const path: string = join(directory, "future.sqlite");
     mkdirSync(directory, { recursive: true });
     const database: Database = new Database(path, { create: true, readwrite: true });
-    database.exec("PRAGMA user_version = 4");
+    database.exec("PRAGMA user_version = 5");
     database.close(false);
     expect((): LocalE2eeVault => new LocalE2eeVault(path, "linux")).toThrow("newer");
   });

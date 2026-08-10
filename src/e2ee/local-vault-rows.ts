@@ -51,6 +51,20 @@ export type OutboxItem = {
   readonly recipientId: string;
   readonly senderId: string;
   readonly tenantId: string;
+  readonly threadId: string;
+};
+
+export type SentReceipt = {
+  readonly claimId: string;
+  readonly envelopeJson: string;
+  readonly expiresAt: string;
+  readonly logicalId: string;
+  readonly pairCounter: number;
+  readonly plaintextDigest: Uint8Array;
+  readonly recipientId: string;
+  readonly senderId: string;
+  readonly tenantId: string;
+  readonly verificationMode: "organization" | "strict" | "tofu";
 };
 
 export type CachedMessage = {
@@ -114,6 +128,7 @@ type OutboxRow = {
   readonly recipient_id: string;
   readonly sender_id: string;
   readonly tenant_id: string;
+  readonly thread_id: string;
 };
 
 type CachedMessageRow = {
@@ -124,6 +139,19 @@ type CachedMessageRow = {
   readonly recipient_id: string;
   readonly sender_id: string;
   readonly tenant_id: string;
+};
+
+type SentReceiptRow = {
+  readonly claim_id: string;
+  readonly envelope_json: string;
+  readonly expires_at: string;
+  readonly logical_id: string;
+  readonly pair_counter: number;
+  readonly plaintext_digest: Uint8Array;
+  readonly recipient_id: string;
+  readonly sender_id: string;
+  readonly tenant_id: string;
+  readonly verification_mode: "organization" | "strict" | "tofu";
 };
 
 const RootKeyRowSchema: z.ZodType<RootKeyRow> = z.strictObject({
@@ -174,6 +202,7 @@ const OutboxRowSchema: z.ZodType<OutboxRow> = z.strictObject({
   recipient_id: z.string(),
   sender_id: z.string(),
   tenant_id: z.string(),
+  thread_id: z.string(),
 });
 const CachedMessageRowSchema: z.ZodType<CachedMessageRow> = z.strictObject({
   expires_at: z.string(),
@@ -183,6 +212,18 @@ const CachedMessageRowSchema: z.ZodType<CachedMessageRow> = z.strictObject({
   recipient_id: z.string(),
   sender_id: z.string(),
   tenant_id: z.string(),
+});
+const SentReceiptRowSchema: z.ZodType<SentReceiptRow> = z.strictObject({
+  claim_id: z.string(),
+  envelope_json: z.string(),
+  expires_at: z.string(),
+  logical_id: z.string(),
+  pair_counter: SafeSqlIntegerSchema,
+  plaintext_digest: BytesSchema,
+  recipient_id: z.string(),
+  sender_id: z.string(),
+  tenant_id: z.string(),
+  verification_mode: z.enum(["organization", "strict", "tofu"]),
 });
 
 export function mapRootKeyRow(input: unknown): StoredRootKey {
@@ -254,6 +295,7 @@ export function mapOutboxRow(input: unknown): OutboxItem {
     recipientId: row.recipient_id,
     senderId: row.sender_id,
     tenantId: row.tenant_id,
+    threadId: row.thread_id,
   };
 }
 
@@ -271,5 +313,21 @@ export function mapCachedMessageRow(input: unknown): CachedMessage {
     recipientId: row.recipient_id,
     senderId: row.sender_id,
     tenantId: row.tenant_id,
+  };
+}
+
+export function mapSentReceiptRow(input: unknown): SentReceipt {
+  const row: SentReceiptRow = SentReceiptRowSchema.parse(input);
+  return {
+    claimId: row.claim_id,
+    envelopeJson: row.envelope_json,
+    expiresAt: row.expires_at,
+    logicalId: row.logical_id,
+    pairCounter: row.pair_counter,
+    plaintextDigest: row.plaintext_digest,
+    recipientId: row.recipient_id,
+    senderId: row.sender_id,
+    tenantId: row.tenant_id,
+    verificationMode: row.verification_mode,
   };
 }

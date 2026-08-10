@@ -6,6 +6,8 @@ import {
   type PrekeyCertificateDto,
   type PublicAgentKeyBundleDto,
   PublicAgentKeyBundleDtoSchema,
+  type PublicAgentSigningChainDto,
+  PublicAgentSigningChainDtoSchema,
 } from "./wire-contracts.js";
 
 export const E2EE_WIRE_VERSION: 1 = 1;
@@ -92,6 +94,7 @@ export type PutEncryptedMessageInput = {
 export type EncryptedMessageDto = {
   readonly envelope: EncryptedEnvelopeDto;
   readonly read_at: string | null;
+  readonly sender_chain: PublicAgentSigningChainDto;
   readonly tenant_sequence: number;
 };
 
@@ -265,6 +268,7 @@ export const ClaimEncryptionPrekeyOutputSchema: z.ZodType<ClaimEncryptionPrekeyO
 export const EncryptedMessageDtoSchema: z.ZodType<EncryptedMessageDto> = z.strictObject({
   envelope: EncryptedEnvelopeDtoSchema,
   read_at: InstantSchema.nullable(),
+  sender_chain: PublicAgentSigningChainDtoSchema,
   tenant_sequence: SequenceSchema.positive(),
 });
 export const PutEncryptedMessageInputSchema: z.ZodType<PutEncryptedMessageInput> = z.strictObject({
