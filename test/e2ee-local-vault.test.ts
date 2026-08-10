@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -15,7 +15,11 @@ import type {
   StoredPrekey,
   StoredRootKey,
 } from "../src/e2ee/local-vault-rows.js";
-import { defaultE2eeVaultPath, windowsVaultAclArguments } from "../src/e2ee/vault-paths.js";
+import {
+  defaultE2eeVaultPath,
+  windowsVaultAclArguments,
+  windowsVaultDirectoryAclArguments,
+} from "../src/e2ee/vault-paths.js";
 
 function fixedDigest(start: number): Uint8Array {
   const digest: Uint8Array = new Uint8Array(32);
@@ -56,6 +60,18 @@ test("derives portable user-scoped vault paths", (): void => {
     // biome-ignore lint/security/noSecrets: This is a public Windows ACL fixture, not credential material.
     "WORKSTATION\\alice:(F)",
   ]);
+  expect(
+    windowsVaultDirectoryAclArguments("C:\\vault", {
+      USERDOMAIN: "WORKSTATION",
+      USERNAME: "alice",
+    }),
+  ).toEqual([
+    "C:\\vault",
+    "/inheritance:r",
+    "/grant:r",
+    // biome-ignore lint/security/noSecrets: This is a public Windows ACL fixture, not credential material.
+    "WORKSTATION\\alice:(OI)(CI)(F)",
+  ]);
   expect((): readonly string[] =>
     windowsVaultAclArguments("C:\\vault.sqlite", { USERNAME: "bad:user" }),
   ).toThrow("identity is unavailable");
@@ -75,6 +91,10 @@ test("creates one installation root across concurrent vault handles with owner-o
       expect(roots[0].privateKey).toEqual(roots[1].privateKey);
       expect(statSync(path).mode & 0o777).toBe(0o600);
       expect(statSync(join(directory, "private")).mode & 0o777).toBe(0o700);
+      for (const suffix of ["-wal", "-shm"]) {
+        const sidecar: string = `${path}${suffix}`;
+        if (existsSync(sidecar)) expect(statSync(sidecar).mode & 0o777).toBe(0o600);
+      }
     } finally {
       first.close();
       second.close();

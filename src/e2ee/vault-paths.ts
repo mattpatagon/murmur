@@ -1,5 +1,5 @@
 import { type SpawnSyncReturns, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import process from "node:process";
 
@@ -42,7 +42,12 @@ export function prepareVaultDirectory(path: string, platform: NodeJS.Platform): 
   if (path === ":memory:") return;
   const directory: string = dirname(path);
   mkdirSync(directory, { mode: 0o700, recursive: true });
-  if (platform !== "win32") chmodSync(directory, 0o700);
+  if (platform === "win32") {
+    runIcacls(windowsVaultDirectoryAclArguments(directory));
+    runIcacls([directory, "/verify"]);
+    return;
+  }
+  chmodSync(directory, 0o700);
 }
 
 export function windowsVaultAclArguments(
@@ -61,6 +66,16 @@ export function windowsVaultAclArguments(
   return [path, "/inheritance:r", "/grant:r", `${account}:(F)`];
 }
 
+export function windowsVaultDirectoryAclArguments(
+  path: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): readonly string[] {
+  const fileArguments: readonly string[] = windowsVaultAclArguments(path, environment);
+  const accountGrant: string | undefined = fileArguments[3];
+  if (accountGrant === undefined) throw new Error("Windows E2E vault ACL is incomplete");
+  return [path, "/inheritance:r", "/grant:r", accountGrant.replace(":(F)", ":(OI)(CI)(F)")];
+}
+
 function runIcacls(arguments_: readonly string[]): void {
   const result: SpawnSyncReturns<string> = spawnSync("icacls.exe", arguments_, {
     encoding: "utf8",
@@ -73,12 +88,16 @@ function runIcacls(arguments_: readonly string[]): void {
 
 export function protectVaultFile(path: string, platform: NodeJS.Platform): void {
   if (path === ":memory:") return;
-  if (platform === "win32") {
-    runIcacls(windowsVaultAclArguments(path));
-    runIcacls([path, "/verify"]);
-    return;
+  const files: readonly string[] = [path, `${path}-wal`, `${path}-shm`];
+  for (const file of files) {
+    if (!existsSync(file)) continue;
+    if (platform === "win32") {
+      runIcacls(windowsVaultAclArguments(file));
+      runIcacls([file, "/verify"]);
+    } else {
+      chmodSync(file, 0o600);
+      const mode: number = statSync(file).mode & 0o777;
+      if (mode !== 0o600) throw new Error("E2E vault permissions are not owner-only");
+    }
   }
-  chmodSync(path, 0o600);
-  const mode: number = statSync(path).mode & 0o777;
-  if (mode !== 0o600) throw new Error("E2E vault permissions are not owner-only");
 }
