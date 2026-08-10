@@ -381,7 +381,7 @@ test.skipIf(
       await verifyHostedTenantMessaging(scenario);
       await verifyHostedAgentLifecycleProtocol(scenario);
       const orchestration: HostedOrchestrationResult = await verifyHostedOrchestration(scenario);
-      await verifyHostedOrchestrationRollback(configuredDatabaseUrl, orchestration.bossSecret);
+      await verifyHostedOrchestrationRollback(configuredDatabaseUrl, orchestration);
       await verifyHostedTenantLifecycle(scenario);
       await verifyHostedAgentLifecycleStorage(scenario);
       await verifyHostedAgentLifecycleHardening(scenario);
