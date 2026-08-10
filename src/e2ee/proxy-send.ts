@@ -81,7 +81,7 @@ export function defaultProxySendOptions(): ProxySendOptions {
   };
 }
 
-function claimProvenanceMatches(
+export function claimProvenanceMatches(
   actual: ClaimedProvenanceDto,
   expected: ClaimedProvenanceDto,
 ): boolean {
@@ -116,7 +116,7 @@ async function digestOutbox(
   }
 }
 
-function envelopeExpiry(
+export function envelopeExpiry(
   now: Instant,
   identity: LocalPublishedIdentity,
   claim: VerifiedClaim,
@@ -216,6 +216,9 @@ async function createStoredEnvelope(
     verified.prekey.prekeyPublicKey,
     options.random,
   );
+  if (envelope.ciphertext.byteLength > capability.max_ciphertext_bytes) {
+    throw new Error("Encrypted message exceeds the hosted ciphertext limit");
+  }
   return {
     outbox: vault.setOutboxEnvelope(
       outbox.logicalId,
