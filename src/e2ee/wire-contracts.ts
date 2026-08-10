@@ -129,7 +129,7 @@ export const AgentKeyCertificateDtoSchema: z.ZodType<AgentKeyCertificateDto> = z
   signing_key_id: AgentKeyIdSchema,
   signing_public_key: Base64UrlSchema.length(43),
 });
-const PrekeyCertificateDtoSchema: z.ZodType<PrekeyCertificateDto> = z.strictObject({
+export const PrekeyCertificateDtoSchema: z.ZodType<PrekeyCertificateDto> = z.strictObject({
   agent_id: AgentIdSchema,
   agent_signing_key_id: AgentKeyIdSchema,
   created_at: InstantSchema,
@@ -341,7 +341,7 @@ export function parseEnvelopeDto(input: unknown): EncryptedEnvelope {
   };
 }
 
-function agentCertificateToDto(certificate: AgentKeyCertificate): AgentKeyCertificateDto {
+export function agentCertificateToDto(certificate: AgentKeyCertificate): AgentKeyCertificateDto {
   return {
     agent_id: certificate.agentId,
     created_at: certificate.createdAt,
@@ -353,7 +353,7 @@ function agentCertificateToDto(certificate: AgentKeyCertificate): AgentKeyCertif
   };
 }
 
-function prekeyCertificateToDto(certificate: PrekeyCertificate): PrekeyCertificateDto {
+export function prekeyCertificateToDto(certificate: PrekeyCertificate): PrekeyCertificateDto {
   return {
     agent_id: certificate.agentId,
     agent_signing_key_id: certificate.agentSigningKeyId,

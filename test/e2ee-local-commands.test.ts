@@ -5,14 +5,22 @@ import { join } from "node:path";
 
 import { Instant } from "../src/domain/value-objects.js";
 import {
+  exportLocalPublicIdentity,
   listLocalPeerTrust,
   localE2eeFingerprint,
   localE2eeStatus,
   trustPeerFingerprint,
 } from "../src/e2ee/local-commands.js";
 import { LocalE2eeVault } from "../src/e2ee/local-vault.js";
-import type { LocalPeerTrustSummary } from "../src/e2ee/local-commands.js";
-import type { StoredRootKey } from "../src/e2ee/local-vault-rows.js";
+import type {
+  LocalPeerTrustSummary,
+  LocalPublicIdentityExport,
+} from "../src/e2ee/local-commands.js";
+import type { StoredAgentKey, StoredPrekey, StoredRootKey } from "../src/e2ee/local-vault-rows.js";
+import {
+  AgentKeyCertificateDtoSchema,
+  PrekeyCertificateDtoSchema,
+} from "../src/e2ee/wire-contracts.js";
 
 test("reports local status and stages an exact strict fingerprint without creating keys", async (): Promise<void> => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-e2ee-local-command-"));
@@ -50,6 +58,53 @@ test("reports local status and stages an exact strict fingerprint without creati
           Instant.parse("2026-08-10T19:02:00.000Z"),
         ),
     ).toThrow("requires an audited reset");
+  } finally {
+    vault.close();
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("exports only bounded public identity material without creating or leaking keys", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-e2ee-public-export-"));
+  const vault: LocalE2eeVault = new LocalE2eeVault(join(directory, "vault.sqlite"), "linux");
+  try {
+    expect((): LocalPublicIdentityExport => exportLocalPublicIdentity(vault)).toThrow(
+      "not initialized",
+    );
+    const root: StoredRootKey = await vault.keys.getOrCreateRoot("2026-08-10T19:00:00.000Z");
+    expect(exportLocalPublicIdentity(vault).agents).toEqual([]);
+    const agent: StoredAgentKey = await vault.keys.getOrCreateAgent(
+      "machine-a:codex:repo-a:alice",
+      "2026-08-10T19:00:00.000Z",
+      "2026-11-08T19:00:00.000Z",
+    );
+    const prekeys: readonly StoredPrekey[] = await vault.keys.replenishPrekeys(
+      agent.certificate.agentId,
+      "one_time",
+      2,
+      "2026-08-10T19:01:00.000Z",
+      "2026-09-16T19:01:00.000Z",
+    );
+    const exported: LocalPublicIdentityExport = exportLocalPublicIdentity(vault);
+    expect(exported.protocol).toBe("murmur-e2ee-v1");
+    expect(exported.root_key_id).toBe(root.rootKeyId);
+    expect(exported.agents).toHaveLength(1);
+    const exportedAgent: LocalPublicIdentityExport["agents"][number] | undefined =
+      exported.agents[0];
+    if (exportedAgent === undefined) throw new Error("Expected an exported agent identity");
+    expect(AgentKeyCertificateDtoSchema.parse(exportedAgent.agent_certificate)).toEqual(
+      exportedAgent.agent_certificate,
+    );
+    exportedAgent.prekeys.forEach((prekey: unknown): void => {
+      PrekeyCertificateDtoSchema.parse(prekey);
+    });
+    const serialized: string = JSON.stringify(exported);
+    expect(serialized).not.toContain(Buffer.from(root.privateKey).toString("base64url"));
+    expect(serialized).not.toContain(Buffer.from(agent.privateKey).toString("base64url"));
+    for (const prekey of prekeys) {
+      if (prekey.privateKey === null) throw new Error("Expected a generated private prekey");
+      expect(serialized).not.toContain(Buffer.from(prekey.privateKey).toString("base64url"));
+    }
   } finally {
     vault.close();
     rmSync(directory, { force: true, recursive: true });

@@ -103,6 +103,17 @@ export class LocalVaultKeys {
     return row === null ? null : mapAgentKeyRow(row);
   }
 
+  public listAgents(): readonly StoredAgentKey[] {
+    const statement: Statement<unknown, []> = this.#database.query(`
+      SELECT agent_id, root_key_id, signing_key_id, public_key, private_key,
+             created_at, expires_at, certificate_signature
+      FROM agent_keys ORDER BY agent_id LIMIT 1001
+    `);
+    const agents: readonly StoredAgentKey[] = statement.all().map(mapAgentKeyRow);
+    if (agents.length > 1_000) throw new Error("Local E2E agent key limit exceeded");
+    return agents;
+  }
+
   public async getOrCreateAgent(
     agentId: string,
     createdAt: string,
