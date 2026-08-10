@@ -1,7 +1,7 @@
 import type { Database, Statement } from "bun:sqlite";
 import { z } from "zod";
 
-const VAULT_SCHEMA_VERSION: number = 1;
+const VAULT_SCHEMA_VERSION: number = 2;
 const UserVersionRowSchema: z.ZodType<{ readonly user_version: number }> = z.object({
   user_version: z
     .union([z.number().int(), z.bigint()])
@@ -102,6 +102,27 @@ export function migrateLocalVault(database: Database): void {
         );
         CREATE INDEX decrypted_cache_expiration ON decrypted_cache(expires_at);
         PRAGMA user_version = 1;
+      `);
+    }
+    if (version <= 1) {
+      database.exec(`
+        CREATE TABLE trust_policy_state (
+          tenant_id TEXT PRIMARY KEY,
+          issuer_key_id TEXT NOT NULL,
+          issuer_public_key BLOB NOT NULL CHECK(length(issuer_public_key) = 32),
+          version INTEGER NOT NULL CHECK(version > 0),
+          expires_at TEXT NOT NULL,
+          signature BLOB NOT NULL CHECK(length(signature) = 64),
+          imported_at TEXT NOT NULL
+        );
+        CREATE TABLE trust_policy_revocations (
+          tenant_id TEXT NOT NULL REFERENCES trust_policy_state(tenant_id) ON DELETE CASCADE,
+          root_key_id TEXT NOT NULL,
+          revoked_at TEXT NOT NULL,
+          reason TEXT NOT NULL CHECK(length(reason) BETWEEN 1 AND 500),
+          PRIMARY KEY(tenant_id, root_key_id)
+        );
+        PRAGMA user_version = 2;
       `);
     }
     database.exec("COMMIT");

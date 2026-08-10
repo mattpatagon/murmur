@@ -12,6 +12,7 @@ import {
   safeSqlCount,
 } from "./local-vault-rows.js";
 import { migrateLocalVault } from "./local-vault-schema.js";
+import { LocalVaultTrust } from "./local-vault-trust.js";
 import { prepareVaultDirectory, protectVaultFile } from "./vault-paths.js";
 
 const MAX_ENVELOPE_JSON_BYTES: number = 1024 * 1024;
@@ -67,6 +68,7 @@ export class LocalE2eeVault {
   readonly #database: Database;
   #closed: boolean = false;
   public readonly keys: LocalVaultKeys;
+  public readonly trust: LocalVaultTrust;
 
   public constructor(path: string, platform: NodeJS.Platform = process.platform) {
     prepareVaultDirectory(path, platform);
@@ -82,6 +84,7 @@ export class LocalE2eeVault {
     migrateLocalVault(this.#database);
     protectVaultFile(path, platform);
     this.keys = new LocalVaultKeys(this.#database);
+    this.trust = new LocalVaultTrust(this.#database);
   }
 
   #ensureOpen(): void {

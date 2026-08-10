@@ -1,5 +1,6 @@
 import type { Changes, Database, Statement } from "bun:sqlite";
 import sodium from "libsodium-wrappers";
+import { z } from "zod";
 
 import {
   type AgentKeyCertificate,
@@ -236,40 +237,70 @@ export class LocalVaultKeys {
     return row === null ? null : mapPeerPinRow(row);
   }
 
+  public getUsablePin(tenantId: string, agentId: string, now: Date): PeerPin | null {
+    const pin: PeerPin | null = this.getPin(tenantId, agentId);
+    if (pin === null || pin.verificationMode !== "organization") return pin;
+    const statement: Statement<unknown, [string]> = this.#database.query(`
+      SELECT expires_at FROM trust_policy_state WHERE tenant_id = ?
+    `);
+    const row: unknown = statement.get(tenantId);
+    const parsed: { readonly expires_at: string } = z
+      .strictObject({ expires_at: z.string() })
+      .parse(row);
+    const expiresMillis: number = Date.parse(parsed.expires_at);
+    if (!Number.isFinite(expiresMillis) || now.getTime() >= expiresMillis) {
+      throw new Error("Organization trust policy is expired; import a valid update");
+    }
+    return pin;
+  }
+
   public async pinPeer(pin: PeerPin): Promise<PeerPin> {
     await sodium.ready;
     const derivedId: string = await rootKeyId(pin.publicKey);
     if (derivedId !== pin.rootKeyId)
       throw new Error("Peer root fingerprint does not match its key");
-    const existing: PeerPin | null = this.getPin(pin.tenantId, pin.agentId);
-    if (existing !== null) {
-      if (
-        existing.rootKeyId !== pin.rootKeyId ||
-        !sodium.memcmp(existing.publicKey, pin.publicKey)
-      ) {
-        throw new Error("Peer root changed and requires an audited reset");
-      }
-      if (pinRank(pin.verificationMode) < pinRank(existing.verificationMode)) {
-        throw new Error("Peer verification mode cannot be downgraded");
-      }
-    }
-    const statement: Statement<unknown, [string, string, string, Uint8Array, string, string]> =
-      this.#database.query(`
-        INSERT INTO peer_pins(
-          tenant_id, agent_id, root_key_id, public_key, verification_mode, verified_at
-        ) VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(tenant_id, agent_id) DO UPDATE SET
-          verification_mode = excluded.verification_mode,
-          verified_at = excluded.verified_at
+    this.#database.exec("BEGIN IMMEDIATE");
+    try {
+      const revokedStatement: Statement<unknown, [string, string]> = this.#database.query(`
+        SELECT 1 FROM trust_policy_revocations WHERE tenant_id = ? AND root_key_id = ?
       `);
-    statement.run(
-      pin.tenantId,
-      pin.agentId,
-      pin.rootKeyId,
-      pin.publicKey,
-      pin.verificationMode,
-      pin.verifiedAt,
-    );
+      if (revokedStatement.get(pin.tenantId, pin.rootKeyId) !== null) {
+        throw new Error("Peer root is revoked by the organization trust policy");
+      }
+      const existing: PeerPin | null = this.getPin(pin.tenantId, pin.agentId);
+      if (existing !== null) {
+        if (
+          existing.rootKeyId !== pin.rootKeyId ||
+          !sodium.memcmp(existing.publicKey, pin.publicKey)
+        ) {
+          throw new Error("Peer root changed and requires an audited reset");
+        }
+        if (pinRank(pin.verificationMode) < pinRank(existing.verificationMode)) {
+          throw new Error("Peer verification mode cannot be downgraded");
+        }
+      }
+      const statement: Statement<unknown, [string, string, string, Uint8Array, string, string]> =
+        this.#database.query(`
+          INSERT INTO peer_pins(
+            tenant_id, agent_id, root_key_id, public_key, verification_mode, verified_at
+          ) VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(tenant_id, agent_id) DO UPDATE SET
+            verification_mode = excluded.verification_mode,
+            verified_at = excluded.verified_at
+        `);
+      statement.run(
+        pin.tenantId,
+        pin.agentId,
+        pin.rootKeyId,
+        pin.publicKey,
+        pin.verificationMode,
+        pin.verifiedAt,
+      );
+      this.#database.exec("COMMIT");
+    } catch (error: unknown) {
+      this.#database.exec("ROLLBACK");
+      throw error;
+    }
     const stored: PeerPin | null = this.getPin(pin.tenantId, pin.agentId);
     if (stored === null) throw new Error("Peer pin was not stored");
     return stored;
