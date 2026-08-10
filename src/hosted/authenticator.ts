@@ -17,7 +17,71 @@ import {
   hashTokenSecret,
 } from "./token-secret.js";
 
-type AuthMode = "hybrid" | "legacy" | "multi-tenant";
+const AuthModeSchema: z.ZodEnum<{
+  hybrid: "hybrid";
+  legacy: "legacy";
+  "multi-tenant": "multi-tenant";
+}> = z.enum(["hybrid", "legacy", "multi-tenant"]);
+const TenantContractVersionSchema: z.ZodEnum<{ "1": "1"; "2": "2" }> = z.enum(["1", "2"]);
+type AuthMode = z.infer<typeof AuthModeSchema>;
+
+export class InvalidHostedAuthModeError extends Error {
+  public constructor() {
+    super("MURMUR_AUTH_MODE must be hybrid, legacy, or multi-tenant");
+    // biome-ignore lint/security/noSecrets: Stable error class identifier, not credential material.
+    this.name = "InvalidHostedAuthModeError";
+  }
+}
+
+export class InvalidTenantContractVersionError extends Error {
+  public constructor() {
+    super("MURMUR_TENANT_CONTRACT_VERSION must be 1 or 2");
+    this.name = "InvalidTenantContractVersionError";
+  }
+}
+
+export class InvalidBootstrapFlagError extends Error {
+  public constructor() {
+    super("MURMUR_ALLOW_BOOTSTRAP must be 0 or 1");
+    this.name = "InvalidBootstrapFlagError";
+  }
+}
+
+export class InvalidBootstrapConfigurationError extends Error {
+  public constructor() {
+    super("Operator bootstrap requires hybrid auth and Postgres hosted storage");
+    this.name = "InvalidBootstrapConfigurationError";
+  }
+}
+
+export class MissingHostedDatabaseError extends Error {
+  public constructor() {
+    super("Multi-tenant auth requires Postgres hosted storage");
+    this.name = "MissingHostedDatabaseError";
+  }
+}
+
+export class MissingLegacyApiTokenError extends Error {
+  public constructor() {
+    super("Legacy auth requires MURMUR_API_TOKEN");
+    // biome-ignore lint/security/noSecrets: Stable error class identifier, not credential material.
+    this.name = "MissingLegacyApiTokenError";
+  }
+}
+
+export class TenantContractVersionMismatchError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = "TenantContractVersionMismatchError";
+  }
+}
+
+export class MissingActiveOperatorError extends Error {
+  public constructor() {
+    super("Multi-tenant auth requires at least one active operator token");
+    this.name = "MissingActiveOperatorError";
+  }
+}
 
 export class HostedAuthenticator {
   public readonly allowBootstrap: boolean;
@@ -98,21 +162,25 @@ export class HostedAuthenticator {
 
 function authMode(environment: NodeJS.ProcessEnv): AuthMode {
   const value: string = environment["MURMUR_AUTH_MODE"] ?? "hybrid";
-  return z.enum(["hybrid", "legacy", "multi-tenant"]).parse(value);
+  const parsed: ReturnType<typeof AuthModeSchema.safeParse> = AuthModeSchema.safeParse(value);
+  if (!parsed.success) throw new InvalidHostedAuthModeError();
+  return parsed.data;
 }
 
 function bootstrapAllowed(environment: NodeJS.ProcessEnv): boolean {
   const value: string | undefined = environment["MURMUR_ALLOW_BOOTSTRAP"];
   if (value === undefined || value === "" || value === "0") return false;
-  if (value !== "1") throw new Error("MURMUR_ALLOW_BOOTSTRAP must be 0 or 1");
+  if (value !== "1") throw new InvalidBootstrapFlagError();
   return true;
 }
 
 function expectedTenantContractVersion(environment: NodeJS.ProcessEnv): 1 | 2 | null {
   const value: string | undefined = environment["MURMUR_TENANT_CONTRACT_VERSION"];
   if (value === undefined || value === "") return null;
-  const parsed: "1" | "2" = z.enum(["1", "2"]).parse(value);
-  return parsed === "1" ? 1 : 2;
+  const parsed: ReturnType<typeof TenantContractVersionSchema.safeParse> =
+    TenantContractVersionSchema.safeParse(value);
+  if (!parsed.success) throw new InvalidTenantContractVersionError();
+  return parsed.data === "1" ? 1 : 2;
 }
 
 export async function createHostedAuthenticator(
@@ -126,7 +194,7 @@ export async function createHostedAuthenticator(
     legacyValue === undefined || legacyValue.trim() === "" ? null : legacyValue;
   const databaseUrl: string | undefined = environment["MURMUR_DATABASE_URL"];
   if (allowBootstrap && mode !== "hybrid") {
-    throw new Error("Operator bootstrap requires hybrid auth and Postgres hosted storage");
+    throw new InvalidBootstrapConfigurationError();
   }
   let controlPlane: HostedControlPlane | null = null;
   if (mode !== "legacy" && databaseUrl !== undefined && databaseUrl !== "") {
@@ -140,28 +208,30 @@ export async function createHostedAuthenticator(
   }
   try {
     if (mode === "multi-tenant" && controlPlane === null) {
-      throw new Error("Multi-tenant auth requires Postgres hosted storage");
+      throw new MissingHostedDatabaseError();
     }
     if (mode === "legacy" && legacyToken === null) {
-      throw new Error("Legacy auth requires MURMUR_API_TOKEN");
+      throw new MissingLegacyApiTokenError();
     }
     if (allowBootstrap && controlPlane === null) {
-      throw new Error("Operator bootstrap requires hybrid auth and Postgres hosted storage");
+      throw new InvalidBootstrapConfigurationError();
     }
     const hasActiveOperator: boolean =
       controlPlane === null ? false : await controlPlane.hasActiveOperator();
     const tenantOnboardingEnabled: boolean =
       controlPlane === null ? false : await controlPlane.tenantOnboardingEnabled();
     if (expectedContractVersion === 2 && !tenantOnboardingEnabled) {
-      throw new Error(
+      throw new TenantContractVersionMismatchError(
         "Tenant contract version 2 is required but the database remains at version 1",
       );
     }
     if (expectedContractVersion === 1 && tenantOnboardingEnabled) {
-      throw new Error("Tenant contract version 1 was requested after database finalization");
+      throw new TenantContractVersionMismatchError(
+        "Tenant contract version 1 was requested after database finalization",
+      );
     }
     if (mode === "multi-tenant" && !hasActiveOperator) {
-      throw new Error("Multi-tenant auth requires at least one active operator token");
+      throw new MissingActiveOperatorError();
     }
     return new HostedAuthenticator({
       allowBootstrap: allowBootstrap && !hasActiveOperator,

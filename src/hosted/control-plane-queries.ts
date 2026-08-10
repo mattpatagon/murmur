@@ -12,6 +12,21 @@ import {
   onlyRow,
 } from "./control-plane-rows.js";
 
+export class HostedSchemaNotAppliedError extends Error {
+  public constructor() {
+    super("Murmur's hosted tenant migration has not been applied");
+    // biome-ignore lint/security/noSecrets: Stable error class identifier, not credential material.
+    this.name = "HostedSchemaNotAppliedError";
+  }
+}
+
+export class UnsafeHostedDatabaseRoleError extends Error {
+  public constructor() {
+    super("Hosted Murmur must connect as the non-owner murmur_app runtime role");
+    this.name = "UnsafeHostedDatabaseRoleError";
+  }
+}
+
 export async function verifyHostedControlPlaneSchema(database: Sql): Promise<void> {
   const rawRows: unknown = await database`
     SELECT
@@ -26,9 +41,9 @@ export async function verifyHostedControlPlaneSchema(database: Sql): Promise<voi
   `;
   const rows: HostedSchemaProbeRow[] = z.array(HostedSchemaProbeRowSchema).parse(rawRows);
   const row: HostedSchemaProbeRow = onlyRow(rows, "hosted schema probe");
-  if (!row.changed) throw new Error("Murmur's hosted tenant migration has not been applied");
+  if (!row.changed) throw new HostedSchemaNotAppliedError();
   if (row.current_role !== "murmur_app" || row.is_superuser || row.bypasses_rls) {
-    throw new Error("Hosted Murmur must connect as the non-owner murmur_app runtime role");
+    throw new UnsafeHostedDatabaseRoleError();
   }
 }
 

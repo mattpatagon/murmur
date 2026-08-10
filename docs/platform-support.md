@@ -62,7 +62,8 @@ PostgreSQL client tools on Linux. Cloud Run deployment requires the tools listed
 [hosted-deployment.md](hosted-deployment.md).
 
 The host-to-container gate rewrites only loopback database hostnames to Docker's runner gateway and
-adds that gateway explicitly on Linux. Remote PostgreSQL hostnames are preserved unchanged.
+adds that gateway explicitly when the container launches. Remote PostgreSQL hostnames are preserved
+unchanged.
 
 ## Reporting a platform defect
 

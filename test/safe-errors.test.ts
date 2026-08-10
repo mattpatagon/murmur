@@ -36,6 +36,29 @@ test("malformed MURMUR_DATABASE_URL never exposes its password", async (): Promi
   expect(stderr).not.toContain(sentinel);
 });
 
+test("startup configuration failures emit a specific safe error class", async (): Promise<void> => {
+  const child: Bun.Subprocess<"ignore", "pipe", "pipe"> = Bun.spawn(
+    [process.execPath, "run", "src/http-server.ts"],
+    {
+      cwd: resolve("."),
+      env: {
+        MURMUR_TELEMETRY_ENABLED: "invalid",
+        PATH: process.env["PATH"] ?? "",
+      },
+      stderr: "pipe",
+      stdin: "ignore",
+      stdout: "pipe",
+    },
+  );
+  const exitCode: number = await child.exited;
+  const stderr: string = await new Response(child.stderr).text();
+  expect(exitCode).not.toBe(0);
+  expect(stderr).toContain('"context":"Murmur HTTP startup failed"');
+  // biome-ignore lint/security/noSecrets: This is a safe error class, not credential material.
+  expect(stderr).toContain('"error_class":"InvalidTelemetryEnabledError"');
+  expect(stderr).not.toContain("MURMUR_TELEMETRY_ENABLED must be");
+});
+
 test("safe error logging initializes lazily under unrelated log-level values", async (): Promise<void> => {
   const child: Bun.Subprocess<"ignore", "pipe", "pipe"> = Bun.spawn(
     [

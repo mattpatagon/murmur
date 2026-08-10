@@ -13,6 +13,7 @@ import {
   RequestObservation,
 } from "../src/observability/request-observation.js";
 import {
+  InvalidLogLevelError,
   type LogFields,
   type LogOutput,
   StructuredLogger,
@@ -151,7 +152,7 @@ test("structured logger validates its only supported verbosity states", (): void
   expect(output.errors).toHaveLength(0);
   expect(
     (): StructuredLogger => new StructuredLogger({ MURMUR_LOG_LEVEL: "debug" }, output),
-  ).toThrow("MURMUR_LOG_LEVEL must be 'info' or 'off'");
+  ).toThrow(InvalidLogLevelError);
 });
 
 test("MCP request metadata drops arguments before crossing the observation boundary", (): void => {

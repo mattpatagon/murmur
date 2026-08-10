@@ -42,24 +42,78 @@ const DEFAULT_EXPORT_TIMEOUT_MS: number = 4_000;
 const MIN_EXPORT_TIMEOUT_MS: number = 100;
 const MAX_EXPORT_TIMEOUT_MS: number = 5_000;
 
+export class MissingTelemetryEndpointError extends Error {
+  public constructor() {
+    super(
+      "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT or OTEL_EXPORTER_OTLP_ENDPOINT is required when telemetry is enabled",
+    );
+    this.name = "MissingTelemetryEndpointError";
+  }
+}
+
+export class UnsupportedTelemetryProtocolError extends Error {
+  public constructor() {
+    super("Murmur tracing supports only OTLP http/protobuf export");
+    this.name = "UnsupportedTelemetryProtocolError";
+  }
+}
+
+export class InvalidTelemetryEndpointError extends Error {
+  public constructor() {
+    super("The OTLP endpoint must be a valid absolute URL");
+    this.name = "InvalidTelemetryEndpointError";
+  }
+}
+
+export class InsecureTelemetryEndpointError extends Error {
+  public constructor() {
+    super("The OTLP endpoint must use HTTPS, except for localhost development");
+    this.name = "InsecureTelemetryEndpointError";
+  }
+}
+
+export class InvalidTelemetryEnabledError extends Error {
+  public constructor() {
+    super("MURMUR_TELEMETRY_ENABLED must be '0' or '1'");
+    this.name = "InvalidTelemetryEnabledError";
+  }
+}
+
+export class InvalidTelemetryTimeoutError extends Error {
+  public constructor() {
+    super("MURMUR_TELEMETRY_EXPORT_TIMEOUT_MS must be an integer from 100 to 5000");
+    this.name = "InvalidTelemetryTimeoutError";
+  }
+}
+
+class InvalidTelemetryStateError extends Error {
+  public constructor() {
+    super("Enabled telemetry requires a validated exporter URL");
+    this.name = "InvalidTelemetryStateError";
+  }
+}
+
 function validatedExporterUrl(environment: NodeJS.ProcessEnv): string {
   const traceEndpoint: string | undefined = environment["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"];
   const genericEndpoint: string | undefined = environment["OTEL_EXPORTER_OTLP_ENDPOINT"];
   const configured: string | undefined =
     traceEndpoint === undefined || traceEndpoint.length === 0 ? genericEndpoint : traceEndpoint;
   if (configured === undefined || configured.length === 0) {
-    throw new Error(
-      "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT or OTEL_EXPORTER_OTLP_ENDPOINT is required when telemetry is enabled",
-    );
+    throw new MissingTelemetryEndpointError();
   }
   const protocol: string | undefined = environment["OTEL_EXPORTER_OTLP_PROTOCOL"];
   if (protocol !== undefined && protocol.length > 0 && protocol !== "http/protobuf") {
-    throw new Error("Murmur tracing supports only OTLP http/protobuf export");
+    throw new UnsupportedTelemetryProtocolError();
   }
-  const url: URL = new URL(configured);
+  let url: URL;
+  try {
+    url = new URL(configured);
+  } catch (_error: unknown) {
+    throw new InvalidTelemetryEndpointError();
+  }
   const local: boolean = url.hostname === "localhost" || url.hostname === "127.0.0.1";
   if (url.protocol !== "https:" && !(local && url.protocol === "http:")) {
-    throw new Error("The OTLP endpoint must use HTTPS, except for localhost development");
+    throw new InsecureTelemetryEndpointError();
   }
   if (traceEndpoint !== undefined && traceEndpoint.length > 0) return url.toString();
   const normalizedPath: string = url.pathname.endsWith("/")
@@ -78,7 +132,7 @@ export function telemetryConfiguration(environment: NodeJS.ProcessEnv): Telemetr
       exporterUrl: null,
     };
   }
-  if (enabledValue !== "1") throw new Error("MURMUR_TELEMETRY_ENABLED must be '0' or '1'");
+  if (enabledValue !== "1") throw new InvalidTelemetryEnabledError();
   const configuredTimeout: string | undefined = environment["MURMUR_TELEMETRY_EXPORT_TIMEOUT_MS"];
   const exportTimeoutMillis: number =
     configuredTimeout === undefined || configuredTimeout.length === 0
@@ -89,7 +143,7 @@ export function telemetryConfiguration(environment: NodeJS.ProcessEnv): Telemetr
     exportTimeoutMillis < MIN_EXPORT_TIMEOUT_MS ||
     exportTimeoutMillis > MAX_EXPORT_TIMEOUT_MS
   ) {
-    throw new Error("MURMUR_TELEMETRY_EXPORT_TIMEOUT_MS must be an integer from 100 to 5000");
+    throw new InvalidTelemetryTimeoutError();
   }
   return {
     enabled: true,
@@ -142,7 +196,7 @@ class OpenTelemetry implements Telemetry {
   public constructor(configuration: TelemetryConfiguration, environment: NodeJS.ProcessEnv) {
     const exporterUrl: string | null = configuration.exporterUrl;
     if (!configuration.enabled || exporterUrl === null) {
-      throw new Error("Enabled telemetry requires a validated exporter URL");
+      throw new InvalidTelemetryStateError();
     }
     this.exportTimeoutMillis = configuration.exportTimeoutMillis;
     const exporter: OTLPTraceExporter = new OTLPTraceExporter({

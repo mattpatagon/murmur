@@ -3,9 +3,15 @@ import { expect, test } from "bun:test";
 import { settleWithin } from "../src/observability/deadline.js";
 import {
   createTelemetry,
+  InsecureTelemetryEndpointError,
+  InvalidTelemetryEnabledError,
+  InvalidTelemetryEndpointError,
+  InvalidTelemetryTimeoutError,
+  MissingTelemetryEndpointError,
   type RequestTrace,
   type Telemetry,
   telemetryConfiguration,
+  UnsupportedTelemetryProtocolError,
 } from "../src/observability/telemetry.js";
 
 test("telemetry is opt-in and validates bounded HTTP exporter configuration", (): void => {
@@ -41,30 +47,42 @@ test("telemetry is opt-in and validates bounded HTTP exporter configuration", ()
   });
   expect((): void => {
     telemetryConfiguration({ MURMUR_TELEMETRY_ENABLED: "yes" });
-  }).toThrow("MURMUR_TELEMETRY_ENABLED must be '0' or '1'");
+  }).toThrow(InvalidTelemetryEnabledError);
   expect((): void => {
     telemetryConfiguration({ MURMUR_TELEMETRY_ENABLED: "1" });
-  }).toThrow("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT or OTEL_EXPORTER_OTLP_ENDPOINT is required");
+  }).toThrow(MissingTelemetryEndpointError);
+  const endpointSentinel: string = "TELEMETRY_SECRET_SENTINEL";
+  try {
+    telemetryConfiguration({
+      MURMUR_TELEMETRY_ENABLED: "1",
+      OTEL_EXPORTER_OTLP_ENDPOINT: ["https://user:", endpointSentinel, "@["].join(""),
+    });
+    throw new Error("Malformed telemetry endpoint unexpectedly parsed");
+  } catch (error: unknown) {
+    expect(error).toBeInstanceOf(InvalidTelemetryEndpointError);
+    expect(String(error)).not.toContain(endpointSentinel);
+    expect(error instanceof Error ? error.cause : undefined).toBeUndefined();
+  }
   expect((): void => {
     telemetryConfiguration({
       MURMUR_TELEMETRY_ENABLED: "1",
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo.example",
     });
-  }).toThrow("The OTLP endpoint must use HTTPS");
+  }).toThrow(InsecureTelemetryEndpointError);
   expect((): void => {
     telemetryConfiguration({
       MURMUR_TELEMETRY_ENABLED: "1",
       OTEL_EXPORTER_OTLP_ENDPOINT: "https://tempo.example",
       OTEL_EXPORTER_OTLP_PROTOCOL: "grpc",
     });
-  }).toThrow("only OTLP http/protobuf");
+  }).toThrow(UnsupportedTelemetryProtocolError);
   expect((): void => {
     telemetryConfiguration({
       MURMUR_TELEMETRY_ENABLED: "1",
       MURMUR_TELEMETRY_EXPORT_TIMEOUT_MS: "5001",
       OTEL_EXPORTER_OTLP_ENDPOINT: "https://tempo.example",
     });
-  }).toThrow("must be an integer from 100 to 5000");
+  }).toThrow(InvalidTelemetryTimeoutError);
 });
 
 test("enabled telemetry exports bounded protobuf spans without request secrets", async (): Promise<void> => {

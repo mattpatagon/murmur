@@ -31,6 +31,13 @@ const SYSTEM_LOG_OUTPUT: LogOutput = {
   },
 };
 
+export class InvalidLogLevelError extends Error {
+  public constructor() {
+    super("MURMUR_LOG_LEVEL must be 'info' or 'off'");
+    this.name = "InvalidLogLevelError";
+  }
+}
+
 function firstEnvironmentValue(
   environment: NodeJS.ProcessEnv,
   names: readonly string[],
@@ -72,7 +79,7 @@ function loggingEnabled(environment: NodeJS.ProcessEnv): boolean {
   const configured: string | undefined = environment["MURMUR_LOG_LEVEL"];
   if (configured === undefined || configured.length === 0 || configured === "info") return true;
   if (configured === "off") return false;
-  throw new Error("MURMUR_LOG_LEVEL must be 'info' or 'off'");
+  throw new InvalidLogLevelError();
 }
 
 function redactedRecord(

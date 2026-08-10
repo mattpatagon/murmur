@@ -35,6 +35,11 @@ a closed set, error classes are allowlisted, and operational failures retain onl
 plus that class. String fields pass through credential and URL redaction before output and again
 before trace export as defense in depth.
 
+Startup configuration and hosted database contract failures use stable, specific `error_class`
+values. Operators can distinguish invalid logging, telemetry, database TLS, hosted authentication,
+tenant contract, migration, and runtime-role failures without recording the rejected value or an
+exception message.
+
 Do not add free-form user input as a field. New values must have a bounded format and cardinality,
 a documented diagnostic purpose, a test proving redaction, and the same safe representation in logs
 and traces. Treat observability output as sensitive operational metadata even after redaction.

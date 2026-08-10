@@ -7,6 +7,15 @@ import { pathToFileURL } from "node:url";
 import { parseDatabaseUrl } from "../src/database-url.js";
 import { StorageCorruptionError, UnsupportedDatabaseError } from "../src/domain/errors.js";
 import { AgentId, TenantId } from "../src/domain/value-objects.js";
+import {
+  createHostedAuthenticator,
+  InvalidBootstrapFlagError,
+  InvalidBootstrapConfigurationError,
+  InvalidHostedAuthModeError,
+  InvalidTenantContractVersionError,
+  MissingHostedDatabaseError,
+  MissingLegacyApiTokenError,
+} from "../src/hosted/authenticator.js";
 import { type HttpServerConfig, parseHttpServerConfig } from "../src/http/http-config.js";
 import { createStore } from "../src/storage/create-store.js";
 import type { MessageStore } from "../src/storage/message-store.js";
@@ -36,6 +45,31 @@ test("domain storage errors preserve names, context, and causes", (): void => {
   expect(unsupported.name).toBe("UnsupportedDatabaseError");
   expect(unsupported.message).toContain("postgresql:");
   expect(unsupported.message).toContain("sqlite:");
+});
+
+test("hosted startup configuration failures preserve operational error classes", async (): Promise<void> => {
+  await expect(createHostedAuthenticator({ MURMUR_AUTH_MODE: "invalid" })).rejects.toThrow(
+    InvalidHostedAuthModeError,
+  );
+  await expect(createHostedAuthenticator({ MURMUR_TENANT_CONTRACT_VERSION: "3" })).rejects.toThrow(
+    InvalidTenantContractVersionError,
+  );
+  await expect(createHostedAuthenticator({ MURMUR_ALLOW_BOOTSTRAP: "yes" })).rejects.toThrow(
+    InvalidBootstrapFlagError,
+  );
+  await expect(
+    createHostedAuthenticator({
+      MURMUR_ALLOW_BOOTSTRAP: "1",
+      MURMUR_API_TOKEN: "legacy-token",
+      MURMUR_AUTH_MODE: "legacy",
+    }),
+  ).rejects.toThrow(InvalidBootstrapConfigurationError);
+  await expect(createHostedAuthenticator({ MURMUR_AUTH_MODE: "multi-tenant" })).rejects.toThrow(
+    MissingHostedDatabaseError,
+  );
+  await expect(createHostedAuthenticator({ MURMUR_AUTH_MODE: "legacy" })).rejects.toThrow(
+    MissingLegacyApiTokenError,
+  );
 });
 
 test("HTTP configuration parses every bound and normalizes origins", (): void => {
