@@ -279,14 +279,16 @@ The runtime connects as the non-owner, non-superuser, non-`BYPASSRLS`
 isolation layers. The deployment tests the role and denied table grants on a
 fresh Postgres instance before touching production.
 
-Runtime database credential rotation is resumable. A deployment probes enabled
-Secret Manager versions and prefers the newest working `murmur_app` credential;
-an interrupted staged version is either reused after a committed database change
-or skipped on the next run. After the strict revision passes its production
-health check, the workflow disables every superseded `MURMUR_DATABASE_URL`
-version so the runtime identity cannot retrieve an older privileged credential.
-Re-enable the exact prior version explicitly before rolling back to a revision
-that references it.
+Runtime database credential rotation is resumable. A deployment inspects enabled
+Secret Manager versions locally and prefers the newest well-formed `murmur_app`
+credential, then idempotently reapplies its password through the reachable admin
+session pooler before deployment. This recovers whether an interrupted run stopped
+immediately before or after the database password commit without requiring the
+GitHub runner to reach Cloud Run's direct database endpoint. After the strict
+revision passes its production health check, the workflow disables every
+superseded `MURMUR_DATABASE_URL` version so the runtime identity cannot retrieve an
+older privileged credential. Re-enable the exact prior version explicitly before
+rolling back to a revision that references it.
 
 The tenant-key upgrade is also staged. Its expansion migration backfills a
 tenant-local message sequence while retaining the old global constraints and
