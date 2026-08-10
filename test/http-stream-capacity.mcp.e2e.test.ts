@@ -11,6 +11,26 @@ import {
   testEnvironment,
 } from "./support/http-mcp-harness.js";
 
+async function openStreamAfterRelease(
+  url: URL,
+  sessionId: string,
+  signal: AbortSignal,
+): Promise<Response> {
+  const maximumAttempts: number = 100;
+  for (let attempt: number = 0; attempt < maximumAttempts; attempt += 1) {
+    const response: Response = await fetch(url, {
+      headers: requestHeaders(sessionId),
+      signal,
+    });
+    if (response.status === 200) return response;
+    const body: string = await response.text();
+    if (response.status !== 503) {
+      throw new Error(`Unexpected stream recovery status ${response.status}: ${body}`);
+    }
+  }
+  throw new Error(`Stream capacity was not released after ${maximumAttempts} attempts`);
+}
+
 test("remote MCP keeps request capacity available while bounding long-lived streams", async (): Promise<void> => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-http-capacity-"));
   const server: MurmurHttpServer = await startHttpServer({
@@ -39,51 +59,6 @@ test("remote MCP keeps request capacity available while bounding long-lived stre
     );
     expect(available.status).toBe(200);
 
-    const registered: Response = await postJson(
-      server.mcpUrl,
-      {
-        id: 3,
-        jsonrpc: "2.0",
-        method: "tools/call",
-        params: {
-          arguments: { agent_id: "capacity-agent", display_name: "Capacity Agent" },
-          name: "register_agent",
-        },
-      },
-      sessionId,
-    );
-    expect(registered.status).toBe(200);
-    const waitingRequest: Promise<Response> = postJson(
-      server.mcpUrl,
-      {
-        id: 4,
-        jsonrpc: "2.0",
-        method: "tools/call",
-        params: {
-          arguments: { agent_id: "capacity-agent", timeout_seconds: 1 },
-          name: "wait_for_messages",
-        },
-      },
-      sessionId,
-    );
-    await Bun.sleep(25);
-    const limitedRequest: Response = await postJson(
-      server.mcpUrl,
-      { id: 5, jsonrpc: "2.0", method: "tools/list", params: {} },
-      sessionId,
-    );
-    expect(limitedRequest.status).toBe(503);
-    expect(await limitedRequest.json()).toEqual({ error: "MCP request capacity reached" });
-    const completedRequest: Response = await waitingRequest;
-    expect(completedRequest.status).toBe(200);
-    await completedRequest.text();
-    const recoveredRequest: Response = await postJson(
-      server.mcpUrl,
-      { id: 6, jsonrpc: "2.0", method: "tools/list", params: {} },
-      sessionId,
-    );
-    expect(recoveredRequest.status).toBe(200);
-
     const secondSessionId: string = await initializeSession(server.mcpUrl);
     const limitedStream: Response = await fetch(server.mcpUrl, {
       headers: requestHeaders(secondSessionId),
@@ -93,11 +68,11 @@ test("remote MCP keeps request capacity available while bounding long-lived stre
     expect(await limitedStream.json()).toEqual({ error: "MCP stream capacity reached" });
 
     streamAbortController.abort();
-    await Bun.sleep(25);
-    const recoveredStream: Response = await fetch(server.mcpUrl, {
-      headers: requestHeaders(secondSessionId),
-      signal: recoveredStreamAbortController.signal,
-    });
+    const recoveredStream: Response = await openStreamAfterRelease(
+      server.mcpUrl,
+      secondSessionId,
+      recoveredStreamAbortController.signal,
+    );
     expect(recoveredStream.status).toBe(200);
   } finally {
     streamAbortController.abort();

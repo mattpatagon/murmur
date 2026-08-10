@@ -47,7 +47,7 @@ Hosted requests pass through ordered, independently observable gates:
 2. Validate origin and request size before parsing untrusted content.
 3. Extract a credential without logging it.
 4. Bound authentication work, validate the token, and derive the principal and tenant.
-5. Apply principal and tenant rate limits, then reserve request or stream capacity.
+5. Reserve request or stream capacity, then apply principal and tenant rate limits.
 6. Resolve or create a tenant-bound MCP session within session quotas.
 7. Parse the MCP envelope and dispatch through the role-specific application.
 8. Stream the response, release all capacity, and emit one completion event when the body closes.
