@@ -1,0 +1,44 @@
+import type {
+  HttpObservability,
+  RequestObservation,
+} from "../observability/request-observation.js";
+import { logSafeError } from "../safe-errors.js";
+import { HEALTH_PATH, MCP_PATH } from "./http-config.js";
+import { jsonResponse } from "./http-request.js";
+
+export type McpRequestHandler = (
+  request: Request,
+  observation: RequestObservation,
+) => Promise<Response>;
+
+export function createHttpRequestHandler(
+  observability: HttpObservability,
+  handleMcpRequest: McpRequestHandler,
+): (request: Request) => Promise<Response> {
+  return async (request: Request): Promise<Response> => {
+    const observation: RequestObservation = observability.observe(request);
+    let response: Response;
+    try {
+      const url: URL = new URL(request.url);
+      if (url.pathname === "/" || url.pathname === HEALTH_PATH) {
+        if (request.method !== "GET") {
+          response = new Response(null, {
+            headers: { allow: "GET" },
+            status: 405,
+          });
+        } else {
+          response = jsonResponse(200, { service: "murmur", status: "ok" });
+        }
+      } else if (url.pathname !== MCP_PATH) {
+        response = jsonResponse(404, { error: "Not found" });
+      } else {
+        response = await handleMcpRequest(request, observation);
+      }
+    } catch (error: unknown) {
+      observation.recordError(error);
+      logSafeError("Murmur HTTP request failed", error);
+      response = jsonResponse(500, { error: "Internal server error" });
+    }
+    return observation.track(response);
+  };
+}

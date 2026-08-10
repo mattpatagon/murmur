@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, type Stats, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -272,20 +272,52 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
   expect(shellQuote("/opt/murmur-hook")).toBe("/opt/murmur-hook");
   expect(shellQuote("/it's here/murmur-hook")).toBe("'/it'\"'\"'s here/murmur-hook'");
   expect(
-    defaultUserConfigurationPaths({
-      CLAUDE_CONFIG_DIR: "/config/claude",
-      CODEX_HOME: "/config/codex",
-      HOME: "/users/test",
-    }),
+    defaultUserConfigurationPaths(
+      {
+        CLAUDE_CONFIG_DIR: "/config/claude",
+        CODEX_HOME: "/config/codex",
+        HOME: "/users/test",
+      },
+      "linux",
+    ),
   ).toEqual({
-    claudeMcp: "/users/test/.claude.json",
+    claudeMcp: "/config/claude/.claude.json",
     claudeSettings: "/config/claude/settings.json",
     codexConfig: "/config/codex/config.toml",
     codexHooks: "/config/codex/hooks.json",
   });
+  expect(
+    defaultUserConfigurationPaths(
+      {
+        HOME: "/msys/home/test",
+        USERPROFILE: "C:\\Users\\test",
+      },
+      "win32",
+    ),
+  ).toEqual({
+    claudeMcp: "C:\\Users\\test\\.claude.json",
+    claudeSettings: "C:\\Users\\test\\.claude\\settings.json",
+    codexConfig: "C:\\Users\\test\\.codex\\config.toml",
+    codexHooks: "C:\\Users\\test\\.codex\\hooks.json",
+  });
+  expect(
+    defaultUserConfigurationPaths(
+      {
+        CLAUDE_CONFIG_DIR: " ",
+        CODEX_HOME: "",
+        HOME: "/home/test",
+      },
+      "linux",
+    ),
+  ).toEqual({
+    claudeMcp: "/home/test/.claude.json",
+    claudeSettings: "/home/test/.claude/settings.json",
+    codexConfig: "/home/test/.codex/config.toml",
+    codexHooks: "/home/test/.codex/hooks.json",
+  });
 });
 
-test("creates user configuration files with private permissions", (): void => {
+test("writes configuration everywhere and preserves POSIX mode contracts", (): void => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-private-config-"));
   const paths: UserConfigurationPaths = {
     claudeMcp: join(directory, ".claude.json"),
@@ -294,12 +326,20 @@ test("creates user configuration files with private permissions", (): void => {
     codexHooks: join(directory, ".codex", "hooks.json"),
   };
   try {
+    writeFileSync(paths.claudeMcp, "{}\n", { encoding: "utf8", mode: 0o640 });
     installUserConfiguration({
       clients: ["codex", "claude"],
       hookExecutable: "/usr/local/bin/murmur-hook",
       paths,
     });
-    for (const path of Object.values(paths)) expect(statSync(path).mode & 0o777).toBe(0o600);
+    for (const path of Object.values(paths)) {
+      const status: Stats = statSync(path);
+      expect(status.isFile()).toBe(true);
+      // Windows protection is ACL-based; the user-profile inheritance contract is documented.
+      if (process.platform !== "win32") {
+        expect(status.mode & 0o777).toBe(path === paths.claudeMcp ? 0o640 : 0o600);
+      }
+    }
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }

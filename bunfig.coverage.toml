@@ -1,0 +1,6 @@
+[test]
+coverage = true
+coverageDir = "coverage"
+coverageReporter = ["text", "lcov"]
+coverageSkipTestFiles = true
+# scripts/check-coverage.ts applies the strict tracked-source census and thresholds.

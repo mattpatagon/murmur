@@ -17,6 +17,29 @@ export type PostgresSslOptions =
       readonly servername?: string;
     };
 
+export class InvalidDatabaseTlsModeError extends Error {
+  public constructor() {
+    super("MURMUR_DATABASE_TLS_INSECURE must be 0 or 1");
+    // biome-ignore lint/security/noSecrets: Stable error class identifier, not credential material.
+    this.name = "InvalidDatabaseTlsModeError";
+  }
+}
+
+export class ConflictingDatabaseTlsConfigurationError extends Error {
+  public constructor() {
+    super("MURMUR_DATABASE_CA_PATH cannot be combined with insecure database TLS");
+    // biome-ignore lint/security/noSecrets: Stable error class identifier, not credential material.
+    this.name = "ConflictingDatabaseTlsConfigurationError";
+  }
+}
+
+export class DatabaseCertificateAuthorityReadError extends Error {
+  public constructor(cause: unknown) {
+    super("MURMUR_DATABASE_CA_PATH could not be read", { cause });
+    this.name = "DatabaseCertificateAuthorityReadError";
+  }
+}
+
 export function postgresTlsConfiguration(environment: NodeJS.ProcessEnv): PostgresTlsConfiguration {
   const certificatePath: string | undefined = environment["MURMUR_DATABASE_CA_PATH"];
   const insecureValue: string | undefined = environment["MURMUR_DATABASE_TLS_INSECURE"];
@@ -26,20 +49,23 @@ export function postgresTlsConfiguration(environment: NodeJS.ProcessEnv): Postgr
     insecureValue !== "0" &&
     insecureValue !== "1"
   ) {
-    throw new Error("MURMUR_DATABASE_TLS_INSECURE must be 0 or 1");
+    throw new InvalidDatabaseTlsModeError();
   }
   if (insecureValue === "1") {
     if (certificatePath !== undefined && certificatePath !== "") {
-      throw new Error("MURMUR_DATABASE_CA_PATH cannot be combined with insecure database TLS");
+      throw new ConflictingDatabaseTlsConfigurationError();
     }
     return { mode: "insecure" };
   }
-  return certificatePath === undefined || certificatePath === ""
-    ? { mode: "verify-system" }
-    : {
-        certificateAuthority: readFileSync(resolve(certificatePath), "utf8"),
-        mode: "verify-full",
-      };
+  if (certificatePath === undefined || certificatePath === "") return { mode: "verify-system" };
+  try {
+    return {
+      certificateAuthority: readFileSync(resolve(certificatePath), "utf8"),
+      mode: "verify-full",
+    };
+  } catch (error: unknown) {
+    throw new DatabaseCertificateAuthorityReadError(error);
+  }
 }
 
 export function postgresSslOptions(

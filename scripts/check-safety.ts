@@ -1,4 +1,5 @@
 import process from "node:process";
+import { join, relative } from "node:path";
 
 import {
   SyntaxKind,
@@ -34,26 +35,38 @@ type Violation = {
 };
 
 const workspace: string = process.cwd();
-const configurationPath: string = `${workspace}/tsconfig.test.json`;
+const configurationPath: string = join(workspace, "tsconfig.test.json");
 const api: API = new API();
 const snapshot: Snapshot = await api.updateSnapshot({ openProjects: [configurationPath] });
 const projects: readonly Project[] = snapshot.getProjects();
 const project: Project | undefined = projects[0];
 if (project === undefined) throw new Error("TypeScript did not load the safety-check project");
 const projectFileNames: readonly string[] = await project.program.getSourceFileNames();
-const fileNames: readonly string[] = projectFileNames.filter(
-  (fileName: string): boolean =>
-    fileName.startsWith(`${workspace}/src/`) ||
-    fileName.startsWith(`${workspace}/test/`) ||
-    fileName.startsWith(`${workspace}/scripts/`),
-);
+function portableWorkspacePath(fileName: string): string {
+  return relative(workspace, fileName).replaceAll("\\", "/");
+}
+
+const fileNames: readonly string[] = projectFileNames.filter((fileName: string): boolean => {
+  const path: string = portableWorkspacePath(fileName);
+  return path.startsWith("src/") || path.startsWith("test/") || path.startsWith("scripts/");
+});
+if (fileNames.length === 0) {
+  throw new Error("The safety-check census is empty; workspace path normalization failed");
+}
+if (
+  !fileNames.some(
+    (fileName: string): boolean => portableWorkspacePath(fileName) === "src/server.ts",
+  )
+) {
+  throw new Error("The safety-check census does not contain the stdio entry point");
+}
 const violations: Violation[] = [];
 
 function report(sourceFile: SourceFile, node: Node, message: string): void {
   const position: LineAndCharacter = sourceFile.getLineAndCharacterOfPosition(node.getStart());
   violations.push({
     column: position.character + 1,
-    file: sourceFile.fileName.slice(workspace.length + 1),
+    file: portableWorkspacePath(sourceFile.fileName),
     line: position.line + 1,
     message,
   });
@@ -126,7 +139,12 @@ sourceFiles.forEach((sourceFile: SourceFile): void => {
   const text: string = sourceFile.getFullText();
   const ignoreDirective: string = "@ts-" + "ignore";
   const expectErrorDirective: string = "@ts-" + "expect-error";
-  if (text.includes(ignoreDirective) || text.includes(expectErrorDirective)) {
+  const noCheckDirective: string = "@ts-" + "nocheck";
+  if (
+    text.includes(ignoreDirective) ||
+    text.includes(expectErrorDirective) ||
+    text.includes(noCheckDirective)
+  ) {
     report(sourceFile, sourceFile, "TypeScript suppression comments are forbidden.");
   }
   visit(sourceFile, sourceFile);

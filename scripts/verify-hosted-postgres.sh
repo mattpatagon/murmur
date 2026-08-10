@@ -65,11 +65,27 @@ for owner_only_call in "${owner_only_calls[@]}"; do
   fi
 done
 
-MURMUR_TEST_APP_DATABASE_URL="$app_url" \
-  MURMUR_TEST_ADMIN_DATABASE_URL="$admin_url" \
-  MURMUR_TEST_BOOTSTRAP_LEGACY_TOKEN='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
-  MURMUR_TEST_DATABASE_TLS_INSECURE=1 \
-  bun test test/hosted.mcp.e2e.test.ts
+coverage_mode="${MURMUR_VERIFY_COVERAGE:-0}"
+case "$coverage_mode" in
+  0|1) ;;
+  *)
+    echo 'MURMUR_VERIFY_COVERAGE must be 0 or 1' >&2
+    exit 1
+    ;;
+esac
+if [ "$coverage_mode" = '1' ]; then
+  MURMUR_TEST_APP_DATABASE_URL="$app_url" \
+    MURMUR_TEST_ADMIN_DATABASE_URL="$admin_url" \
+    MURMUR_TEST_BOOTSTRAP_LEGACY_TOKEN='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    MURMUR_TEST_DATABASE_TLS_INSECURE=1 \
+    bun run scripts/run-coverage.ts --defer-audit
+else
+  MURMUR_TEST_APP_DATABASE_URL="$app_url" \
+    MURMUR_TEST_ADMIN_DATABASE_URL="$admin_url" \
+    MURMUR_TEST_BOOTSTRAP_LEGACY_TOKEN='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    MURMUR_TEST_DATABASE_TLS_INSECURE=1 \
+    bun test test/hosted.mcp.e2e.test.ts
+fi
 
 psql "$admin_url" --set ON_ERROR_STOP=1 \
   --command 'select murmur.validate_tenant_contract()'
@@ -153,3 +169,6 @@ bunx supabase db advisors \
   --fail-on error
 
 MURMUR_MIGRATION_TEST_ADMIN_URL="$admin_url" bash scripts/verify-populated-upgrade.sh
+if [ "$coverage_mode" = '1' ]; then
+  bun run scripts/check-coverage.ts
+fi

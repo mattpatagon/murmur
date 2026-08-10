@@ -59,7 +59,7 @@ test("configures both clients at user scope without copying the API token", (): 
     expect(result.stdout).toContain("Configured Murmur user-level MCP");
     expect(result.stdout).toContain("no token was written");
     const combined: string = [
-      readFileSync(join(directory, ".claude.json"), "utf8"),
+      readFileSync(join(directory, "claude", ".claude.json"), "utf8"),
       readFileSync(join(directory, "claude", "settings.json"), "utf8"),
       readFileSync(join(directory, "codex", "config.toml"), "utf8"),
       readFileSync(join(directory, "codex", "hooks.json"), "utf8"),

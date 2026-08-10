@@ -3,50 +3,78 @@
 import process from "node:process";
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 import {
   detectAgentClient,
   detectBranchName,
   detectRepositoryName,
 } from "./context/repository-context.js";
-import { MurmurApplication } from "./mcp/murmur-application.js";
 import type { AgentClient, BranchName, RepositoryName } from "./domain/value-objects.js";
+import { MurmurApplication } from "./mcp/murmur-application.js";
+import { logSafeError } from "./safe-errors.js";
 import { createStore } from "./storage/create-store.js";
 import type { MessageStore } from "./storage/message-store.js";
-import { logSafeError } from "./safe-errors.js";
 
-export async function main(): Promise<void> {
-  const store: MessageStore = await createStore();
-  const branchName: BranchName | null = detectBranchName();
-  const client: AgentClient | null = detectAgentClient();
-  const repositoryName: RepositoryName | null = detectRepositoryName();
+export type StdioServerRuntime = {
+  readonly createStore: () => Promise<MessageStore>;
+  readonly createTransport: () => Transport;
+  readonly detectBranchName: () => BranchName | null;
+  readonly detectClient: () => AgentClient | null;
+  readonly detectRepositoryName: () => RepositoryName | null;
+  readonly onSignal: (signal: NodeJS.Signals, listener: () => void) => void;
+};
+
+export type StdioServerHandle = {
+  readonly application: MurmurApplication;
+  readonly shutdown: () => Promise<void>;
+};
+
+const DEFAULT_RUNTIME: StdioServerRuntime = {
+  createStore: async (): Promise<MessageStore> => await createStore(),
+  createTransport: (): Transport => new StdioServerTransport(),
+  detectBranchName,
+  detectClient: detectAgentClient,
+  detectRepositoryName,
+  onSignal: (signal: NodeJS.Signals, listener: () => void): void => {
+    process.once(signal, listener);
+  },
+};
+
+export async function main(
+  runtime: StdioServerRuntime = DEFAULT_RUNTIME,
+): Promise<StdioServerHandle> {
+  const store: MessageStore = await runtime.createStore();
+  const branchName: BranchName | null = runtime.detectBranchName();
+  const client: AgentClient | null = runtime.detectClient();
+  const repositoryName: RepositoryName | null = runtime.detectRepositoryName();
   const application: MurmurApplication = new MurmurApplication({
     branchName,
     client,
     repositoryName,
     store,
   });
-  const transport: StdioServerTransport = new StdioServerTransport();
+  const transport: Transport = runtime.createTransport();
   await application.server.connect(transport);
 
-  let shuttingDown: boolean = false;
+  let shutdownPromise: Promise<void> | null = null;
   const shutdown: () => Promise<void> = async (): Promise<void> => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    await application.close();
+    if (shutdownPromise === null) shutdownPromise = application.close();
+    await shutdownPromise;
   };
-  process.once("SIGINT", (): void => {
+  runtime.onSignal("SIGINT", (): void => {
     void shutdown().catch((error: unknown): void => {
       logSafeError("Murmur shutdown failed", error);
       process.exitCode = 1;
     });
   });
-  process.once("SIGTERM", (): void => {
+  runtime.onSignal("SIGTERM", (): void => {
     void shutdown().catch((error: unknown): void => {
       logSafeError("Murmur shutdown failed", error);
       process.exitCode = 1;
     });
   });
+  return { application, shutdown };
 }
 
 if (import.meta.main) {

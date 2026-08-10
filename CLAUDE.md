@@ -1,4 +1,10 @@
-# Murmur
+@AGENTS.md
+
+# Claude Code project notes
+
+Follow `AGENTS.md` as the authoritative repository contract. Before editing, inspect the working
+tree and use Murmur to coordinate overlapping work. Do not weaken the strict type, lint, coverage,
+500-line, dependency, security, portability, or redaction gates.
 
 ## Deploy Configuration (configured by /setup-deploy)
 

@@ -17,6 +17,8 @@ type SetupArguments = {
   readonly url: string;
 };
 
+export type SetupAction = (arguments_: readonly string[]) => readonly string[];
+
 const HELP: string = `Murmur user-level setup
 
 Usage:
@@ -123,46 +125,48 @@ export function setup(arguments_: readonly string[]): readonly string[] {
   });
 }
 
-function printSetupResult(changedPaths: readonly string[]): void {
+export function formatSetupResult(
+  changedPaths: readonly string[],
+  tokenConfigured: boolean,
+): string {
+  let output: string;
   if (changedPaths.length === 0) {
-    process.stdout.write("Murmur is already configured for the selected clients.\n");
+    output = "Murmur is already configured for the selected clients.\n";
   } else {
-    process.stdout.write("Configured Murmur user-level MCP and passive notifications:\n");
-    for (const path of changedPaths) process.stdout.write(`  ${path}\n`);
+    output = "Configured Murmur user-level MCP and passive notifications:\n";
+    for (const path of changedPaths) output += `  ${path}\n`;
   }
-  const token: string | undefined = process.env[MURMUR_TOKEN_ENV];
-  if (token === undefined || token.trim() === "") {
-    process.stdout.write(
-      `\nWarning: ${MURMUR_TOKEN_ENV} is not set in this process. Set it where Codex and Claude are launched.\n`,
-    );
+  if (tokenConfigured) {
+    output += `\nAuthentication uses ${MURMUR_TOKEN_ENV}; no token was written to settings.\n`;
   } else {
-    process.stdout.write(
-      `\nAuthentication uses ${MURMUR_TOKEN_ENV}; no token was written to settings.\n`,
-    );
+    output +=
+      `\nWarning: ${MURMUR_TOKEN_ENV} is not set in this process. ` +
+      "Set it where Codex and Claude are launched.\n";
   }
-  process.stdout.write("Restart active Codex and Claude sessions to load the hooks.\n");
+  return `${output}Restart active Codex and Claude sessions to load the hooks.\n`;
 }
 
-function main(): void {
-  const arguments_: readonly string[] = process.argv.slice(2);
+export function runCli(
+  arguments_: readonly string[],
+  setupAction: SetupAction = setup,
+  token: string | undefined = process.env[MURMUR_TOKEN_ENV],
+): string {
   if (arguments_.length === 0 || arguments_[0] === "--help" || arguments_[0] === "-h") {
-    process.stdout.write(HELP);
-    return;
+    return HELP;
   }
   if (arguments_[0] !== "setup") {
     throw new Error(`Unknown command: ${arguments_[0] ?? ""}\n\n${HELP}`);
   }
   if (arguments_[1] === "--help" || arguments_[1] === "-h") {
-    process.stdout.write(HELP);
-    return;
+    return HELP;
   }
-  const changedPaths: readonly string[] = setup(arguments_.slice(1));
-  printSetupResult(changedPaths);
+  const changedPaths: readonly string[] = setupAction(arguments_.slice(1));
+  return formatSetupResult(changedPaths, token !== undefined && token.trim() !== "");
 }
 
 if (import.meta.main) {
   try {
-    main();
+    process.stdout.write(runCli(process.argv.slice(2)));
   } catch (error: unknown) {
     const message: string = error instanceof Error ? error.message : String(error);
     process.stderr.write(`murmur: ${message}\n`);

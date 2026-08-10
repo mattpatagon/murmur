@@ -8,8 +8,14 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+
+import {
+  environmentPath,
+  type PathJoin,
+  pathJoinForPlatform,
+  userHomeDirectory,
+} from "../platform-paths.js";
 
 export const DEFAULT_MURMUR_URL: string = "https://api.usemurmur.dev/mcp";
 export const MURMUR_TOKEN_ENV: string = "MURMUR_API_TOKEN";
@@ -350,15 +356,25 @@ export function shellQuote(value: string): string {
 
 export function defaultUserConfigurationPaths(
   environment: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
 ): UserConfigurationPaths {
-  const home: string = environment["HOME"] ?? homedir();
-  const codexHome: string = environment["CODEX_HOME"] ?? join(home, ".codex");
-  const claudeDirectory: string = environment["CLAUDE_CONFIG_DIR"] ?? join(home, ".claude");
+  const joinTargetPath: PathJoin = pathJoinForPlatform(platform);
+  const home: string = userHomeDirectory(environment, platform);
+  const configuredCodexHome: string | null = environmentPath(environment, "CODEX_HOME");
+  const configuredClaudeDirectory: string | null = environmentPath(
+    environment,
+    "CLAUDE_CONFIG_DIR",
+  );
+  const codexHome: string = configuredCodexHome ?? joinTargetPath(home, ".codex");
+  const claudeDirectory: string = configuredClaudeDirectory ?? joinTargetPath(home, ".claude");
   return {
-    claudeMcp: join(home, ".claude.json"),
-    claudeSettings: join(claudeDirectory, "settings.json"),
-    codexConfig: join(codexHome, "config.toml"),
-    codexHooks: join(codexHome, "hooks.json"),
+    claudeMcp:
+      configuredClaudeDirectory === null
+        ? joinTargetPath(home, ".claude.json")
+        : joinTargetPath(configuredClaudeDirectory, ".claude.json"),
+    claudeSettings: joinTargetPath(claudeDirectory, "settings.json"),
+    codexConfig: joinTargetPath(codexHome, "config.toml"),
+    codexHooks: joinTargetPath(codexHome, "hooks.json"),
   };
 }
 

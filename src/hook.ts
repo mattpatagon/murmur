@@ -10,6 +10,7 @@ import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 
 import { detectBranchName, detectRepositoryName } from "./context/repository-context.js";
 import { InboxOutputSchema, type InboxOutput } from "./domain/contracts.js";
+import { defaultHookCacheDirectory, environmentPath, positiveInteger } from "./platform-paths.js";
 import {
   DEFAULT_MURMUR_URL,
   MURMUR_TOKEN_ENV,
@@ -232,12 +233,6 @@ function missingTokenOutput(
   return output;
 }
 
-function numericEnvironmentValue(value: string | undefined, fallback: number): number {
-  if (value === undefined) return fallback;
-  const parsed: number = Number.parseInt(value, 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
 function rpcResult(response: unknown): unknown {
   if (!isRecord(response)) throw new Error("Murmur returned an invalid JSON-RPC response");
   if (response["error"] !== undefined) {
@@ -424,20 +419,15 @@ export async function handleHook(
     return missingTokenOutput(client, eventName, identity);
   }
 
+  const configuredCacheDirectory: string | null = environmentPath(environment, "MURMUR_CACHE_DIR");
   const cacheDirectory: string =
-    options.cacheDirectory ??
-    environment["MURMUR_CACHE_DIR"] ??
-    join(
-      environment["XDG_CACHE_HOME"] ?? join(environment["HOME"] ?? ".", ".cache"),
-      "murmur",
-      "hooks",
-    );
+    options.cacheDirectory ?? configuredCacheDirectory ?? defaultHookCacheDirectory(environment);
   const path: string = cachePath(cacheDirectory, identity);
   const cache: HookCache = readCache(path);
   const now: number = options.now ?? Date.now();
   const debounceMs: number =
     options.debounceMs ??
-    numericEnvironmentValue(environment["MURMUR_HOOK_DEBOUNCE_MS"], DEFAULT_DEBOUNCE_MS);
+    positiveInteger(environment["MURMUR_HOOK_DEBOUNCE_MS"], DEFAULT_DEBOUNCE_MS);
   if (eventName !== "SessionStart" && now - cache.lastCheckedAt < debounceMs) return null;
 
   writeCache(path, {
@@ -446,8 +436,7 @@ export async function handleHook(
   });
 
   const timeoutMs: number =
-    options.timeoutMs ??
-    numericEnvironmentValue(environment["MURMUR_HOOK_TIMEOUT_MS"], DEFAULT_TIMEOUT_MS);
+    options.timeoutMs ?? positiveInteger(environment["MURMUR_HOOK_TIMEOUT_MS"], DEFAULT_TIMEOUT_MS);
   const summary: InboxSummary = await (options.checkInbox ?? checkRemoteInbox)(identity, {
     afterSequence: eventName === "SessionStart" ? 0 : cache.lastNotifiedInboxVersion,
     token,

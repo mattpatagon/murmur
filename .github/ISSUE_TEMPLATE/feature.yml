@@ -1,0 +1,34 @@
+name: Feature request
+description: Propose a focused improvement to Murmur
+title: "feature: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user or operator problem, not only a proposed implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: What observable result would make this successful?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and compatibility
+      description: Include current workarounds and protocol, platform, or migration constraints.
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Trust, resource, and data boundaries
+      description: Note authentication, tenant isolation, quotas, storage, or telemetry implications.
+    validations:
+      required: true

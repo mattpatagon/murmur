@@ -1,0 +1,64 @@
+name: Bug report
+description: Report a reproducible, non-security Murmur defect
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Do not report vulnerabilities, credentials, message content, database URLs, or tenant data
+        here. Use the private security-reporting link instead.
+  - type: input
+    id: version
+    attributes:
+      label: Murmur revision or version
+      placeholder: v0.4.4.0 or commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Deployment mode
+      options:
+        - Local SQLite / stdio
+        - Shared PostgreSQL / stdio
+        - Hosted HTTP / PostgreSQL
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system and Bun version
+      placeholder: Windows 11, Bun 1.3.11
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include deterministic steps and sanitized configuration.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include only safe error classes, request IDs, and redacted structured fields.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Data safety
+      options:
+        - label: I removed credentials, database URLs, message content, tenant data, and personal paths.
+          required: true
+        - label: This is not a vulnerability report.
+          required: true
