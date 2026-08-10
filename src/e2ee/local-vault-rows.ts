@@ -40,6 +40,13 @@ export type PeerPin = {
   readonly verifiedAt: string;
 };
 
+export type ExpectedPeerRoot = {
+  readonly agentId: string;
+  readonly rootKeyId: string;
+  readonly tenantId: string;
+  readonly verifiedAt: string;
+};
+
 export type OutboxItem = {
   readonly claimId: string | null;
   readonly createdAt: string;
@@ -117,6 +124,13 @@ type PeerPinRow = {
   readonly verified_at: string;
 };
 
+type ExpectedPeerRootRow = {
+  readonly agent_id: string;
+  readonly root_key_id: string;
+  readonly tenant_id: string;
+  readonly verified_at: string;
+};
+
 type OutboxRow = {
   readonly claim_id: string | null;
   readonly created_at: string;
@@ -189,6 +203,12 @@ const PeerPinRowSchema: z.ZodType<PeerPinRow> = z.strictObject({
   root_key_id: z.string(),
   tenant_id: z.string(),
   verification_mode: z.enum(["organization", "strict", "tofu"]),
+  verified_at: z.string(),
+});
+const ExpectedPeerRootRowSchema: z.ZodType<ExpectedPeerRootRow> = z.strictObject({
+  agent_id: z.string(),
+  root_key_id: z.string(),
+  tenant_id: z.string(),
   verified_at: z.string(),
 });
 const OutboxRowSchema: z.ZodType<OutboxRow> = z.strictObject({
@@ -278,6 +298,16 @@ export function mapPeerPinRow(input: unknown): PeerPin {
     rootKeyId: row.root_key_id,
     tenantId: row.tenant_id,
     verificationMode: row.verification_mode,
+    verifiedAt: row.verified_at,
+  };
+}
+
+export function mapExpectedPeerRootRow(input: unknown): ExpectedPeerRoot {
+  const row: ExpectedPeerRootRow = ExpectedPeerRootRowSchema.parse(input);
+  return {
+    agentId: row.agent_id,
+    rootKeyId: row.root_key_id,
+    tenantId: row.tenant_id,
     verifiedAt: row.verified_at,
   };
 }

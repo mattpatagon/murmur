@@ -18,7 +18,7 @@ import {
 } from "../src/e2ee/certificates.js";
 import { decryptEnvelope } from "../src/e2ee/envelope.js";
 import { LocalE2eeVault } from "../src/e2ee/local-vault.js";
-import type { PeerPin, SentReceipt } from "../src/e2ee/local-vault-rows.js";
+import type { SentReceipt } from "../src/e2ee/local-vault-rows.js";
 import type {
   BoxKeyPair,
   EncryptedEnvelope,
@@ -121,7 +121,6 @@ function uuidSequence(values: readonly string[]): () => string {
 type RecipientFixture = {
   readonly bundle: PublicAgentKeyBundleDto;
   readonly prekeys: readonly BoxKeyPair[];
-  readonly root: SigningKeyPair;
 };
 
 async function recipientFixture(): Promise<RecipientFixture> {
@@ -199,7 +198,6 @@ async function recipientFixture(): Promise<RecipientFixture> {
       root_public_key: encode(root.publicKey),
     },
     prekeys: [first, second],
-    root,
   };
 }
 
@@ -338,15 +336,12 @@ test("reclaims an expired claim with a fresh counter and preserves committed ret
   try {
     const recipient: RecipientFixture = await recipientFixture();
     const remote: FakeRemote = new FakeRemote(recipient);
-    const pin: PeerPin = {
+    vault.keys.expectPeerRoot({
       agentId: "recipient",
-      publicKey: recipient.root.publicKey,
       rootKeyId: recipient.bundle.root_key_id,
       tenantId: TENANT_ID,
-      verificationMode: "strict",
       verifiedAt: NOW.toISOString(),
-    };
-    await vault.keys.pinPeer(pin);
+    });
     const random: SequentialRandom = new SequentialRandom([
       await createBoxKeyPair(bytes(32, 161)),
       await createBoxKeyPair(bytes(32, 193)),
@@ -381,6 +376,7 @@ test("reclaims an expired claim with a fresh counter and preserves committed ret
     );
     expect(result.content).toBe(input.content);
     expect(result.verificationMode).toBe("strict");
+    expect(vault.keys.getExpectedPeerRoot(TENANT_ID, "recipient")).toBeNull();
     expect(remote.claimCalls).toBe(2);
     expect(remote.puts).toHaveLength(2);
     const first: PutEncryptedMessageInput | undefined = remote.puts[0];

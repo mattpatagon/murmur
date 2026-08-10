@@ -195,6 +195,9 @@ test("rejects issuer substitution and upgrades a populated version-one vault", a
     original.close();
     const legacyDatabase: Database = new Database(path, { readwrite: true, strict: true });
     legacyDatabase.exec(`
+      DROP TABLE peer_root_expectations;
+      DROP INDEX prekeys_signing_generation;
+      ALTER TABLE prekeys DROP COLUMN agent_signing_key_id;
       DROP TABLE trust_policy_revocations;
       DROP TABLE trust_policy_state;
       ALTER TABLE outbox DROP COLUMN claim_id;

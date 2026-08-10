@@ -17,15 +17,28 @@ import {
 } from "./certificates.js";
 import {
   mapAgentKeyRow,
+  mapExpectedPeerRootRow,
   mapPeerPinRow,
   mapPrekeyRow,
   mapRootKeyRow,
+  type ExpectedPeerRoot,
   type PeerPin,
   type StoredAgentKey,
   type StoredPrekey,
   type StoredRootKey,
 } from "./local-vault-rows.js";
 import type { BoxKeyPair, PrekeyClass, SigningKeyPair } from "./protocol.js";
+
+const ExpectedPeerRootSchema: z.ZodType<ExpectedPeerRoot> = z.strictObject({
+  agentId: z
+    .string()
+    .min(1)
+    .max(200)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
+  rootKeyId: z.string().regex(/^mrk_[A-Za-z0-9_-]{43}$/u),
+  tenantId: z.string().uuid(),
+  verifiedAt: z.iso.datetime({ offset: true }),
+});
 
 function pinRank(mode: PeerPin["verificationMode"]): number {
   if (mode === "tofu") return 0;
@@ -292,6 +305,45 @@ export class LocalVaultKeys {
     return row === null ? null : mapPeerPinRow(row);
   }
 
+  public getExpectedPeerRoot(tenantId: string, agentId: string): ExpectedPeerRoot | null {
+    const statement: Statement<unknown, [string, string]> = this.#database.query(`
+      SELECT tenant_id, agent_id, root_key_id, verified_at
+      FROM peer_root_expectations WHERE tenant_id = ? AND agent_id = ?
+    `);
+    const row: unknown = statement.get(tenantId, agentId);
+    return row === null ? null : mapExpectedPeerRootRow(row);
+  }
+
+  public expectPeerRoot(input: ExpectedPeerRoot): ExpectedPeerRoot {
+    const expected: ExpectedPeerRoot = ExpectedPeerRootSchema.parse(input);
+    const existingPin: PeerPin | null = this.getPin(expected.tenantId, expected.agentId);
+    if (existingPin !== null) {
+      if (existingPin.rootKeyId !== expected.rootKeyId) {
+        throw new Error("Peer root changed and requires an audited reset");
+      }
+      return expected;
+    }
+    const existing: ExpectedPeerRoot | null = this.getExpectedPeerRoot(
+      expected.tenantId,
+      expected.agentId,
+    );
+    if (existing !== null && existing.rootKeyId !== expected.rootKeyId) {
+      throw new Error("Peer root expectation changed and requires an audited reset");
+    }
+    const statement: Statement<unknown, [string, string, string, string]> = this.#database.query(`
+      INSERT INTO peer_root_expectations(tenant_id, agent_id, root_key_id, verified_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(tenant_id, agent_id) DO UPDATE SET verified_at = excluded.verified_at
+    `);
+    statement.run(expected.tenantId, expected.agentId, expected.rootKeyId, expected.verifiedAt);
+    const stored: ExpectedPeerRoot | null = this.getExpectedPeerRoot(
+      expected.tenantId,
+      expected.agentId,
+    );
+    if (stored === null) throw new Error("Peer root expectation was not stored");
+    return stored;
+  }
+
   public getUsablePin(tenantId: string, agentId: string, now: Date): PeerPin | null {
     const pin: PeerPin | null = this.getPin(tenantId, agentId);
     if (pin === null || pin.verificationMode !== "organization") return pin;
@@ -323,6 +375,10 @@ export class LocalVaultKeys {
         throw new Error("Peer root is revoked by the organization trust policy");
       }
       const existing: PeerPin | null = this.getPin(pin.tenantId, pin.agentId);
+      const expected: ExpectedPeerRoot | null = this.getExpectedPeerRoot(pin.tenantId, pin.agentId);
+      if (expected !== null && expected.rootKeyId !== pin.rootKeyId) {
+        throw new Error("Peer root does not match its verified expectation");
+      }
       if (existing !== null) {
         if (
           existing.rootKeyId !== pin.rootKeyId ||
@@ -351,6 +407,10 @@ export class LocalVaultKeys {
         pin.verificationMode,
         pin.verifiedAt,
       );
+      const clearExpectation: Statement<unknown, [string, string]> = this.#database.query(`
+        DELETE FROM peer_root_expectations WHERE tenant_id = ? AND agent_id = ?
+      `);
+      clearExpectation.run(pin.tenantId, pin.agentId);
       this.#database.exec("COMMIT");
     } catch (error: unknown) {
       this.#database.exec("ROLLBACK");

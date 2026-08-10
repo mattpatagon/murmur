@@ -10,7 +10,7 @@ import type { Clock, Instant } from "../domain/value-objects.js";
 import { verifyAgentKeyCertificate } from "./certificates.js";
 import { decryptEnvelope, verifyEnvelopeSignature } from "./envelope.js";
 import type { LocalE2eeVault } from "./local-vault.js";
-import type { CachedMessage, PeerPin, StoredPrekey } from "./local-vault-rows.js";
+import type { CachedMessage, ExpectedPeerRoot, PeerPin, StoredPrekey } from "./local-vault-rows.js";
 import type { EncryptedEnvelope } from "./protocol.js";
 import {
   getE2eeCapability,
@@ -127,7 +127,14 @@ async function verifySender(
     new Date(now.toISOString()),
   );
   if (pin === null) {
-    if (!trustOnFirstUse) {
+    const expected: ExpectedPeerRoot | null = vault.keys.getExpectedPeerRoot(
+      tenantId,
+      envelope.header.senderId,
+    );
+    if (expected !== null && expected.rootKeyId !== chain.rootKeyId) {
+      throw new Error("Encrypted message verification failed");
+    }
+    if (expected === null && !trustOnFirstUse) {
       throw new Error(
         `Sender '${envelope.header.senderId}' is not trusted. Verify its full root fingerprint, then run murmur e2ee trust.`,
       );
@@ -137,7 +144,7 @@ async function verifySender(
       publicKey: chain.rootPublicKey,
       rootKeyId: chain.rootKeyId,
       tenantId,
-      verificationMode: "tofu",
+      verificationMode: expected === null ? "tofu" : "strict",
       verifiedAt: now.toISOString(),
     });
   }

@@ -7,7 +7,13 @@ import {
   verifyPrekeyCertificate,
 } from "./certificates.js";
 import type { LocalE2eeVault } from "./local-vault.js";
-import type { PeerPin, StoredAgentKey, StoredPrekey, StoredRootKey } from "./local-vault-rows.js";
+import type {
+  ExpectedPeerRoot,
+  PeerPin,
+  StoredAgentKey,
+  StoredPrekey,
+  StoredRootKey,
+} from "./local-vault-rows.js";
 import type { E2eeRemoteClient } from "./remote-client.js";
 import {
   type PublicAgentKeyBundle,
@@ -215,7 +221,14 @@ export async function verifyClaimedPeer(
     new Date(now.toISOString()),
   );
   if (pin === null) {
-    if (!trustOnFirstUse) {
+    const expected: ExpectedPeerRoot | null = vault.keys.getExpectedPeerRoot(
+      tenantId,
+      expectedRecipientId,
+    );
+    if (expected !== null && expected.rootKeyId !== recipient.rootKeyId) {
+      throw new Error("Recipient root does not match its verified fingerprint");
+    }
+    if (expected === null && !trustOnFirstUse) {
       throw new Error(
         `Recipient '${expectedRecipientId}' is not trusted. Verify its full root fingerprint, then run murmur e2ee trust.`,
       );
@@ -225,7 +238,7 @@ export async function verifyClaimedPeer(
       publicKey: recipient.rootPublicKey,
       rootKeyId: recipient.rootKeyId,
       tenantId,
-      verificationMode: "tofu",
+      verificationMode: expected === null ? "tofu" : "strict",
       verifiedAt: now.toISOString(),
     });
   }

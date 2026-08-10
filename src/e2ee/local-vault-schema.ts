@@ -1,7 +1,7 @@
 import type { Database, Statement } from "bun:sqlite";
 import { z } from "zod";
 
-const VAULT_SCHEMA_VERSION: number = 5;
+const VAULT_SCHEMA_VERSION: number = 6;
 const UserVersionRowSchema: z.ZodType<{ readonly user_version: number }> = z.object({
   user_version: z
     .union([z.number().int(), z.bigint()])
@@ -165,6 +165,18 @@ export function migrateLocalVault(database: Database): void {
         CREATE INDEX prekeys_signing_generation
           ON prekeys(agent_id, agent_signing_key_id, prekey_class, expires_at, prekey_id);
         PRAGMA user_version = 5;
+      `);
+    }
+    if (version <= 5) {
+      database.exec(`
+        CREATE TABLE peer_root_expectations (
+          tenant_id TEXT NOT NULL,
+          agent_id TEXT NOT NULL,
+          root_key_id TEXT NOT NULL,
+          verified_at TEXT NOT NULL,
+          PRIMARY KEY(tenant_id, agent_id)
+        );
+        PRAGMA user_version = 6;
       `);
     }
     database.exec("COMMIT");

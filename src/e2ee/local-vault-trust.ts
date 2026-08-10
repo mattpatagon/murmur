@@ -212,6 +212,12 @@ export class LocalVaultTrust {
         importedAt,
       );
     }
+    const deleteExpectations: Statement<unknown, [string, string]> = this.#database.query(`
+      DELETE FROM peer_root_expectations WHERE tenant_id = ? AND agent_id = ?
+    `);
+    for (const binding of policy.bindings) {
+      deleteExpectations.run(policy.tenantId, binding.agentId);
+    }
   }
 
   public async applyPolicy(

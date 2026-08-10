@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { type CacheDecryptedInput, LocalE2eeVault } from "../src/e2ee/local-vault.js";
 import type {
   CachedMessage,
+  ExpectedPeerRoot,
   OutboxItem,
   PeerPin,
   SentReceipt,
@@ -118,6 +119,20 @@ test("persists certified agent keys, bounded prekeys, and strict peer pins", asy
         publicKey: fixedDigest(77),
       };
       await expect(vault.keys.pinPeer(changed)).rejects.toThrow("fingerprint does not match");
+      const expected: ExpectedPeerRoot = vault.keys.expectPeerRoot({
+        agentId: "machine:codex:other:carol",
+        rootKeyId: root.rootKeyId,
+        tenantId: tofu.tenantId,
+        verifiedAt: tofu.verifiedAt,
+      });
+      expect(expected.rootKeyId).toBe(root.rootKeyId);
+      const expectedPin: PeerPin = await vault.keys.pinPeer({
+        ...tofu,
+        agentId: expected.agentId,
+        verificationMode: "strict",
+      });
+      expect(expectedPin.verificationMode).toBe("strict");
+      expect(vault.keys.getExpectedPeerRoot(tofu.tenantId, expected.agentId)).toBeNull();
     } finally {
       vault.close();
     }
@@ -334,6 +349,7 @@ test("upgrades version-four prekeys with their original signing generation", asy
     if (prekey === undefined) throw new Error("Expected upgrade prekey");
     const legacy: Database = new Database(path, { create: false, readwrite: true });
     legacy.exec(`
+      DROP TABLE peer_root_expectations;
       DROP INDEX prekeys_signing_generation;
       ALTER TABLE prekeys DROP COLUMN agent_signing_key_id;
       PRAGMA user_version = 4;
@@ -356,7 +372,7 @@ test("rejects a vault schema newer than the running binary", async (): Promise<v
     const path: string = join(directory, "future.sqlite");
     mkdirSync(directory, { recursive: true });
     const database: Database = new Database(path, { create: true, readwrite: true });
-    database.exec("PRAGMA user_version = 6");
+    database.exec("PRAGMA user_version = 7");
     database.close(false);
     expect((): LocalE2eeVault => new LocalE2eeVault(path, "linux")).toThrow("newer");
   });
