@@ -50,6 +50,7 @@ export const E2EE_KEY_PROVISIONING_TOOL_NAMES: readonly string[] = ["publish_age
 export const E2EE_ENFORCED_TOOL_NAMES: readonly string[] = [
   "cancel_encrypted_broadcast",
   "claim_encryption_prekey",
+  "claim_orchestrator_prekey",
   "commit_encrypted_broadcast",
   "get_encrypted_messages",
   "get_inbox_summary",

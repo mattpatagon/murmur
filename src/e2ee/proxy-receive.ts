@@ -297,6 +297,7 @@ export async function receiveEncryptedMessages(
     remote,
     parsedInput.agent_id,
     now,
+    parsedInput.session_key,
   );
   const output: EncryptedInboxOutput = EncryptedInboxOutputSchema.parse(
     await remote.getEncryptedMessages(parsedInput),
@@ -339,6 +340,7 @@ export async function waitForDecryptedMessages(
     remote,
     parsedInput.agent_id,
     now,
+    parsedInput.session_key,
   );
   const output: WaitForEncryptedMessagesOutput = WaitForEncryptedMessagesOutputSchema.parse(
     await remote.waitForEncryptedMessages(parsedInput),

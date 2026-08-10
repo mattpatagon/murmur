@@ -105,6 +105,7 @@ class ReceiveRemote implements E2eeRemoteClient {
 
   public async capability(): Promise<E2eeCapabilityOutput> {
     return {
+      caller_authority: "peer",
       max_ciphertext_bytes: 512 * 1024 + 16,
       max_one_time_prekeys: 100,
       protocol: "murmur-e2ee-v1",
@@ -407,7 +408,7 @@ test("rejects signed-envelope context relabeling and public-chain substitution",
           ...message.envelope.header,
           message_kind: "orchestration_request",
           orchestrator_policy_id: "44444444-4444-4444-8444-444444444444",
-          sender_authority: "orchestrator",
+          sender_authority: "peer",
         },
       },
     });

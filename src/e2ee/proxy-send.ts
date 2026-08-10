@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import sodium from "libsodium-wrappers";
 
 import type { Clock, Instant } from "../domain/value-objects.js";
+import { ordinaryClaimedProvenance } from "./claimed-provenance.js";
 import { BinaryWriter } from "./encoding.js";
 import { encryptEnvelope } from "./envelope.js";
 import type { LocalE2eeVault } from "./local-vault.js";
@@ -23,6 +24,7 @@ import {
   serializeEnvelope,
 } from "./wire-contracts.js";
 import {
+  type ClaimEncryptionPrekeyOutput,
   type ClaimedProvenanceDto,
   type E2eeCapabilityOutput,
   type E2eeMessageContextDto,
@@ -40,6 +42,7 @@ export type ProxySendInput = {
   readonly idempotencyKey: string | null;
   readonly recipientId: string;
   readonly senderId: string;
+  readonly sessionKey?: string | undefined;
   readonly threadId: string | null;
 };
 
@@ -50,7 +53,10 @@ export type ProxySendResult = {
 };
 
 export type ProxySendOptions = {
-  readonly expectedProvenance: ClaimedProvenanceDto;
+  readonly claimProvider?:
+    | ((input: ProxySendInput) => Promise<ClaimEncryptionPrekeyOutput>)
+    | undefined;
+  readonly expectedProvenance: ClaimedProvenanceDto | null;
   readonly random: EnvelopeRandom;
   readonly trustOnFirstUse: boolean;
   readonly uuid: () => string;
@@ -70,11 +76,7 @@ export class SodiumEnvelopeRandom implements EnvelopeRandom {
 
 export function defaultProxySendOptions(): ProxySendOptions {
   return {
-    expectedProvenance: {
-      message_kind: "message",
-      orchestrator_policy_id: null,
-      sender_authority: "peer",
-    },
+    expectedProvenance: null,
     random: new SodiumEnvelopeRandom(),
     trustOnFirstUse: false,
     uuid: randomUUID,
@@ -171,19 +173,26 @@ async function createStoredEnvelope(
   readonly outbox: OutboxItem;
   readonly verificationMode: VerifiedClaim["verificationMode"];
 }> {
+  const claimOutput: ClaimEncryptionPrekeyOutput =
+    options.claimProvider === undefined
+      ? await remote.claimEncryptionPrekey({
+          context: input.context,
+          recipient_id: input.recipientId,
+          sender_id: input.senderId,
+          ...(input.sessionKey === undefined ? {} : { session_key: input.sessionKey }),
+        })
+      : await options.claimProvider(input);
   const verified: VerifiedClaim = await verifyClaimedPeer(
     vault,
-    await remote.claimEncryptionPrekey({
-      context: input.context,
-      recipient_id: input.recipientId,
-      sender_id: input.senderId,
-    }),
+    claimOutput,
     input.recipientId,
     capability.tenant_id,
     now,
     options.trustOnFirstUse,
   );
-  if (!claimProvenanceMatches(verified.claim.provenance, options.expectedProvenance)) {
+  const expectedProvenance: ClaimedProvenanceDto =
+    options.expectedProvenance ?? ordinaryClaimedProvenance(capability.caller_authority);
+  if (!claimProvenanceMatches(verified.claim.provenance, expectedProvenance)) {
     throw new Error("Hosted Murmur returned unexpected sender provenance");
   }
   const envelope: EncryptedEnvelope = await encryptEnvelope(
@@ -244,6 +253,7 @@ export async function sendEncryptedMessage(
     remote,
     input.senderId,
     now,
+    input.sessionKey,
   );
   const logicalId: string = input.idempotencyKey === null ? options.uuid() : input.idempotencyKey;
   const plaintextDigest: Uint8Array = await digestOutbox(

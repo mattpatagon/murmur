@@ -15,7 +15,8 @@ import { PersonalId } from "../src/domain/orchestration.js";
 import { AgentId, RepositoryName, TenantId } from "../src/domain/value-objects.js";
 import type { HostedPrincipal } from "../src/hosted/control-plane.js";
 import { parseE2eeEntitlementRecord, tenantDataToolNames } from "../src/hosted/e2ee-entitlement.js";
-import { type ToolExposure, toolsForPrincipal } from "../src/mcp/murmur-tool-definitions.js";
+import { toolsForPrincipal } from "../src/mcp/murmur-tool-definitions.js";
+import type { ToolExposure } from "../src/mcp/murmur-tool-exposure.js";
 
 const DATA_TOOLS: readonly string[] = [
   "broadcast_message",
@@ -112,7 +113,9 @@ describe("MCP role-to-tool exposure", (): void => {
       unreadPlaintextMessages: 0,
     });
     expect(names({ ...exposure(principal), e2eeEntitlement: entitlement })).toEqual(
-      [...tenantDataToolNames(entitlement)].sort(),
+      tenantDataToolNames(entitlement)
+        .filter((name: string): boolean => name !== "claim_orchestrator_prekey")
+        .sort(),
     );
     expect(names({ ...exposure(principal), e2eeEntitlement: entitlement })).not.toContain(
       "get_messages",
@@ -159,6 +162,47 @@ describe("MCP role-to-tool exposure", (): void => {
       [...DATA_TOOLS, ...BOSS_ORCHESTRATION_TOOLS].sort(),
     );
     expect(names(exposure(boss))).toEqual([]);
+  });
+
+  test("enforced E2E uses only encrypted orchestration content routes", (): void => {
+    const tenantId: TenantId = TenantId.parse("00000000-0000-4000-8000-000000000001");
+    const entitlement: ReturnType<typeof parseE2eeEntitlementRecord> = parseE2eeEntitlementRecord({
+      plaintextWritesBlocked: true,
+      retainedCiphertextMessages: 0,
+      state: "enforced",
+      trustPolicyVersion: 1,
+      unreadPlaintextMessages: 0,
+    });
+    const worker: HostedPrincipal = {
+      kind: "tenant",
+      personalId: PersonalId.parse("20000000-0000-4000-8000-000000000001"),
+      role: "agent",
+      tenantId,
+      tokenId: "10000000-0000-4000-8000-000000000011",
+    };
+    const boss: HostedPrincipal = {
+      ...worker,
+      agentId: AgentId.parse("boss-agent"),
+      role: "orchestrator",
+      tokenId: "10000000-0000-4000-8000-000000000012",
+    };
+    const workerTools: readonly string[] = names({
+      ...exposure(worker),
+      e2eeEntitlement: entitlement,
+      orchestrationEnabled: true,
+    });
+    expect(workerTools).toContain("claim_orchestrator_prekey");
+    expect(workerTools).toContain("get_orchestrator");
+    expect(workerTools).not.toContain("ask_orchestrator");
+    expect(workerTools).not.toContain("send_message");
+    const bossTools: readonly string[] = names({
+      ...exposure(boss),
+      e2eeEntitlement: entitlement,
+      orchestrationEnabled: true,
+    });
+    expect(bossTools).toContain("get_delegation");
+    expect(bossTools).toContain("claim_encryption_prekey");
+    expect(bossTools).not.toContain("claim_orchestrator_prekey");
   });
 
   test("bootstrap sessions expose one tool only while the bootstrap proof exists", (): void => {

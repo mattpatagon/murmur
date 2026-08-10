@@ -231,7 +231,7 @@ test("hosted validation rejects validly signed tenant, context, provenance, and 
       ...base,
       messageKind: "orchestration_request",
       orchestratorPolicyId: "00000000-0000-4000-8000-000000000098",
-      senderAuthority: "orchestrator",
+      senderAuthority: "peer",
     },
     { ...base, broadcastId: "00000000-0000-4000-8000-000000000097" },
     { ...base, recipientPrekeyId: `mpk_${"Z".repeat(43)}` },

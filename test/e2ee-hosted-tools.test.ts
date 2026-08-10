@@ -29,9 +29,11 @@ import {
   type E2eeEntitlementRecord,
   parseE2eeEntitlementRecord,
 } from "../src/hosted/e2ee-entitlement.js";
+import type { EffectiveOrchestratorDto } from "../src/hosted/orchestration-contracts.js";
 import { callE2eeTool, type E2eeToolContext } from "../src/mcp/murmur-e2ee-tools.js";
 import type {
   E2eeMessageStore,
+  E2eeWriteAuthorization,
   EncryptedInboxUpdateHandler,
 } from "../src/storage/e2ee-message-store.js";
 import type { InboxSubscription } from "../src/storage/message-store.js";
@@ -82,6 +84,7 @@ function entitlement(state: E2eeEntitlementRecord["state"]): E2eeEntitlementReco
 
 function capability(state: E2eeEntitlementRecord["state"]): E2eeCapabilityOutput {
   return {
+    caller_authority: "peer",
     max_ciphertext_bytes: 524_304,
     max_one_time_prekeys: 20,
     protocol: "murmur-e2ee-v1",
@@ -92,6 +95,8 @@ function capability(state: E2eeEntitlementRecord["state"]): E2eeCapabilityOutput
 }
 
 class FakeE2eeStore implements E2eeMessageStore {
+  public claimAuthorization: E2eeWriteAuthorization | null = null;
+  public claimInput: ClaimEncryptionPrekeyInput | null = null;
   public inboxes: EncryptedInboxOutput[] = [];
   public publishInput: PublishAgentKeyBundleInput | null = null;
   public watchCloseCount: number = 0;
@@ -111,8 +116,29 @@ class FakeE2eeStore implements E2eeMessageStore {
     };
   }
 
-  public claimEncryptionPrekey(_input: ClaimEncryptionPrekeyInput): ClaimEncryptionPrekeyOutput {
-    throw new Error("unused fake claim");
+  public claimEncryptionPrekey(
+    input: ClaimEncryptionPrekeyInput,
+    authorization?: E2eeWriteAuthorization,
+  ): ClaimEncryptionPrekeyOutput {
+    this.claimAuthorization = authorization ?? null;
+    this.claimInput = input;
+    return {
+      bundle: bundle(input.recipient_id),
+      claim_id: "22222222-2222-4222-8222-222222222222",
+      claimed_at: NOW,
+      expires_at: "2026-08-10T17:05:00.000Z",
+      prekey_class: "fallback",
+      prekey_id: FALLBACK_PREKEY_ID,
+      provenance:
+        authorization === undefined
+          ? {
+              message_kind: "message",
+              orchestrator_policy_id: null,
+              sender_authority: "peer",
+            }
+          : authorization.provenance,
+      recipient_id: input.recipient_id,
+    };
   }
 
   public putEncryptedMessage(_input: PutEncryptedMessageInput): PutEncryptedMessageOutput {
@@ -177,7 +203,16 @@ function context(
   store: E2eeMessageStore | null,
   sleep: (milliseconds: number) => Promise<void> = async (): Promise<void> => {},
 ): E2eeToolContext {
-  return { capability: capability(state), entitlement: entitlement(state), sleep, store };
+  return {
+    authorizeAgent: async (): Promise<void> => {},
+    boundAgentId: null,
+    capability: capability(state),
+    entitlement: entitlement(state),
+    resolveOrchestrator: null,
+    senderAuthority: "peer",
+    sleep,
+    store,
+  };
 }
 
 test("returns only the server-derived capability in the off state", async (): Promise<void> => {
@@ -228,6 +263,47 @@ test("validates and delegates public bundle provisioning without accepting secre
       context("provisioning", store),
     ),
   ).toBeNull();
+});
+
+test("resolves encrypted orchestration claims entirely from authenticated server context", async (): Promise<void> => {
+  const store: FakeE2eeStore = new FakeE2eeStore();
+  const policyId: string = "33333333-3333-4333-8333-333333333333";
+  const routedContext: E2eeToolContext = {
+    ...context("enforced", store),
+    resolveOrchestrator: async (): Promise<EffectiveOrchestratorDto> => ({
+      agent_id: "orchestrator",
+      policy_id: policyId,
+      scope: { personal_id: null, repository: null, scope_kind: "organization" },
+    }),
+  };
+  const output: CallToolResult | null = await callE2eeTool(
+    "claim_orchestrator_prekey",
+    {
+      context: { branch: "feature/e2e", client: "codex", repository: "owner/repository" },
+      sender_id: "alice",
+      session_key: "worker-session",
+    },
+    routedContext,
+  );
+  if (output === null) throw new Error("Orchestrator claim was not routed");
+  expect(store.claimInput).toEqual({
+    context: { branch: "feature/e2e", client: "codex", repository: "owner/repository" },
+    recipient_id: "orchestrator",
+    sender_id: "alice",
+    session_key: "worker-session",
+  });
+  expect(store.claimAuthorization).toEqual({
+    boundSenderId: null,
+    provenance: {
+      message_kind: "orchestration_request",
+      orchestrator_policy_id: policyId,
+      sender_authority: "peer",
+    },
+  });
+  expect(output.structuredContent).toMatchObject({
+    claim: { recipient_id: "orchestrator" },
+    orchestrator: { agent_id: "orchestrator", policy_id: policyId },
+  });
 });
 
 test("bounds encrypted waits and always closes their subscription", async (): Promise<void> => {

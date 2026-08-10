@@ -1,7 +1,8 @@
 import type { Database } from "bun:sqlite";
 
 import type { MarkMessagesReadInput, MarkMessagesReadOutput } from "../domain/contracts.js";
-import type { Clock, Instant, TenantId } from "../domain/value-objects.js";
+import { SessionKey } from "../domain/lifecycle-values.js";
+import { AgentId, type Clock, type Instant, type TenantId } from "../domain/value-objects.js";
 import type {
   CancelEncryptedBroadcastInput,
   CancelEncryptedBroadcastOutput,
@@ -23,13 +24,19 @@ import type {
   PutEncryptedMessageOutput,
 } from "../e2ee/wire-tools.js";
 import { MAX_E2EE_CIPHERTEXT_BYTES } from "../e2ee/wire-contracts.js";
+import { ordinaryClaimedProvenance } from "../e2ee/claimed-provenance.js";
 import {
   verifyHostedEncryptedEnvelope,
   verifyHostedPublicBundle,
 } from "../e2ee/hosted-validation.js";
 import { logSafeError } from "../safe-errors.js";
-import type { E2eeMessageStore, EncryptedInboxUpdateHandler } from "./e2ee-message-store.js";
+import type {
+  E2eeMessageStore,
+  E2eeWriteAuthorization,
+  EncryptedInboxUpdateHandler,
+} from "./e2ee-message-store.js";
 import type { InboxSubscription } from "./message-store.js";
+import { renewSqliteSession } from "./sqlite-agent-lifecycle-store.js";
 import {
   cancelSqliteEncryptedBroadcast,
   commitSqliteEncryptedBroadcast,
@@ -152,9 +159,17 @@ export class SqliteE2eeMessageStore implements E2eeMessageStore {
     return publishSqliteAgentKeyBundle(this.database, input, now);
   }
 
-  public claimEncryptionPrekey(input: ClaimEncryptionPrekeyInput): ClaimEncryptionPrekeyOutput {
+  public claimEncryptionPrekey(
+    input: ClaimEncryptionPrekeyInput,
+    authorization?: E2eeWriteAuthorization,
+  ): ClaimEncryptionPrekeyOutput {
     this.prune();
-    return claimSqliteEncryptionPrekey(this.database, input, this.clock.now());
+    return claimSqliteEncryptionPrekey(
+      this.database,
+      input,
+      this.clock.now(),
+      authorization === undefined ? ordinaryClaimedProvenance("peer") : authorization.provenance,
+    );
   }
 
   public async putEncryptedMessage(
@@ -184,23 +199,32 @@ export class SqliteE2eeMessageStore implements E2eeMessageStore {
 
   public getEncryptedMessages(input: GetEncryptedMessagesInput): EncryptedInboxOutput {
     this.prune();
+    this.renewReadSession(input.agent_id, input.session_key);
     return getSqliteEncryptedMessages(this.database, input, this.clock.now());
   }
 
   public markEncryptedMessagesRead(input: MarkMessagesReadInput): MarkMessagesReadOutput {
     this.prune();
+    this.renewReadSession(input.agent_id, input.session_key);
     return markSqliteEncryptedMessagesRead(this.database, input, this.clock.now());
   }
 
   public prepareEncryptedBroadcast(
     input: PrepareEncryptedBroadcastInput,
+    authorization?: E2eeWriteAuthorization,
   ): PrepareEncryptedBroadcastOutput {
     this.prune();
-    return prepareSqliteEncryptedBroadcast(this.database, input, this.clock.now());
+    return prepareSqliteEncryptedBroadcast(
+      this.database,
+      input,
+      this.clock.now(),
+      authorization === undefined ? ordinaryClaimedProvenance("peer") : authorization.provenance,
+    );
   }
 
   public async putEncryptedBroadcastDelivery(
     input: PutEncryptedBroadcastDeliveryInput,
+    authorization?: E2eeWriteAuthorization,
   ): Promise<PutEncryptedBroadcastDeliveryOutput> {
     this.prune();
     const now: Instant = this.clock.now();
@@ -216,26 +240,64 @@ export class SqliteE2eeMessageStore implements E2eeMessageStore {
       putInput: { claim_id: input.claim_id, envelope: input.envelope },
       tenantId: this.tenantId.value,
     });
-    return putSqliteEncryptedBroadcastDelivery(this.database, this.tenantId.value, input, now);
+    return putSqliteEncryptedBroadcastDelivery(
+      this.database,
+      this.tenantId.value,
+      input,
+      now,
+      authorization ?? {
+        boundSenderId: null,
+        provenance: ordinaryClaimedProvenance("peer"),
+      },
+    );
   }
 
   public commitEncryptedBroadcast(
     input: CommitEncryptedBroadcastInput,
+    authorization?: E2eeWriteAuthorization,
   ): CommitEncryptedBroadcastOutput {
     this.prune();
-    return commitSqliteEncryptedBroadcast(this.database, input, this.clock.now());
+    return commitSqliteEncryptedBroadcast(
+      this.database,
+      input,
+      this.clock.now(),
+      authorization ?? {
+        boundSenderId: null,
+        provenance: ordinaryClaimedProvenance("peer"),
+      },
+    );
   }
 
   public cancelEncryptedBroadcast(
     input: CancelEncryptedBroadcastInput,
+    authorization?: E2eeWriteAuthorization,
   ): CancelEncryptedBroadcastOutput {
     this.prune();
-    return cancelSqliteEncryptedBroadcast(this.database, input);
+    return cancelSqliteEncryptedBroadcast(
+      this.database,
+      input,
+      authorization ?? {
+        boundSenderId: null,
+        provenance: ordinaryClaimedProvenance("peer"),
+      },
+    );
   }
 
   public getEncryptedInboxSummary(input: GetInboxSummaryInput): GetInboxSummaryOutput {
     this.prune();
+    this.renewReadSession(input.agent_id, input.session_key);
     return getSqliteEncryptedInboxSummary(this.database, input, this.clock.now());
+  }
+
+  private renewReadSession(agentId: string, sessionKey: string | undefined): void {
+    if (sessionKey === undefined) return;
+    renewSqliteSession(
+      this.database,
+      AgentId.parse(agentId),
+      SessionKey.parse(sessionKey),
+      this.clock.now(),
+      false,
+    );
   }
 
   public watchEncryptedInbox(

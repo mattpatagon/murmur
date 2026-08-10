@@ -29,6 +29,16 @@ import {
   type RegisterAgentOutput,
   RegisterAgentOutputSchema,
 } from "../domain/contracts.js";
+import {
+  type GetDelegationInput,
+  GetDelegationInputSchema,
+  type GetDelegationOutput,
+  GetDelegationOutputSchema,
+  type GetOrchestratorInput,
+  GetOrchestratorInputSchema,
+  type GetOrchestratorOutput,
+  GetOrchestratorOutputSchema,
+} from "../hosted/orchestration-contracts.js";
 import { BoundedHttpClientTransport } from "./bounded-http-transport.js";
 import {
   type E2eeProxyRemoteClient,
@@ -82,6 +92,12 @@ import {
   type WaitForEncryptedMessagesOutput,
   WaitForEncryptedMessagesOutputSchema,
 } from "./wire-tools.js";
+import {
+  type ClaimOrchestratorPrekeyInput,
+  ClaimOrchestratorPrekeyInputSchema,
+  type ClaimOrchestratorPrekeyOutput,
+  ClaimOrchestratorPrekeyOutputSchema,
+} from "./wire-orchestration.js";
 
 const CONNECT_TIMEOUT_MS: number = 10_000;
 const REQUEST_TIMEOUT_MS: number = 30_000;
@@ -303,6 +319,35 @@ export class E2eeHttpRemoteClient implements E2eeRemoteClient, E2eeProxyRemoteCl
       input,
       ClaimEncryptionPrekeyInputSchema,
       ClaimEncryptionPrekeyOutputSchema,
+    );
+  }
+
+  public async claimOrchestratorPrekey(
+    input: ClaimOrchestratorPrekeyInput,
+  ): Promise<ClaimOrchestratorPrekeyOutput> {
+    return await this.call(
+      "claim_orchestrator_prekey",
+      input,
+      ClaimOrchestratorPrekeyInputSchema,
+      ClaimOrchestratorPrekeyOutputSchema,
+    );
+  }
+
+  public async getOrchestrator(input: GetOrchestratorInput): Promise<GetOrchestratorOutput> {
+    return await this.call(
+      "get_orchestrator",
+      input,
+      GetOrchestratorInputSchema,
+      GetOrchestratorOutputSchema,
+    );
+  }
+
+  public async getDelegation(input: GetDelegationInput): Promise<GetDelegationOutput> {
+    return await this.call(
+      "get_delegation",
+      input,
+      GetDelegationInputSchema,
+      GetDelegationOutputSchema,
     );
   }
 

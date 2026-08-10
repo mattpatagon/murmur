@@ -4,6 +4,10 @@ import { z } from "zod";
 
 import { MarkMessagesReadInputSchema, MarkMessagesReadOutputSchema } from "../domain/contracts.js";
 import {
+  ClaimOrchestratorPrekeyInputSchema,
+  ClaimOrchestratorPrekeyOutputSchema,
+} from "./wire-orchestration.js";
+import {
   CancelEncryptedBroadcastInputSchema,
   CancelEncryptedBroadcastOutputSchema,
   ClaimEncryptionPrekeyInputSchema,
@@ -88,6 +92,14 @@ export function encryptedWireToolDefinitions(): readonly Tool[] {
       "Claim one recipient prekey and server-derived provenance for a direct encrypted delivery.",
       ClaimEncryptionPrekeyInputSchema,
       ClaimEncryptionPrekeyOutputSchema,
+      WRITE,
+    ),
+    wireTool(
+      "claim_orchestrator_prekey",
+      "Claim orchestrator encryption key",
+      "Resolve the authenticated worker's effective orchestrator and claim its prekey with server-issued policy provenance.",
+      ClaimOrchestratorPrekeyInputSchema,
+      ClaimOrchestratorPrekeyOutputSchema,
       WRITE,
     ),
     wireTool(

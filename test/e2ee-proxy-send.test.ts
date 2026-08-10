@@ -214,6 +214,7 @@ class FakeRemote implements E2eeRemoteClient {
 
   public async capability(): Promise<E2eeCapabilityOutput> {
     return {
+      caller_authority: "peer",
       max_ciphertext_bytes: 512 * 1024 + 16,
       max_one_time_prekeys: 100,
       protocol: "murmur-e2ee-v1",

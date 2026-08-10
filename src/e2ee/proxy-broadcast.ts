@@ -1,6 +1,7 @@
 import sodium from "libsodium-wrappers";
 
 import type { Clock, Instant } from "../domain/value-objects.js";
+import { ordinaryClaimedProvenance } from "./claimed-provenance.js";
 import { BinaryWriter } from "./encoding.js";
 import { encryptEnvelope } from "./envelope.js";
 import type { LocalE2eeVault } from "./local-vault.js";
@@ -43,6 +44,7 @@ export type ProxyBroadcastInput = {
   readonly context: E2eeMessageContextDto;
   readonly idempotencyKey: string | null;
   readonly senderId: string;
+  readonly sessionKey?: string | undefined;
   readonly threadId: string | null;
 };
 
@@ -172,7 +174,9 @@ async function createDelivery(
     now,
     options.trustOnFirstUse,
   );
-  if (!claimProvenanceMatches(verified.claim.provenance, options.expectedProvenance)) {
+  const expectedProvenance: EncryptedBroadcastClaimDto["provenance"] =
+    options.expectedProvenance ?? ordinaryClaimedProvenance(capability.caller_authority);
+  if (!claimProvenanceMatches(verified.claim.provenance, expectedProvenance)) {
     throw new Error("Hosted Murmur returned unexpected broadcast sender provenance");
   }
   const logicalId: string = deliveryLogicalId(broadcastLogicalId, claim.recipient_id);
@@ -315,6 +319,7 @@ export async function broadcastEncryptedMessage(
     remote,
     input.senderId,
     clock.now(),
+    input.sessionKey,
   );
   const broadcastLogicalId: string =
     input.idempotencyKey === null ? options.uuid() : input.idempotencyKey;
@@ -326,6 +331,7 @@ export async function broadcastEncryptedMessage(
         context: input.context,
         idempotency_key: broadcastLogicalId,
         sender_id: input.senderId,
+        ...(input.sessionKey === undefined ? {} : { session_key: input.sessionKey }),
         thread_id: input.threadId === null ? undefined : input.threadId,
       }),
     );

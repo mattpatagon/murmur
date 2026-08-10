@@ -2,7 +2,7 @@ import type { Database, Statement } from "bun:sqlite";
 
 import { type UserVersionRow, UserVersionRowSchema } from "./sqlite-message-rows.js";
 
-const SUPPORTED_SCHEMA_VERSION: number = 9;
+const SUPPORTED_SCHEMA_VERSION: number = 10;
 
 function schemaVersion(database: Database): number {
   const statement: Statement<unknown, []> = database.query("PRAGMA user_version");
@@ -362,6 +362,14 @@ export function migrateSqliteDatabase(database: Database): void {
         ALTER TABLE messages ADD COLUMN orchestrator_policy_id TEXT
           CHECK(orchestrator_policy_id IS NULL);
         PRAGMA user_version = 9;
+      `);
+      version = 9;
+    }
+    if (version === 9) {
+      database.exec(`
+        ALTER TABLE e2ee_broadcasts ADD COLUMN sender_authority TEXT NOT NULL DEFAULT 'peer'
+          CHECK(sender_authority IN ('peer', 'orchestrator'));
+        PRAGMA user_version = 10;
       `);
     }
     database.exec("COMMIT");

@@ -21,6 +21,13 @@ import {
   type WaitForMessagesInput,
 } from "../domain/contracts.js";
 import type { AgentClient, BranchName, Clock, RepositoryName } from "../domain/value-objects.js";
+import type {
+  AskOrchestratorInput,
+  GetDelegationInput,
+  GetDelegationOutput,
+  GetOrchestratorInput,
+  GetOrchestratorOutput,
+} from "../hosted/orchestration-contracts.js";
 import type { LocalE2eeVault } from "./local-vault.js";
 import {
   broadcastEncryptedMessage,
@@ -30,6 +37,7 @@ import {
 import {
   broadcastToProxyOutput,
   decryptedMessageToProxyDto,
+  type ProxyAskOrchestratorOutput,
   type ProxyBroadcastOutput,
   type ProxyInboxOutput,
   ProxyInboxOutputSchema,
@@ -40,6 +48,7 @@ import {
   sentMessageToProxyDto,
 } from "./proxy-contracts.js";
 import { publishLocalIdentity } from "./proxy-identity.js";
+import { askEncryptedOrchestrator } from "./proxy-orchestration.js";
 import {
   markEncryptedMessagesRead,
   type ReceiveEncryptedMessagesResult,
@@ -73,6 +82,9 @@ export interface E2eeProxyOperations {
   listAgents(input: ListAgentsInput): Promise<ListAgentsOutput>;
   endSession(input: EndSessionInput): Promise<EndSessionOutput>;
   closeAgent(input: CloseAgentInput): Promise<CloseAgentOutput>;
+  askOrchestrator?(input: AskOrchestratorInput): Promise<ProxyAskOrchestratorOutput>;
+  getDelegation?(input: GetDelegationInput): Promise<GetDelegationOutput>;
+  getOrchestrator?(input: GetOrchestratorInput): Promise<GetOrchestratorOutput>;
   sendMessage(input: SendMessageInput): Promise<ProxySendMessageOutput>;
   broadcastMessage(input: BroadcastMessageInput): Promise<ProxyBroadcastOutput>;
   getMessages(input: GetMessagesInput): Promise<ProxyInboxOutput>;
@@ -133,6 +145,7 @@ export class E2eeProxyService implements E2eeProxyOperations {
       this.#dependencies.remote,
       output.agent.agent_id,
       this.#dependencies.clock.now(),
+      input.session_key,
     );
     return output;
   }
@@ -157,6 +170,39 @@ export class E2eeProxyService implements E2eeProxyOperations {
     return await this.#dependencies.remote.closeAgent(input);
   }
 
+  public async getOrchestrator(input: GetOrchestratorInput): Promise<GetOrchestratorOutput> {
+    this.#ensureOpen();
+    const operation: E2eeProxyRemoteClient["getOrchestrator"] =
+      this.#dependencies.remote.getOrchestrator;
+    if (operation === undefined) throw new Error("Encrypted orchestration is unavailable");
+    return await operation.call(this.#dependencies.remote, input);
+  }
+
+  public async getDelegation(input: GetDelegationInput): Promise<GetDelegationOutput> {
+    this.#ensureOpen();
+    const operation: E2eeProxyRemoteClient["getDelegation"] =
+      this.#dependencies.remote.getDelegation;
+    if (operation === undefined) throw new Error("Encrypted orchestration is unavailable");
+    return await operation.call(this.#dependencies.remote, input);
+  }
+
+  public async askOrchestrator(input: AskOrchestratorInput): Promise<ProxyAskOrchestratorOutput> {
+    this.#ensureOpen();
+    return await askEncryptedOrchestrator(
+      this.#dependencies.vault,
+      this.#dependencies.remote,
+      this.#dependencies.clock,
+      {
+        content: input.content,
+        context: requiredContext(input.context, this.#dependencies),
+        idempotencyKey: input.idempotency_key,
+        senderId: input.sender_id,
+        threadId: input.thread_id === undefined ? null : input.thread_id,
+      },
+      this.#dependencies.trustOnFirstUse,
+    );
+  }
+
   public async sendMessage(input: SendMessageInput): Promise<ProxySendMessageOutput> {
     this.#ensureOpen();
     const encryptedInput: ProxySendInput = {
@@ -165,6 +211,7 @@ export class E2eeProxyService implements E2eeProxyOperations {
       idempotencyKey: input.idempotency_key === undefined ? null : input.idempotency_key,
       recipientId: input.recipient_id,
       senderId: input.sender_id,
+      ...(input.session_key === undefined ? {} : { sessionKey: input.session_key }),
       threadId: input.thread_id === undefined ? null : input.thread_id,
     };
     const result: ProxySendResult = await sendEncryptedMessage(
@@ -192,6 +239,7 @@ export class E2eeProxyService implements E2eeProxyOperations {
       context: requiredContext(input.context, this.#dependencies),
       idempotencyKey: input.idempotency_key === undefined ? null : input.idempotency_key,
       senderId: input.sender_id,
+      ...(input.session_key === undefined ? {} : { sessionKey: input.session_key }),
       threadId: input.thread_id === undefined ? null : input.thread_id,
     };
     const result: ProxyBroadcastResult = await broadcastEncryptedMessage(

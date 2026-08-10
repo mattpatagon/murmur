@@ -254,7 +254,7 @@ const EnvelopeHeaderDtoSchema: z.ZodType<EnvelopeHeaderDto> = z
   .superRefine((header: EnvelopeHeaderDto, context: z.core.$RefinementCtx): void => {
     const isOrchestration: boolean = header.message_kind === "orchestration_request";
     if (
-      isOrchestration !== (header.sender_authority === "orchestrator") ||
+      (isOrchestration && header.sender_authority !== "peer") ||
       isOrchestration !== (header.orchestrator_policy_id !== null)
     ) {
       context.addIssue({ code: "custom", message: "Envelope provenance is inconsistent" });

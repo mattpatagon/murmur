@@ -1,6 +1,10 @@
 import { z } from "zod";
 
 import type { MessageContextDto } from "../domain/contracts.js";
+import {
+  type EffectiveOrchestratorDto,
+  EffectiveOrchestratorDtoSchema,
+} from "../hosted/orchestration-contracts.js";
 import type { ProxyBroadcastResult } from "./proxy-broadcast.js";
 import type { EncryptionProof, VerifiedDecryptedMessage } from "./proxy-receive.js";
 import type { ProxySendResult } from "./proxy-send.js";
@@ -44,6 +48,14 @@ export type ProxyMessageDto = {
 export type ProxySendMessageOutput = Record<string, unknown> & {
   readonly duplicate: boolean;
   readonly message: ProxyMessageDto;
+  readonly retention_days: number;
+  readonly status: "stored";
+};
+
+export type ProxyAskOrchestratorOutput = Record<string, unknown> & {
+  readonly duplicate: boolean;
+  readonly message: ProxyMessageDto;
+  readonly orchestrator: EffectiveOrchestratorDto;
   readonly retention_days: number;
   readonly status: "stored";
 };
@@ -126,6 +138,15 @@ export const ProxySendMessageOutputSchema: z.ZodType<ProxySendMessageOutput> = z
   retention_days: z.number().int().positive().safe(),
   status: z.literal("stored"),
 });
+
+export const ProxyAskOrchestratorOutputSchema: z.ZodType<ProxyAskOrchestratorOutput> =
+  z.strictObject({
+    duplicate: z.boolean(),
+    message: ProxyMessageDtoSchema,
+    orchestrator: EffectiveOrchestratorDtoSchema,
+    retention_days: z.number().int().positive().safe(),
+    status: z.literal("stored"),
+  });
 
 export const ProxyInboxOutputSchema: z.ZodType<ProxyInboxOutput> = z.strictObject({
   agent_id: AgentIdSchema,

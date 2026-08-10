@@ -19,29 +19,42 @@ import type {
   PutEncryptedBroadcastDeliveryOutput,
   PutEncryptedMessageInput,
   PutEncryptedMessageOutput,
+  ClaimedProvenanceDto,
 } from "../e2ee/wire-tools.js";
 import type { Awaitable, InboxSubscription } from "./message-store.js";
 
 export type EncryptedInboxUpdateHandler = (sequence: number) => Promise<void>;
 
+export type E2eeWriteAuthorization = {
+  readonly boundSenderId: string | null;
+  readonly provenance: ClaimedProvenanceDto;
+};
+
 export interface E2eeMessageStore {
   scopeE2ee(tenantId: TenantId): E2eeMessageStore;
   publishAgentKeyBundle(input: PublishAgentKeyBundleInput): Awaitable<PublishAgentKeyBundleOutput>;
-  claimEncryptionPrekey(input: ClaimEncryptionPrekeyInput): Awaitable<ClaimEncryptionPrekeyOutput>;
+  claimEncryptionPrekey(
+    input: ClaimEncryptionPrekeyInput,
+    authorization?: E2eeWriteAuthorization,
+  ): Awaitable<ClaimEncryptionPrekeyOutput>;
   putEncryptedMessage(input: PutEncryptedMessageInput): Awaitable<PutEncryptedMessageOutput>;
   getEncryptedMessages(input: GetEncryptedMessagesInput): Awaitable<EncryptedInboxOutput>;
   markEncryptedMessagesRead(input: MarkMessagesReadInput): Awaitable<MarkMessagesReadOutput>;
   prepareEncryptedBroadcast(
     input: PrepareEncryptedBroadcastInput,
+    authorization?: E2eeWriteAuthorization,
   ): Awaitable<PrepareEncryptedBroadcastOutput>;
   putEncryptedBroadcastDelivery(
     input: PutEncryptedBroadcastDeliveryInput,
+    authorization?: E2eeWriteAuthorization,
   ): Awaitable<PutEncryptedBroadcastDeliveryOutput>;
   commitEncryptedBroadcast(
     input: CommitEncryptedBroadcastInput,
+    authorization?: E2eeWriteAuthorization,
   ): Awaitable<CommitEncryptedBroadcastOutput>;
   cancelEncryptedBroadcast(
     input: CancelEncryptedBroadcastInput,
+    authorization?: E2eeWriteAuthorization,
   ): Awaitable<CancelEncryptedBroadcastOutput>;
   getEncryptedInboxSummary(input: GetInboxSummaryInput): Awaitable<GetInboxSummaryOutput>;
   watchEncryptedInbox(

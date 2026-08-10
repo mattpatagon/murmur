@@ -9,6 +9,7 @@ test("exposes only bounded public-key and ciphertext wire tools", (): void => {
     "get_e2ee_capability",
     "publish_agent_key_bundle",
     "claim_encryption_prekey",
+    "claim_orchestrator_prekey",
     "put_encrypted_message",
     "get_encrypted_messages",
     "wait_for_encrypted_messages",

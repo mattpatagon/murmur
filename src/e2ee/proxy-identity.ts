@@ -93,6 +93,7 @@ export async function publishLocalIdentity(
   remote: E2eeRemoteClient,
   agentId: string,
   now: Instant,
+  sessionKey?: string | undefined,
 ): Promise<LocalPublishedIdentity> {
   vault.purgeExpired(now.toISOString());
   await getE2eeCapability(remote, true);
@@ -154,6 +155,7 @@ export async function publishLocalIdentity(
         oneTimePrekeys.map((prekey: StoredPrekey): PrekeyCertificate => prekey.certificate),
         vault.keys.listAgentKeyRevocations(agentId),
       ),
+      ...(sessionKey === undefined ? {} : { session_key: sessionKey }),
     }),
   );
   if (

@@ -84,7 +84,7 @@ function header(): EnvelopeHeaderInput {
     recipientRootKeyId: ROOT_KEY_ID,
     repositoryName: null,
     senderAgentKeyId: AGENT_KEY_ID,
-    senderAuthority: "orchestrator",
+    senderAuthority: "peer",
     senderId: "sender",
     senderRootKeyId: ROOT_KEY_ID,
     tenantId: "33333333-3333-4333-8333-333333333333",
@@ -124,7 +124,7 @@ test("round trips strict public wire envelopes without plaintext or private keys
   ).rejects.toThrow("Encrypted message verification failed");
   const changedAuthority: EncryptedEnvelope = {
     ...parsed,
-    header: { ...parsed.header, senderAuthority: "peer" },
+    header: { ...parsed.header, senderAuthority: "orchestrator" },
   };
   await expect(
     decryptEnvelope(changedAuthority, sender.publicKey, recipient.privateKey),

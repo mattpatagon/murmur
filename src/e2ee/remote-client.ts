@@ -13,6 +13,16 @@ import type {
   RegisterAgentOutput,
 } from "../domain/contracts.js";
 import type {
+  GetDelegationInput,
+  GetDelegationOutput,
+  GetOrchestratorInput,
+  GetOrchestratorOutput,
+} from "../hosted/orchestration-contracts.js";
+import type {
+  ClaimOrchestratorPrekeyInput,
+  ClaimOrchestratorPrekeyOutput,
+} from "./wire-orchestration.js";
+import type {
   CancelEncryptedBroadcastInput,
   CancelEncryptedBroadcastOutput,
   ClaimEncryptionPrekeyInput,
@@ -50,6 +60,9 @@ export interface E2eeRemoteClient {
   capability(): Promise<E2eeCapabilityOutput>;
   publishAgentKeyBundle(input: PublishAgentKeyBundleInput): Promise<PublishAgentKeyBundleOutput>;
   claimEncryptionPrekey(input: ClaimEncryptionPrekeyInput): Promise<ClaimEncryptionPrekeyOutput>;
+  claimOrchestratorPrekey?(
+    input: ClaimOrchestratorPrekeyInput,
+  ): Promise<ClaimOrchestratorPrekeyOutput>;
   putEncryptedMessage(input: PutEncryptedMessageInput): Promise<PutEncryptedMessageOutput>;
   getEncryptedMessages(input: GetEncryptedMessagesInput): Promise<EncryptedInboxOutput>;
   waitForEncryptedMessages(
@@ -76,6 +89,8 @@ export interface E2eeProxyRemoteClient extends E2eeRemoteClient {
   closeAgent(input: CloseAgentInput): Promise<CloseAgentOutput>;
   endSession(input: EndSessionInput): Promise<EndSessionOutput>;
   getAgent(input: GetAgentInput): Promise<GetAgentOutput>;
+  getDelegation?(input: GetDelegationInput): Promise<GetDelegationOutput>;
+  getOrchestrator?(input: GetOrchestratorInput): Promise<GetOrchestratorOutput>;
   registerAgent(input: RegisterAgentInput): Promise<RegisterAgentOutput>;
   listAgents(input: ListAgentsInput): Promise<ListAgentsOutput>;
 }

@@ -442,6 +442,7 @@ export class LocalE2eeVault {
       "DELETE FROM sent_receipts WHERE expires_at <= ?",
     );
     receipts.run(now);
+    this.settings.purgeExpiredOrchestrationRoutes(now);
     return deleted;
   }
 

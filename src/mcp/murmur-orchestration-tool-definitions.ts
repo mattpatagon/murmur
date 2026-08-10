@@ -1,6 +1,4 @@
-import type { Tool, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 import {
   AskOrchestratorInputSchema,
@@ -18,26 +16,7 @@ import {
   SetOrchestratorPolicyInputSchema,
   SetOrchestratorPolicyOutputSchema,
 } from "../hosted/orchestration-contracts.js";
-
-function toolDefinition<Input, Output>(
-  name: string,
-  title: string,
-  description: string,
-  inputSchema: z.ZodType<Input>,
-  outputSchema: z.ZodType<Output>,
-  annotations: ToolAnnotations,
-): Tool {
-  const generatedInput: unknown = z.toJSONSchema(inputSchema);
-  const generatedOutput: unknown = z.toJSONSchema(outputSchema);
-  return {
-    annotations,
-    description,
-    inputSchema: ToolSchema.shape.inputSchema.parse(generatedInput),
-    name,
-    outputSchema: ToolSchema.shape.outputSchema.unwrap().parse(generatedOutput),
-    title,
-  };
-}
+import { toolDefinition } from "./tool-definition.js";
 
 export function orchestratorLookupTool(): Tool {
   return toolDefinition(

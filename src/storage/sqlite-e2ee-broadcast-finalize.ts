@@ -12,10 +12,12 @@ import {
   type CommitEncryptedBroadcastOutput,
   CommitEncryptedBroadcastOutputSchema,
 } from "../e2ee/wire-tools.js";
+import type { E2eeWriteAuthorization } from "./e2ee-message-store.js";
 import {
+  assertSqliteE2eeBroadcastAuthorization,
   readSqliteE2eeBroadcast,
   sqliteE2eeOpenAgentGeneration,
-} from "./sqlite-e2ee-broadcasts.js";
+} from "./sqlite-e2ee-broadcast-state.js";
 import {
   type SqliteE2eeBroadcastRow,
   SqliteE2eeCountRowSchema,
@@ -118,12 +120,14 @@ export function commitSqliteEncryptedBroadcast(
   database: Database,
   inputValue: unknown,
   now: Instant,
+  authorization: E2eeWriteAuthorization,
 ): CommitEncryptedBroadcastOutput {
   const input: CommitEncryptedBroadcastInput =
     CommitEncryptedBroadcastInputSchema.parse(inputValue);
   database.exec("BEGIN IMMEDIATE");
   try {
     const broadcast: SqliteE2eeBroadcastRow = readSqliteE2eeBroadcast(database, input.broadcast_id);
+    assertSqliteE2eeBroadcastAuthorization(broadcast, authorization);
     if (broadcast.state === "committed") {
       database.exec("COMMIT");
       return committedOutput(broadcast, true);
@@ -189,12 +193,14 @@ function pendingCiphertextBytes(database: Database, broadcastId: string): number
 export function cancelSqliteEncryptedBroadcast(
   database: Database,
   inputValue: unknown,
+  authorization: E2eeWriteAuthorization,
 ): CancelEncryptedBroadcastOutput {
   const input: CancelEncryptedBroadcastInput =
     CancelEncryptedBroadcastInputSchema.parse(inputValue);
   database.exec("BEGIN IMMEDIATE");
   try {
     const broadcast: SqliteE2eeBroadcastRow = readSqliteE2eeBroadcast(database, input.broadcast_id);
+    assertSqliteE2eeBroadcastAuthorization(broadcast, authorization);
     if (broadcast.state === "committed") {
       database.exec("COMMIT");
       return CancelEncryptedBroadcastOutputSchema.parse({ cancelled: false });

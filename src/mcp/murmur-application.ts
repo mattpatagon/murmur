@@ -16,9 +16,17 @@ import type {
   RepositoryName,
   TenantId,
 } from "../domain/value-objects.js";
-import type { HostedControlPlane, HostedPrincipal } from "../hosted/control-plane.js";
+import type { E2eeCapabilityConfiguration } from "../e2ee/wire-tools.js";
+import type {
+  EffectiveOrchestrator,
+  HostedControlPlane,
+  HostedPrincipal,
+} from "../hosted/control-plane.js";
 import type { E2eeEntitlementRecord } from "../hosted/e2ee-entitlement.js";
-import type { E2eeCapabilityOutput } from "../e2ee/wire-tools.js";
+import {
+  type EffectiveOrchestratorDto,
+  toEffectiveOrchestratorDto,
+} from "../hosted/orchestration-contracts.js";
 import { logSafeError } from "../safe-errors.js";
 import type { E2eeMessageStore } from "../storage/e2ee-message-store.js";
 import type { MessageStore } from "../storage/message-store.js";
@@ -28,6 +36,7 @@ import {
   callOperatorTool,
   callTenantAdminTool,
 } from "./murmur-admin-tools.js";
+import { authorizedActorId } from "./murmur-data-tool-helpers.js";
 import { callDataTool, type DataToolContext } from "./murmur-data-tools.js";
 import { callE2eeTool, type E2eeToolContext } from "./murmur-e2ee-tools.js";
 import { MurmurInboxResources } from "./murmur-inbox-resources.js";
@@ -46,7 +55,7 @@ export type MurmurApplicationDependencies = {
   readonly client: AgentClient | null;
   readonly closeStoreOnClose?: boolean;
   readonly controlPlane?: HostedControlPlane | null;
-  readonly e2eeCapability?: E2eeCapabilityOutput | null | undefined;
+  readonly e2eeCapability?: E2eeCapabilityConfiguration | null | undefined;
   readonly e2eeEntitlement?: E2eeEntitlementRecord | null | undefined;
   readonly e2eeSleep?: ((milliseconds: number) => Promise<void>) | undefined;
   readonly e2eeStore?: E2eeMessageStore | null | undefined;
@@ -68,7 +77,7 @@ export class MurmurApplication {
   private readonly client: AgentClient | null;
   private readonly controlPlane: HostedControlPlane | null;
   private readonly closeStoreSeparately: boolean;
-  private readonly e2eeCapability: E2eeCapabilityOutput | null;
+  private readonly e2eeCapability: E2eeCapabilityConfiguration | null;
   private readonly e2eeEntitlement: E2eeEntitlementRecord | null;
   private readonly e2eeSleep: (milliseconds: number) => Promise<void>;
   private readonly e2eeStore: E2eeMessageStore | null;
@@ -202,8 +211,15 @@ export class MurmurApplication {
       }
       if (this.e2eeCapability !== null && this.e2eeEntitlement !== null) {
         const e2eeContext: E2eeToolContext = {
+          authorizeAgent: async (agentId: AgentId): Promise<void> => {
+            if (this.store === null) throw new Error("This credential cannot access tenant data");
+            await authorizedActorId(agentId, this.senderAuthority(), this.store);
+          },
+          boundAgentId: this.boundAgentId(),
           capability: this.e2eeCapability,
           entitlement: this.e2eeEntitlement,
+          resolveOrchestrator: this.e2eeOrchestratorResolver(),
+          senderAuthority: this.senderAuthority(),
           sleep: this.e2eeSleep,
           store: this.e2eeStore,
         };
@@ -316,6 +332,30 @@ export class MurmurApplication {
 
   private senderAuthority(): "orchestrator" | "peer" {
     return this.boundAgentId() === null ? "peer" : "orchestrator";
+  }
+
+  private e2eeOrchestratorResolver(): (() => Promise<EffectiveOrchestratorDto | null>) | null {
+    if (
+      !this.orchestrationEnabled ||
+      this.controlPlane === null ||
+      this.principal === null ||
+      this.principal.kind !== "tenant" ||
+      this.principal.role === "orchestrator"
+    ) {
+      return null;
+    }
+    return async (): Promise<EffectiveOrchestratorDto | null> => {
+      if (
+        this.controlPlane === null ||
+        this.principal === null ||
+        this.principal.kind !== "tenant"
+      ) {
+        throw new Error("Encrypted orchestrator routing is unavailable");
+      }
+      const orchestrator: EffectiveOrchestrator | null =
+        await this.controlPlane.resolveOrchestrator(this.principal);
+      return orchestrator === null ? null : toEffectiveOrchestratorDto(orchestrator);
+    };
   }
 
   public async close(): Promise<void> {

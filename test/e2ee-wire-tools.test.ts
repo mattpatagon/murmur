@@ -114,6 +114,17 @@ test("requires claimed prekeys and provenance to be internally consistent", (): 
       sender_authority: "peer",
     }),
   ).toThrow("inconsistent");
+  expect(
+    ClaimedProvenanceDtoSchema.parse({
+      message_kind: "message",
+      orchestrator_policy_id: null,
+      sender_authority: "orchestrator",
+    }),
+  ).toEqual({
+    message_kind: "message",
+    orchestrator_policy_id: null,
+    sender_authority: "orchestrator",
+  });
 });
 
 test("requires exact sorted broadcast snapshots with no hidden content field", (): void => {

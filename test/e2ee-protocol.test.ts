@@ -374,7 +374,7 @@ test("rejects valid-looking relabeling of every mutable signed header field", as
       ...header,
       messageKind: "orchestration_request",
       orchestratorPolicyId: "40000000-0000-4000-8000-000000000003",
-      senderAuthority: "orchestrator",
+      senderAuthority: "peer",
     },
     { ...header, paddedLength: header.paddedLength * 2 },
     { ...header, pairCounter: 2 },

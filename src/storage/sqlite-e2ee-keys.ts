@@ -4,7 +4,9 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { UnknownAgentError } from "../domain/errors.js";
-import type { Instant } from "../domain/value-objects.js";
+import { SessionKey } from "../domain/lifecycle-values.js";
+import { AgentId, type Instant } from "../domain/value-objects.js";
+import { ordinaryClaimedProvenance } from "../e2ee/claimed-provenance.js";
 import type {
   AgentKeyRevocationDto,
   PrekeyCertificateDto,
@@ -30,14 +32,9 @@ import {
   SqliteE2eeCountRowSchema,
 } from "./sqlite-e2ee-rows.js";
 import { updateSqliteE2eeUsage } from "./sqlite-e2ee-usage.js";
+import { renewSqliteSession } from "./sqlite-agent-lifecycle-store.js";
 
 const CLAIM_MINUTES: number = 5;
-const PEER_PROVENANCE: ClaimedProvenanceDto = {
-  message_kind: "message",
-  orchestrator_policy_id: null,
-  sender_authority: "peer",
-};
-
 type PrekeyRow = {
   readonly certificate_json: string;
   readonly claimed_at: string | null;
@@ -50,7 +47,15 @@ const PrekeyRowSchema: z.ZodType<PrekeyRow> = z.strictObject({
   prekey_class: z.enum(["fallback", "one_time"]),
 });
 
-function activeAgent(database: Database, agentId: string, now: Instant): SqliteE2eeAgentRow {
+function activeAgent(
+  database: Database,
+  agentId: string,
+  now: Instant,
+  sessionKey: SessionKey | null,
+): SqliteE2eeAgentRow {
+  if (sessionKey !== null) {
+    renewSqliteSession(database, AgentId.parse(agentId), sessionKey, now, true);
+  }
   const raw: unknown = database
     .query<unknown, [string, string]>(`
       SELECT agent.agent_id, agent.generation
@@ -197,7 +202,12 @@ export function publishSqliteAgentKeyBundle(
   validateBundleWindow(input.bundle, now);
   database.exec("BEGIN IMMEDIATE");
   try {
-    const agent: SqliteE2eeAgentRow = activeAgent(database, input.agent_id, now);
+    const agent: SqliteE2eeAgentRow = activeAgent(
+      database,
+      input.agent_id,
+      now,
+      input.session_key === undefined ? SessionKey.default() : SessionKey.parse(input.session_key),
+    );
     const bundleJson: string = JSON.stringify(input.bundle);
     const existingRaw: unknown = database
       .query<unknown, [string]>(`
@@ -312,11 +322,16 @@ export function claimSqliteEncryptionPrekeyInTransaction(
   inputValue: unknown,
   now: Instant,
   broadcastId: string | null,
-  provenance: ClaimedProvenanceDto = PEER_PROVENANCE,
+  provenance: ClaimedProvenanceDto = ordinaryClaimedProvenance("peer"),
 ): ClaimEncryptionPrekeyOutput {
   const input: ClaimEncryptionPrekeyInput = ClaimEncryptionPrekeyInputSchema.parse(inputValue);
-  const sender: SqliteE2eeAgentRow = activeAgent(database, input.sender_id, now);
-  const recipient: SqliteE2eeAgentRow = activeAgent(database, input.recipient_id, now);
+  const sender: SqliteE2eeAgentRow = activeAgent(
+    database,
+    input.sender_id,
+    now,
+    input.session_key === undefined ? SessionKey.default() : SessionKey.parse(input.session_key),
+  );
+  const recipient: SqliteE2eeAgentRow = activeAgent(database, input.recipient_id, now, null);
   const bundle: PublicAgentKeyBundleDto = currentBundle(database, recipient);
   validateBundleWindow(bundle, now);
   const prekey: PrekeyCertificateDto = selectedPrekey(database, recipient, bundle);
@@ -378,7 +393,11 @@ export function claimSqliteEncryptionPrekeyInTransaction(
       recipient.generation,
       prekey.prekey_id,
       prekey.prekey_class,
-      JSON.stringify(input),
+      JSON.stringify({
+        context: input.context,
+        recipient_id: input.recipient_id,
+        sender_id: input.sender_id,
+      }),
       JSON.stringify(output),
       broadcastId,
       output.claimed_at,
@@ -400,6 +419,7 @@ export function claimSqliteEncryptionPrekey(
   database: Database,
   inputValue: unknown,
   now: Instant,
+  provenance: ClaimedProvenanceDto = ordinaryClaimedProvenance("peer"),
 ): ClaimEncryptionPrekeyOutput {
   database.exec("BEGIN IMMEDIATE");
   try {
@@ -408,6 +428,7 @@ export function claimSqliteEncryptionPrekey(
       inputValue,
       now,
       null,
+      provenance,
     );
     database.exec("COMMIT");
     return output;

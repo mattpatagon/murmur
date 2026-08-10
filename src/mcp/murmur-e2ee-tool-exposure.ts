@@ -6,11 +6,16 @@ import { type E2eeEntitlementRecord, tenantDataToolNames } from "../hosted/e2ee-
 export function entitledDataTools(
   entitlement: E2eeEntitlementRecord,
   plaintextTools: readonly Tool[],
+  orchestrationClaimEnabled: boolean,
 ): Tool[] {
   const allowedNames: ReadonlySet<string> = new Set<string>(tenantDataToolNames(entitlement));
   const selected: Map<string, Tool> = new Map<string, Tool>();
   for (const tool of [...plaintextTools, ...encryptedWireToolDefinitions()]) {
-    if (allowedNames.has(tool.name)) selected.set(tool.name, tool);
+    const orchestrationClaimUnavailable: boolean =
+      tool.name === "claim_orchestrator_prekey" && !orchestrationClaimEnabled;
+    if (allowedNames.has(tool.name) && !orchestrationClaimUnavailable) {
+      selected.set(tool.name, tool);
+    }
   }
   return Array.from(selected.values());
 }

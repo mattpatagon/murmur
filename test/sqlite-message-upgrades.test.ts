@@ -305,7 +305,7 @@ test("upgrades a populated SQLite v8 database with bounded E2E tables and usage"
       if (versionRow === null || typeof versionRow !== "object") {
         throw new Error("Expected SQLite schema version row");
       }
-      expect(Number(Reflect.get(versionRow, "user_version"))).toBe(9);
+      expect(Number(Reflect.get(versionRow, "user_version"))).toBe(10);
       const usageRow: unknown = database
         .query<unknown, []>(`
           SELECT claim_count, pending_broadcast_count, retained_message_count

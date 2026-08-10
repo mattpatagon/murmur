@@ -3,8 +3,9 @@ import { randomUUID } from "node:crypto";
 
 import { z } from "zod";
 
-import { IdempotencyConflictError, UnknownAgentError } from "../domain/errors.js";
-import type { Instant } from "../domain/value-objects.js";
+import { IdempotencyConflictError } from "../domain/errors.js";
+import { SessionKey } from "../domain/lifecycle-values.js";
+import { AgentId, type Instant } from "../domain/value-objects.js";
 import {
   type PublicAgentKeyBundleDto,
   PublicAgentKeyBundleDtoSchema,
@@ -15,6 +16,7 @@ import {
   ClaimEncryptionPrekeyInputSchema,
   type ClaimEncryptionPrekeyOutput,
   ClaimEncryptionPrekeyOutputSchema,
+  type ClaimedProvenanceDto,
   type PrepareEncryptedBroadcastInput,
   PrepareEncryptedBroadcastInputSchema,
   type PrepareEncryptedBroadcastOutput,
@@ -24,6 +26,7 @@ import {
   type PutEncryptedBroadcastDeliveryOutput,
   PutEncryptedBroadcastDeliveryOutputSchema,
 } from "../e2ee/wire-tools.js";
+import type { E2eeWriteAuthorization } from "./e2ee-message-store.js";
 import {
   e2eeEnvelopeJson,
   encryptedCiphertextBytes,
@@ -31,6 +34,12 @@ import {
   senderChainFromBundle,
   validateEnvelopeForClaim,
 } from "./e2ee-store-validation.js";
+import { renewSqliteSession } from "./sqlite-agent-lifecycle-store.js";
+import {
+  assertSqliteE2eeBroadcastAuthorization,
+  readSqliteE2eeBroadcast,
+  sqliteE2eeOpenAgentGeneration,
+} from "./sqlite-e2ee-broadcast-state.js";
 import { claimSqliteEncryptionPrekeyInTransaction } from "./sqlite-e2ee-keys.js";
 import {
   type SqliteE2eeBroadcastRow,
@@ -52,21 +61,6 @@ const RecipientRowSchema: z.ZodType<RecipientRow> = z.strictObject({
     .union([z.number().int(), z.bigint()])
     .transform((value: number | bigint): number => Number(value)),
 });
-
-export function sqliteE2eeOpenAgentGeneration(database: Database, agentId: string): number {
-  const raw: unknown = database
-    .query<unknown, [string]>(
-      "SELECT generation FROM agents WHERE agent_id = ? AND closed_at IS NULL",
-    )
-    .get(agentId);
-  if (raw === null) throw new UnknownAgentError(agentId);
-  if (typeof raw !== "object") throw new Error("Stored agent generation is invalid");
-  const generation: unknown = Reflect.get(raw, "generation");
-  if (typeof generation !== "number" && typeof generation !== "bigint") {
-    throw new Error("Stored agent generation is invalid");
-  }
-  return Number(generation);
-}
 
 function candidateRecipients(
   database: Database,
@@ -112,21 +106,6 @@ function candidateRecipients(
   return recipients;
 }
 
-export function readSqliteE2eeBroadcast(
-  database: Database,
-  broadcastId: string,
-): SqliteE2eeBroadcastRow {
-  const raw: unknown = database
-    .query<unknown, [string]>(`
-      SELECT broadcast_id, committed_at, expires_at, recipient_count, request_json,
-        sender_generation, sender_id, state, thread_id
-      FROM e2ee_broadcasts WHERE broadcast_id = ?
-    `)
-    .get(broadcastId);
-  if (raw === null) throw new Error("Encrypted broadcast is unavailable or expired");
-  return SqliteE2eeBroadcastRowSchema.parse(raw);
-}
-
 function claimsForBroadcast(
   database: Database,
   broadcastId: string,
@@ -163,12 +142,13 @@ function preparedOutput(
 function existingBroadcast(
   database: Database,
   input: PrepareEncryptedBroadcastInput,
+  provenance: ClaimedProvenanceDto,
 ): SqliteE2eeBroadcastRow | null {
   if (input.idempotency_key === undefined) return null;
   const raw: unknown = database
     .query<unknown, [string, string]>(`
       SELECT broadcast_id, committed_at, expires_at, recipient_count, request_json,
-        sender_generation, sender_id, state, thread_id
+        sender_authority, sender_generation, sender_id, state, thread_id
       FROM e2ee_broadcasts WHERE sender_id = ? AND idempotency_key = ?
     `)
     .get(input.sender_id, input.idempotency_key);
@@ -177,7 +157,17 @@ function existingBroadcast(
   const storedInput: PrepareEncryptedBroadcastInput = PrepareEncryptedBroadcastInputSchema.parse(
     JSON.parse(row.request_json),
   );
-  if (JSON.stringify(storedInput) !== JSON.stringify(input)) {
+  const normalizedInput: PrepareEncryptedBroadcastInput = {
+    audience: input.audience,
+    context: input.context,
+    ...(input.idempotency_key === undefined ? {} : { idempotency_key: input.idempotency_key }),
+    sender_id: input.sender_id,
+    ...(input.thread_id === undefined ? {} : { thread_id: input.thread_id }),
+  };
+  if (JSON.stringify(storedInput) !== JSON.stringify(normalizedInput)) {
+    throw new IdempotencyConflictError(input.idempotency_key);
+  }
+  if (row.sender_authority !== provenance.sender_authority) {
     throw new IdempotencyConflictError(input.idempotency_key);
   }
   return row;
@@ -187,18 +177,25 @@ export function prepareSqliteEncryptedBroadcast(
   database: Database,
   inputValue: unknown,
   now: Instant,
+  provenance: ClaimedProvenanceDto,
 ): PrepareEncryptedBroadcastOutput {
   const input: PrepareEncryptedBroadcastInput =
     PrepareEncryptedBroadcastInputSchema.parse(inputValue);
   database.exec("BEGIN IMMEDIATE");
   try {
-    const prior: SqliteE2eeBroadcastRow | null = existingBroadcast(database, input);
+    const prior: SqliteE2eeBroadcastRow | null = existingBroadcast(database, input, provenance);
     if (prior !== null) {
       if (prior.state === "cancelled") throw new Error("Encrypted broadcast was cancelled");
       database.exec("COMMIT");
       return preparedOutput(database, prior, true);
     }
-    const senderGeneration: number = sqliteE2eeOpenAgentGeneration(database, input.sender_id);
+    const senderGeneration: number = renewSqliteSession(
+      database,
+      AgentId.parse(input.sender_id),
+      input.session_key === undefined ? SessionKey.default() : SessionKey.parse(input.session_key),
+      now,
+      true,
+    ).generation.value;
     const recipients: readonly RecipientRow[] = candidateRecipients(database, input, now);
     const broadcastId: string = randomUUID();
     const threadId: string = input.thread_id ?? randomUUID();
@@ -210,6 +207,7 @@ export function prepareSqliteEncryptedBroadcast(
           string,
           string,
           number,
+          string,
           string,
           string | null,
           string | null,
@@ -223,19 +221,29 @@ export function prepareSqliteEncryptedBroadcast(
       >(`
         INSERT INTO e2ee_broadcasts(
           broadcast_id, sender_id, sender_generation, thread_id,
+          sender_authority,
           audience_repository_name, audience_machine_name, idempotency_key,
           request_json, recipient_count, state, created_at, expires_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         broadcastId,
         input.sender_id,
         senderGeneration,
         threadId,
+        provenance.sender_authority,
         input.audience.repository ?? null,
         input.audience.machine ?? null,
         input.idempotency_key ?? null,
-        JSON.stringify(input),
+        JSON.stringify({
+          audience: input.audience,
+          context: input.context,
+          ...(input.idempotency_key === undefined
+            ? {}
+            : { idempotency_key: input.idempotency_key }),
+          sender_id: input.sender_id,
+          ...(input.thread_id === undefined ? {} : { thread_id: input.thread_id }),
+        }),
         recipients.length,
         "pending",
         now.toISOString(),
@@ -247,12 +255,14 @@ export function prepareSqliteEncryptedBroadcast(
         context: input.context,
         recipient_id: recipient.agent_id,
         sender_id: input.sender_id,
+        session_key: input.session_key,
       });
       const claim: ClaimEncryptionPrekeyOutput = claimSqliteEncryptionPrekeyInTransaction(
         database,
         claimInput,
         now,
         broadcastId,
+        provenance,
       );
       claims.push(claim);
       database
@@ -359,6 +369,7 @@ export function putSqliteEncryptedBroadcastDelivery(
   tenantId: string,
   inputValue: unknown,
   now: Instant,
+  authorization: E2eeWriteAuthorization,
 ): PutEncryptedBroadcastDeliveryOutput {
   const input: PutEncryptedBroadcastDeliveryInput =
     PutEncryptedBroadcastDeliveryInputSchema.parse(inputValue);
@@ -366,6 +377,7 @@ export function putSqliteEncryptedBroadcastDelivery(
   database.exec("BEGIN IMMEDIATE");
   try {
     const broadcast: SqliteE2eeBroadcastRow = readSqliteE2eeBroadcast(database, input.broadcast_id);
+    assertSqliteE2eeBroadcastAuthorization(broadcast, authorization);
     const delivery: SqliteE2eeDeliveryRow = deliveryRow(
       database,
       input.broadcast_id,

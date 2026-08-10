@@ -24,6 +24,7 @@ import type {
   CancelEncryptedBroadcastOutput,
   ClaimEncryptionPrekeyInput,
   ClaimEncryptionPrekeyOutput,
+  ClaimedProvenanceDto,
   CommitEncryptedBroadcastInput,
   CommitEncryptedBroadcastOutput,
   E2eeCapabilityOutput,
@@ -101,6 +102,7 @@ export class MemoryE2eeBackend {
 
   public capability(): E2eeCapabilityOutput {
     return {
+      caller_authority: "peer",
       max_ciphertext_bytes: 524_304,
       max_one_time_prekeys: 100,
       protocol: "murmur-e2ee-v1",
@@ -198,7 +200,14 @@ export class MemoryE2eeBackend {
     return `00000000-0000-4000-8000-${suffix}`;
   }
 
-  public claim(input: ClaimEncryptionPrekeyInput): ClaimEncryptionPrekeyOutput {
+  public claim(
+    input: ClaimEncryptionPrekeyInput,
+    provenance: ClaimedProvenanceDto = {
+      message_kind: "message",
+      orchestrator_policy_id: null,
+      sender_authority: "peer",
+    },
+  ): ClaimEncryptionPrekeyOutput {
     const bundle: PublicAgentKeyBundleDto | undefined = this.#bundles.get(input.recipient_id);
     if (bundle === undefined) throw new Error("recipient bundle missing");
     const oneTime: PublicAgentKeyBundleDto["one_time_prekeys"][number] | undefined =
@@ -216,11 +225,7 @@ export class MemoryE2eeBackend {
       expires_at: "2026-08-10T20:02:00.000Z",
       prekey_class: prekey.prekey_class,
       prekey_id: prekey.prekey_id,
-      provenance: {
-        message_kind: "message",
-        orchestrator_policy_id: null,
-        sender_authority: "peer",
-      },
+      provenance,
       recipient_id: input.recipient_id,
     };
     this.#claims.set(output.claim_id, { input: structuredClone(input), output });

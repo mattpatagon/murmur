@@ -30,8 +30,19 @@ import {
   type WaitForMessagesInput,
   WaitForMessagesInputSchema,
 } from "../domain/contracts.js";
+import {
+  type AskOrchestratorInput,
+  AskOrchestratorInputSchema,
+  type GetDelegationInput,
+  GetDelegationInputSchema,
+  GetDelegationOutputSchema,
+  type GetOrchestratorInput,
+  GetOrchestratorInputSchema,
+  GetOrchestratorOutputSchema,
+} from "../hosted/orchestration-contracts.js";
 import { toolResult } from "../mcp/murmur-tool-results.js";
 import {
+  ProxyAskOrchestratorOutputSchema,
   ProxyBroadcastOutputSchema,
   ProxyInboxOutputSchema,
   ProxySendMessageOutputSchema,
@@ -144,6 +155,45 @@ export function e2eeProxyTools(): readonly Tool[] {
       },
     ),
     toolDefinition(
+      "get_orchestrator",
+      "Get encrypted orchestrator",
+      "Resolve the authenticated scope's effective orchestrator without returning private delegation instructions.",
+      GetOrchestratorInputSchema,
+      GetOrchestratorOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: true,
+        title: "Get encrypted orchestrator",
+      },
+    ),
+    toolDefinition(
+      "ask_orchestrator",
+      "Ask encrypted orchestrator",
+      "Encrypt the question locally and route only signed ciphertext to the server-selected orchestrator.",
+      AskOrchestratorInputSchema,
+      ProxyAskOrchestratorOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: false,
+        readOnlyHint: false,
+        title: "Ask encrypted orchestrator",
+      },
+    ),
+    toolDefinition(
+      "get_delegation",
+      "Get encrypted delegation",
+      "Read private delegation instructions only when the upstream credential is the bound orchestrator.",
+      GetDelegationInputSchema,
+      GetDelegationOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: true,
+        title: "Get encrypted delegation",
+      },
+    ),
+    toolDefinition(
       "broadcast_message",
       "Broadcast encrypted agent message",
       "Encrypt one distinct delivery per selected recipient and commit the audience atomically.",
@@ -227,6 +277,24 @@ export async function callE2eeProxyTool(
     case "send_message": {
       const input: SendMessageInput = SendMessageInputSchema.parse(argumentsValue);
       return toolResult(await operations.sendMessage(input));
+    }
+    case "get_orchestrator": {
+      const input: GetOrchestratorInput = GetOrchestratorInputSchema.parse(argumentsValue);
+      const operation: E2eeProxyOperations["getOrchestrator"] = operations.getOrchestrator;
+      if (operation === undefined) throw new Error("Encrypted orchestration is unavailable");
+      return toolResult(await operation.call(operations, input));
+    }
+    case "ask_orchestrator": {
+      const input: AskOrchestratorInput = AskOrchestratorInputSchema.parse(argumentsValue);
+      const operation: E2eeProxyOperations["askOrchestrator"] = operations.askOrchestrator;
+      if (operation === undefined) throw new Error("Encrypted orchestration is unavailable");
+      return toolResult(await operation.call(operations, input));
+    }
+    case "get_delegation": {
+      const input: GetDelegationInput = GetDelegationInputSchema.parse(argumentsValue);
+      const operation: E2eeProxyOperations["getDelegation"] = operations.getDelegation;
+      if (operation === undefined) throw new Error("Encrypted orchestration is unavailable");
+      return toolResult(await operation.call(operations, input));
     }
     case "broadcast_message": {
       const input: BroadcastMessageInput = BroadcastMessageInputSchema.parse(argumentsValue);

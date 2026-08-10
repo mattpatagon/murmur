@@ -25,6 +25,7 @@ const CONFIG: E2eeHttpRemoteClientConfig = {
   token: "test-access-token",
 };
 const CAPABILITY: E2eeCapabilityOutput = {
+  caller_authority: "peer",
   max_ciphertext_bytes: 524_304,
   max_one_time_prekeys: 20,
   protocol: "murmur-e2ee-v1",

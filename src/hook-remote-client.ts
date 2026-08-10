@@ -109,7 +109,10 @@ export async function checkRemoteInbox(
         method: "tools/call",
         params:
           options.e2ee === true
-            ? { name: "get_inbox_summary", arguments: { agent_id: identity.agentId } }
+            ? {
+                name: "get_inbox_summary",
+                arguments: { agent_id: identity.agentId, session_key: sessionKey },
+              }
             : {
                 name: "get_messages",
                 arguments: {

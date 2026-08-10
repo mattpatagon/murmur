@@ -37,7 +37,7 @@ function validateHeader(header: EnvelopeHeader): void {
   }
   const isOrchestration: boolean = header.messageKind === "orchestration_request";
   if (
-    isOrchestration !== (header.senderAuthority === "orchestrator") ||
+    (isOrchestration && header.senderAuthority !== "peer") ||
     isOrchestration !== (header.orchestratorPolicyId !== null)
   ) {
     throw new Error("Envelope provenance is inconsistent");

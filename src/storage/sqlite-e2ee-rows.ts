@@ -70,6 +70,7 @@ export type SqliteE2eeBroadcastRow = {
   readonly recipient_count: number;
   readonly request_json: string;
   readonly sender_generation: number;
+  readonly sender_authority: "orchestrator" | "peer";
   readonly sender_id: string;
   readonly state: "cancelled" | "committed" | "pending";
   readonly thread_id: string;
@@ -82,6 +83,7 @@ export const SqliteE2eeBroadcastRowSchema: z.ZodType<SqliteE2eeBroadcastRow> = z
   recipient_count: SqliteIntegerSchema,
   request_json: z.string(),
   sender_generation: SqliteIntegerSchema,
+  sender_authority: z.enum(["peer", "orchestrator"]),
   sender_id: z.string(),
   state: z.enum(["cancelled", "committed", "pending"]),
   thread_id: z.string(),

@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { SessionKeyInputSchema } from "../domain/lifecycle-values.js";
+import { type SenderAuthority, SenderAuthoritySchema } from "../domain/orchestration.js";
 
 import {
   type EncryptedEnvelopeDto,
@@ -42,6 +44,7 @@ export type E2eeMessageContextDto = {
 };
 
 export type E2eeCapabilityOutput = {
+  readonly caller_authority: SenderAuthority;
   readonly max_ciphertext_bytes: number;
   readonly max_one_time_prekeys: number;
   readonly protocol: "murmur-e2ee-v1";
@@ -50,9 +53,12 @@ export type E2eeCapabilityOutput = {
   readonly wire_version: typeof E2EE_WIRE_VERSION;
 };
 
+export type E2eeCapabilityConfiguration = Omit<E2eeCapabilityOutput, "caller_authority">;
+
 export type PublishAgentKeyBundleInput = {
   readonly agent_id: string;
   readonly bundle: PublicAgentKeyBundleDto;
+  readonly session_key?: string | undefined;
 };
 
 export type PublishAgentKeyBundleOutput = {
@@ -67,6 +73,7 @@ export type ClaimEncryptionPrekeyInput = {
   readonly context: E2eeMessageContextDto;
   readonly recipient_id: string;
   readonly sender_id: string;
+  readonly session_key?: string | undefined;
 };
 
 export type ClaimedProvenanceDto = {
@@ -109,6 +116,7 @@ export type GetEncryptedMessagesInput = {
   readonly after_sequence: number;
   readonly agent_id: string;
   readonly limit: number;
+  readonly session_key?: string | undefined;
   readonly thread_id?: string | undefined;
   readonly unread_only: boolean;
 };
@@ -122,6 +130,7 @@ export type EncryptedInboxOutput = {
 export type WaitForEncryptedMessagesInput = {
   readonly after_sequence: number;
   readonly agent_id: string;
+  readonly session_key?: string | undefined;
   readonly timeout_seconds: number;
 };
 
@@ -141,6 +150,7 @@ export type PrepareEncryptedBroadcastInput = {
   readonly context: E2eeMessageContextDto;
   readonly idempotency_key?: string | undefined;
   readonly sender_id: string;
+  readonly session_key?: string | undefined;
   readonly thread_id?: string | undefined;
 };
 
@@ -179,7 +189,10 @@ export type CommitEncryptedBroadcastOutput = {
 export type CancelEncryptedBroadcastInput = { readonly broadcast_id: string };
 export type CancelEncryptedBroadcastOutput = { readonly cancelled: boolean };
 
-export type GetInboxSummaryInput = { readonly agent_id: string };
+export type GetInboxSummaryInput = {
+  readonly agent_id: string;
+  readonly session_key?: string | undefined;
+};
 export type GetInboxSummaryOutput = {
   readonly agent_id: string;
   readonly inbox_version: number;
@@ -194,6 +207,7 @@ export const E2eeMessageContextDtoSchema: z.ZodType<E2eeMessageContextDto> = z.s
 });
 export const E2eeCapabilityInputSchema: z.ZodType<Record<string, never>> = z.strictObject({});
 export const E2eeCapabilityOutputSchema: z.ZodType<E2eeCapabilityOutput> = z.strictObject({
+  caller_authority: SenderAuthoritySchema,
   max_ciphertext_bytes: z.number().int().positive().safe(),
   max_one_time_prekeys: z.number().int().positive().max(100),
   protocol: z.literal("murmur-e2ee-v1"),
@@ -205,6 +219,7 @@ export const PublishAgentKeyBundleInputSchema: z.ZodType<PublishAgentKeyBundleIn
   .strictObject({
     agent_id: AgentIdSchema,
     bundle: PublicAgentKeyBundleDtoSchema,
+    session_key: SessionKeyInputSchema.optional(),
   })
   .superRefine((input: PublishAgentKeyBundleInput, context: z.core.$RefinementCtx): void => {
     if (input.agent_id !== input.bundle.agent_certificate.agent_id) {
@@ -227,8 +242,11 @@ export const ClaimedProvenanceDtoSchema: z.ZodType<ClaimedProvenanceDto> = z
   })
   .superRefine((value: ClaimedProvenanceDto, context: z.core.$RefinementCtx): void => {
     const isOrchestration: boolean = value.message_kind === "orchestration_request";
-    if (isOrchestration !== (value.sender_authority === "orchestrator")) {
-      context.addIssue({ code: "custom", message: "Claimed provenance is inconsistent" });
+    if (isOrchestration && value.sender_authority !== "peer") {
+      context.addIssue({
+        code: "custom",
+        message: "Orchestration requests must originate from peer authority",
+      });
     }
     if (isOrchestration !== (value.orchestrator_policy_id !== null)) {
       context.addIssue({ code: "custom", message: "Claimed policy provenance is inconsistent" });
@@ -239,6 +257,7 @@ export const ClaimEncryptionPrekeyInputSchema: z.ZodType<ClaimEncryptionPrekeyIn
     context: E2eeMessageContextDtoSchema,
     recipient_id: AgentIdSchema,
     sender_id: AgentIdSchema,
+    session_key: SessionKeyInputSchema.optional(),
   });
 export const ClaimEncryptionPrekeyOutputSchema: z.ZodType<ClaimEncryptionPrekeyOutput> = z
   .strictObject({
@@ -288,6 +307,7 @@ export const GetEncryptedMessagesInputSchema: z.ZodType<GetEncryptedMessagesInpu
     after_sequence: SequenceSchema,
     agent_id: AgentIdSchema,
     limit: z.number().int().min(1).max(500),
+    session_key: SessionKeyInputSchema.optional(),
     thread_id: ThreadIdSchema.optional(),
     unread_only: z.boolean(),
   },
@@ -301,6 +321,7 @@ export const WaitForEncryptedMessagesInputSchema: z.ZodType<WaitForEncryptedMess
   z.strictObject({
     after_sequence: SequenceSchema,
     agent_id: AgentIdSchema,
+    session_key: SessionKeyInputSchema.optional(),
     timeout_seconds: z.number().int().min(1).max(25),
   });
 export const WaitForEncryptedMessagesOutputSchema: z.ZodType<WaitForEncryptedMessagesOutput> =
@@ -320,6 +341,7 @@ export const PrepareEncryptedBroadcastInputSchema: z.ZodType<PrepareEncryptedBro
     context: E2eeMessageContextDtoSchema,
     idempotency_key: IdempotencyKeySchema.optional(),
     sender_id: AgentIdSchema,
+    session_key: SessionKeyInputSchema.optional(),
     thread_id: ThreadIdSchema.optional(),
   });
 export const EncryptedBroadcastClaimDtoSchema: z.ZodType<EncryptedBroadcastClaimDto> =
@@ -377,6 +399,7 @@ export const CancelEncryptedBroadcastOutputSchema: z.ZodType<CancelEncryptedBroa
   z.strictObject({ cancelled: z.boolean() });
 export const GetInboxSummaryInputSchema: z.ZodType<GetInboxSummaryInput> = z.strictObject({
   agent_id: AgentIdSchema,
+  session_key: SessionKeyInputSchema.optional(),
 });
 export const GetInboxSummaryOutputSchema: z.ZodType<GetInboxSummaryOutput> = z.strictObject({
   agent_id: AgentIdSchema,

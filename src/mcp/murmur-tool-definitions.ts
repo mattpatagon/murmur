@@ -1,5 +1,4 @@
-import type { Tool, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 import {
@@ -60,44 +59,16 @@ import {
   TenantStatusOutputSchema,
 } from "../hosted/contracts.js";
 import type { HostedPrincipal } from "../hosted/control-plane.js";
-import { type E2eeEntitlementRecord, tenantDataToolNames } from "../hosted/e2ee-entitlement.js";
-import { encryptedWireToolDefinitions } from "../e2ee/wire-tool-definitions.js";
+import { entitledDataTools } from "./murmur-e2ee-tool-exposure.js";
 import {
   bossOrchestrationTools,
+  orchestratorLookupTool,
   tenantAdminOrchestrationTools,
   workerOrchestrationTools,
 } from "./murmur-orchestration-tool-definitions.js";
-export type ToolExposure = {
-  readonly bootstrapEnabled: boolean;
-  readonly e2eeEntitlement?: E2eeEntitlementRecord | null | undefined;
-  readonly legacyAdoptionEnabled: boolean;
-  readonly orchestrationEnabled?: boolean | undefined;
-  readonly principal: HostedPrincipal | null;
-  readonly tenantOnboardingEnabled: boolean;
-};
-export function toolDefinition<Input, Output>(
-  name: string,
-  title: string,
-  description: string,
-  inputSchema: z.ZodType<Input>,
-  outputSchema: z.ZodType<Output>,
-  annotations: ToolAnnotations,
-): Tool {
-  const generatedInput: unknown = z.toJSONSchema(inputSchema);
-  const generatedOutput: unknown = z.toJSONSchema(outputSchema);
-  const validatedInput: Tool["inputSchema"] = ToolSchema.shape.inputSchema.parse(generatedInput);
-  const validatedOutput: NonNullable<Tool["outputSchema"]> = ToolSchema.shape.outputSchema
-    .unwrap()
-    .parse(generatedOutput);
-  return {
-    annotations,
-    description,
-    inputSchema: validatedInput,
-    name,
-    outputSchema: validatedOutput,
-    title,
-  };
-}
+import type { E2eeEntitlementRecord, ToolExposure } from "./murmur-tool-exposure.js";
+import { toolDefinition } from "./tool-definition.js";
+
 function dataTools(): Tool[] {
   return [
     toolDefinition(
@@ -490,11 +461,17 @@ export function toolsForPrincipal(exposure: ToolExposure): Tool[] {
   const entitlement: E2eeEntitlementRecord | null = exposure.e2eeEntitlement ?? null;
   const tools: Tool[] =
     principal !== null && principal.kind === "tenant" && entitlement !== null
-      ? entitledDataTools(entitlement)
+      ? entitledDataTools(
+          entitlement,
+          dataTools(),
+          exposure.orchestrationEnabled === true && principal.role !== "orchestrator",
+        )
       : dataTools();
   if (principal !== null && principal.kind === "tenant" && exposure.orchestrationEnabled === true) {
     if (principal.role === "orchestrator") {
       tools.push(...bossOrchestrationTools());
+    } else if (entitlement !== null && entitlement.state === "enforced") {
+      tools.push(orchestratorLookupTool());
     } else {
       tools.push(...workerOrchestrationTools());
     }
@@ -504,13 +481,4 @@ export function toolsForPrincipal(exposure: ToolExposure): Tool[] {
     if (exposure.orchestrationEnabled === true) tools.push(...tenantAdminOrchestrationTools());
   }
   return tools;
-}
-
-function entitledDataTools(entitlement: E2eeEntitlementRecord): Tool[] {
-  const allowedNames: ReadonlySet<string> = new Set<string>(tenantDataToolNames(entitlement));
-  const selected: Map<string, Tool> = new Map<string, Tool>();
-  for (const tool of [...dataTools(), ...encryptedWireToolDefinitions()]) {
-    if (allowedNames.has(tool.name)) selected.set(tool.name, tool);
-  }
-  return Array.from(selected.values());
 }
