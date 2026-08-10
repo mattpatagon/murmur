@@ -27,6 +27,7 @@
   "type": "module",
   "bin": {
     "murmur": "./src/cli.ts",
+    "murmur-e2ee-proxy": "./src/e2ee-proxy.ts",
     "murmur-hook": "./src/hook.ts",
     "murmur-mcp": "./src/server.ts"
   },

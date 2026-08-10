@@ -1,4 +1,11 @@
-import type { MarkMessagesReadInput, MarkMessagesReadOutput } from "../domain/contracts.js";
+import type {
+  ListAgentsInput,
+  ListAgentsOutput,
+  MarkMessagesReadInput,
+  MarkMessagesReadOutput,
+  RegisterAgentInput,
+  RegisterAgentOutput,
+} from "../domain/contracts.js";
 import type {
   CancelEncryptedBroadcastInput,
   CancelEncryptedBroadcastOutput,
@@ -57,4 +64,9 @@ export interface E2eeRemoteClient {
   ): Promise<CancelEncryptedBroadcastOutput>;
   getInboxSummary(input: GetInboxSummaryInput): Promise<GetInboxSummaryOutput>;
   close(): Promise<void>;
+}
+
+export interface E2eeProxyRemoteClient extends E2eeRemoteClient {
+  registerAgent(input: RegisterAgentInput): Promise<RegisterAgentOutput>;
+  listAgents(input: ListAgentsInput): Promise<ListAgentsOutput>;
 }

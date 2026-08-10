@@ -4,14 +4,23 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { z } from "zod";
 
 import {
+  type ListAgentsInput,
+  ListAgentsInputSchema,
+  type ListAgentsOutput,
+  ListAgentsOutputSchema,
   type MarkMessagesReadInput,
   MarkMessagesReadInputSchema,
   type MarkMessagesReadOutput,
   MarkMessagesReadOutputSchema,
+  type RegisterAgentInput,
+  RegisterAgentInputSchema,
+  type RegisterAgentOutput,
+  RegisterAgentOutputSchema,
 } from "../domain/contracts.js";
 import { BoundedHttpClientTransport } from "./bounded-http-transport.js";
 import {
   type E2eeRemoteClient,
+  type E2eeProxyRemoteClient,
   ENCRYPTION_CLAIM_EXPIRED_MESSAGE,
   EncryptionClaimExpiredError,
 } from "./remote-client.js";
@@ -73,10 +82,10 @@ const CLAIM_EXPIRED_CONTENT: string = JSON.stringify(
 );
 
 export type E2eeHttpRemoteClientConfig = {
-  readonly branch: string;
+  readonly branch: string | null;
   readonly client: "claude" | "codex";
   readonly endpoint: string;
-  readonly repository: string;
+  readonly repository: string | null;
   readonly token: string;
 };
 
@@ -94,21 +103,25 @@ class McpWireToolCaller implements E2eeWireToolCaller {
 
   public static async connect(config: E2eeHttpRemoteClientConfig): Promise<McpWireToolCaller> {
     const endpoint: URL = parseEndpoint(config.endpoint);
-    const context: { branch: string; client: "claude" | "codex"; repository: string } =
-      E2eeMessageContextDtoSchema.parse({
-        branch: config.branch,
-        client: config.client,
-        repository: config.repository,
-      });
+    const context: { branch: string; client: "claude" | "codex"; repository: string } | null =
+      config.branch === null || config.repository === null
+        ? null
+        : E2eeMessageContextDtoSchema.parse({
+            branch: config.branch,
+            client: config.client,
+            repository: config.repository,
+          });
     if (!TOKEN_PATTERN.test(config.token)) {
       throw new Error("The encrypted Murmur access token is invalid");
     }
     const headers: Headers = new Headers({
       Authorization: `Bearer ${config.token}`,
-      "X-Murmur-Branch": context.branch,
-      "X-Murmur-Client": context.client,
-      "X-Murmur-Repository": context.repository,
+      "X-Murmur-Client": config.client,
     });
+    if (context !== null) {
+      headers.set("X-Murmur-Branch", context.branch);
+      headers.set("X-Murmur-Repository", context.repository);
+    }
     const transport: BoundedHttpClientTransport = new BoundedHttpClientTransport(endpoint, headers);
     const client: Client = new Client(
       { name: "murmur-e2ee-proxy", version: "1.0.0" },
@@ -182,7 +195,7 @@ function isClaimExpired(result: CallToolResult): boolean {
   );
 }
 
-export class E2eeHttpRemoteClient implements E2eeRemoteClient {
+export class E2eeHttpRemoteClient implements E2eeRemoteClient, E2eeProxyRemoteClient {
   readonly #caller: E2eeWireToolCaller;
   #closed: boolean = false;
 
@@ -232,6 +245,19 @@ export class E2eeHttpRemoteClient implements E2eeRemoteClient {
       E2eeCapabilityInputSchema,
       E2eeCapabilityOutputSchema,
     );
+  }
+
+  public async registerAgent(input: RegisterAgentInput): Promise<RegisterAgentOutput> {
+    return await this.call(
+      "register_agent",
+      input,
+      RegisterAgentInputSchema,
+      RegisterAgentOutputSchema,
+    );
+  }
+
+  public async listAgents(input: ListAgentsInput): Promise<ListAgentsOutput> {
+    return await this.call("list_agents", input, ListAgentsInputSchema, ListAgentsOutputSchema);
   }
 
   public async publishAgentKeyBundle(

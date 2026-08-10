@@ -1,0 +1,255 @@
+import { expect, test } from "bun:test";
+
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+
+import type {
+  BroadcastMessageInput,
+  GetMessagesInput,
+  ListAgentsOutput,
+  MarkMessagesReadInput,
+  MarkMessagesReadOutput,
+  RegisterAgentInput,
+  RegisterAgentOutput,
+  SendMessageInput,
+  WaitForMessagesInput,
+} from "../src/domain/contracts.js";
+import { E2eeProxyApplication } from "../src/e2ee/proxy-application.js";
+import {
+  type ProxyBroadcastOutput,
+  ProxyBroadcastOutputSchema,
+  type ProxyInboxOutput,
+  ProxyInboxOutputSchema,
+  type ProxyMessageDto,
+  type ProxySendMessageOutput,
+  ProxySendMessageOutputSchema,
+  type ProxyWaitForMessagesOutput,
+  ProxyWaitForMessagesOutputSchema,
+} from "../src/e2ee/proxy-contracts.js";
+import type { E2eeProxyOperations } from "../src/e2ee/proxy-service.js";
+
+const NOW: string = "2026-08-10T20:00:00.000Z";
+const EXPIRES: string = "2026-09-09T20:00:00.000Z";
+const MESSAGE_ID: string = "00000000-0000-4000-8000-000000000001";
+const BROADCAST_ID: string = "00000000-0000-4000-8000-000000000002";
+const SENDER_ID: string = "machine-a:codex:repo:1";
+const RECIPIENT_ID: string = "machine-b:codex:repo:2";
+const ROOT_KEY_ID: string = `mrk_${"A".repeat(43)}`;
+const AGENT_KEY_ID: string = `mak_${"B".repeat(43)}`;
+
+function proxyMessage(): ProxyMessageDto {
+  return {
+    content: "endpoint plaintext",
+    context: {
+      branch: "feature/e2ee",
+      client: "codex",
+      repository: "mattpatagon/murmur",
+    },
+    created_at: NOW,
+    encryption: {
+      context_binding: "verified",
+      message_kind: "message",
+      orchestrator_policy_id: null,
+      protocol: "murmur-e2ee-v1",
+      provenance: "sender_signed_server_asserted",
+      recipient_prekey_class: "one_time",
+      sender_agent_key_id: AGENT_KEY_ID,
+      sender_authority: "peer",
+      sender_root_key_id: ROOT_KEY_ID,
+      verification_mode: "strict",
+    },
+    expires_at: EXPIRES,
+    message_id: MESSAGE_ID,
+    read_at: null,
+    recipient_id: RECIPIENT_ID,
+    sender_id: SENDER_ID,
+    sequence: 1,
+    thread_id: "thread-1",
+  };
+}
+
+function registration(): RegisterAgentOutput {
+  return {
+    agent: {
+      agent_id: SENDER_ID,
+      created_at: NOW,
+      display_name: "Sender",
+      last_seen_at: NOW,
+      metadata: {},
+    },
+    inbox_uri: `murmur://inbox/${encodeURIComponent(SENDER_ID)}`,
+    retention_days: 30,
+  };
+}
+
+class FakeProxyOperations implements E2eeProxyOperations {
+  public readonly calls: string[] = [];
+  #closed: boolean = false;
+
+  public async registerAgent(_input: RegisterAgentInput): Promise<RegisterAgentOutput> {
+    this.calls.push("register_agent");
+    return registration();
+  }
+
+  public async listAgents(): Promise<ListAgentsOutput> {
+    this.calls.push("list_agents");
+    return { agents: [registration().agent] };
+  }
+
+  public async sendMessage(_input: SendMessageInput): Promise<ProxySendMessageOutput> {
+    this.calls.push("send_message");
+    return {
+      duplicate: false,
+      message: proxyMessage(),
+      retention_days: 30,
+      status: "stored",
+    };
+  }
+
+  public async broadcastMessage(_input: BroadcastMessageInput): Promise<ProxyBroadcastOutput> {
+    this.calls.push("broadcast_message");
+    return {
+      audience: { repository: "mattpatagon/murmur" },
+      broadcast_id: BROADCAST_ID,
+      created_at: NOW,
+      duplicate: false,
+      encryption: {
+        protocol: "murmur-e2ee-v1",
+        recipients: [{ recipient_id: RECIPIENT_ID, verification_mode: "strict" }],
+      },
+      expires_at: EXPIRES,
+      recipient_count: 1,
+      retention_days: 30,
+      status: "stored",
+      thread_id: "thread-1",
+    };
+  }
+
+  public async getMessages(_input: GetMessagesInput): Promise<ProxyInboxOutput> {
+    this.calls.push("get_messages");
+    return { agent_id: RECIPIENT_ID, inbox_version: 1, messages: [proxyMessage()] };
+  }
+
+  public async waitForMessages(_input: WaitForMessagesInput): Promise<ProxyWaitForMessagesOutput> {
+    this.calls.push("wait_for_messages");
+    return { agent_id: RECIPIENT_ID, messages: [proxyMessage()], timed_out: false };
+  }
+
+  public async markMessagesRead(_input: MarkMessagesReadInput): Promise<MarkMessagesReadOutput> {
+    this.calls.push("mark_messages_read");
+    return { read_at: NOW, updated: 1 };
+  }
+
+  public async close(): Promise<void> {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.calls.push("close");
+  }
+}
+
+async function callTool(
+  client: Client,
+  name: string,
+  arguments_: Record<string, unknown>,
+): Promise<CallToolResult> {
+  return CallToolResultSchema.parse(await client.callTool({ arguments: arguments_, name }));
+}
+
+test("local E2E MCP proxy preserves familiar data tools and verified plaintext outputs", async (): Promise<void> => {
+  const operations: FakeProxyOperations = new FakeProxyOperations();
+  const application: E2eeProxyApplication = new E2eeProxyApplication(operations);
+  const transports: [InMemoryTransport, InMemoryTransport] = InMemoryTransport.createLinkedPair();
+  const client: Client = new Client(
+    { name: "proxy-contract-test", version: "1.0.0" },
+    { capabilities: {} },
+  );
+  await application.server.connect(transports[1]);
+  await client.connect(transports[0]);
+  try {
+    const listed: Awaited<ReturnType<Client["listTools"]>> = await client.listTools();
+    expect(listed.tools.map((tool: (typeof listed.tools)[number]): string => tool.name)).toEqual([
+      "register_agent",
+      "list_agents",
+      "send_message",
+      "broadcast_message",
+      "get_messages",
+      "wait_for_messages",
+      "mark_messages_read",
+    ]);
+    expect(
+      listed.tools.some(
+        (tool: (typeof listed.tools)[number]): boolean => tool.name === "put_encrypted_message",
+      ),
+    ).toBe(false);
+
+    await callTool(client, "register_agent", {
+      agent_id: SENDER_ID,
+      display_name: "Sender",
+    });
+    await callTool(client, "list_agents", {});
+    const sent: CallToolResult = await callTool(client, "send_message", {
+      content: "endpoint plaintext",
+      recipient_id: RECIPIENT_ID,
+      sender_id: SENDER_ID,
+    });
+    const sentOutput: ProxySendMessageOutput = ProxySendMessageOutputSchema.parse(
+      sent.structuredContent,
+    );
+    expect(sentOutput.message.content).toBe("endpoint plaintext");
+    expect(sentOutput.message.encryption).toMatchObject({
+      context_binding: "verified",
+      protocol: "murmur-e2ee-v1",
+      verification_mode: "strict",
+    });
+
+    const broadcast: CallToolResult = await callTool(client, "broadcast_message", {
+      audience: { repository: "mattpatagon/murmur" },
+      content: "endpoint plaintext",
+      sender_id: SENDER_ID,
+    });
+    expect(ProxyBroadcastOutputSchema.parse(broadcast.structuredContent).recipient_count).toBe(1);
+
+    const inbox: CallToolResult = await callTool(client, "get_messages", {
+      after_sequence: 0,
+      agent_id: RECIPIENT_ID,
+      limit: 100,
+      unread_only: false,
+    });
+    expect(ProxyInboxOutputSchema.parse(inbox.structuredContent).messages[0]).toEqual(
+      proxyMessage(),
+    );
+    const waited: CallToolResult = await callTool(client, "wait_for_messages", {
+      after_sequence: 0,
+      agent_id: RECIPIENT_ID,
+      timeout_seconds: 20,
+    });
+    expect(ProxyWaitForMessagesOutputSchema.parse(waited.structuredContent).timed_out).toBe(false);
+    await callTool(client, "mark_messages_read", {
+      agent_id: RECIPIENT_ID,
+      message_ids: [MESSAGE_ID],
+    });
+
+    expect(operations.calls).toEqual([
+      "register_agent",
+      "list_agents",
+      "send_message",
+      "broadcast_message",
+      "get_messages",
+      "wait_for_messages",
+      "mark_messages_read",
+    ]);
+
+    const invalid: CallToolResult = await callTool(client, "send_message", {
+      content: "",
+      recipient_id: RECIPIENT_ID,
+      sender_id: SENDER_ID,
+    });
+    expect(invalid.isError).toBe(true);
+    expect(JSON.stringify(invalid)).not.toContain("endpoint plaintext");
+  } finally {
+    await Promise.allSettled([client.close(), application.close()]);
+  }
+  expect(operations.calls.at(-1)).toBe("close");
+});

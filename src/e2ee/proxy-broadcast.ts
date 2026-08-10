@@ -54,6 +54,7 @@ export type BroadcastRecipientVerification = {
 export type ProxyBroadcastResult = {
   readonly content: string;
   readonly output: CommitEncryptedBroadcastOutput;
+  readonly prepared: PrepareEncryptedBroadcastOutput;
   readonly recipients: readonly BroadcastRecipientVerification[];
 };
 
@@ -381,6 +382,7 @@ export async function broadcastEncryptedMessage(
       return {
         content: input.content,
         output,
+        prepared,
         recipients: deliveries.map(
           (delivery: BroadcastDelivery): BroadcastRecipientVerification => ({
             recipientId: delivery.claim.recipient_id,

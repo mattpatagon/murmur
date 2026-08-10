@@ -39,10 +39,13 @@ const MAX_CLOCK_SKEW_MS: number = 5 * 60 * 1000;
 
 export type EncryptionProof = {
   readonly contextBinding: "verified";
+  readonly messageKind: "message" | "orchestration_request";
+  readonly orchestratorPolicyId: string | null;
   readonly protocol: "murmur-e2ee-v1";
   readonly provenance: "sender_signed_server_asserted";
   readonly recipientPrekeyClass: "fallback" | "one_time";
   readonly senderAgentKeyId: string;
+  readonly senderAuthority: "orchestrator" | "peer";
   readonly senderRootKeyId: string;
   readonly verificationMode: "organization" | "strict" | "tofu";
 };
@@ -222,10 +225,13 @@ async function decryptOne(
     content: plaintext,
     proof: {
       contextBinding: "verified",
+      messageKind: envelope.header.messageKind,
+      orchestratorPolicyId: envelope.header.orchestratorPolicyId,
       protocol: envelope.header.protocol,
       provenance: "sender_signed_server_asserted",
       recipientPrekeyClass: envelope.header.recipientPrekeyClass,
       senderAgentKeyId: envelope.header.senderAgentKeyId,
+      senderAuthority: envelope.header.senderAuthority,
       senderRootKeyId: envelope.header.senderRootKeyId,
       verificationMode: sender.verificationMode,
     },
