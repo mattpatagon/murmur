@@ -250,6 +250,21 @@ deletes superseded revisions that could retain injected legacy credentials.
 The runtime service account then needs access only to `MURMUR_DATABASE_URL` and
 the public `MURMUR_DATABASE_CA` trust anchor.
 
+Run the operator-authenticated live isolation canary after a production change:
+
+```bash
+gh workflow run production-smoke.yml --ref main
+```
+
+The workflow reads and masks only the operator credential through the deploy
+identity and never prints it. It mints a short-lived founding-tenant credential,
+verifies operator/admin/agent tool separation, intra-organization direct and
+broadcast delivery, cross-tenant read/write denial, session binding,
+suspension/restoration, and audit history, then revokes that temporary credential
+and leaves its uniquely named canary tenant suspended for inspection. It does not
+depend on the legacy founding secret, and the runtime service account receives no
+administrative credential access.
+
 ### Hosted authorization
 
 Hosted credentials map to exactly one principal; callers never supply a tenant
@@ -587,7 +602,11 @@ sessions, principal and tenant request rates, and idle sessions. The default
 active-request ceiling is 64, below the production Cloud Run concurrency of 80,
 so one tenant cannot consume every request slot with SSE streams or long polls.
 Concurrent authentication is limited to four, matching the control-plane pool
-instead of allowing invalid credentials to build a database queue.
+instead of allowing invalid credentials to build a database queue. Credentials
+already recognized by the active-token admission cache may wait for a bounded two
+seconds when an organization's agents reconnect together; at most 32 requests
+globally and eight per tenant may wait. Unknown credentials never enter that queue,
+and a rejected caller receives `Retry-After: 1`.
 Active SSE responses are not treated as idle. Configure these with the
 `MURMUR_MAX_*`, `MURMUR_*RATE_LIMIT*`, and `MURMUR_SESSION_IDLE_MS` variables in
 `.env.example`.

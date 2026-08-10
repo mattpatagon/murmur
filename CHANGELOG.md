@@ -2,6 +2,17 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.4.4.0] - 2026-08-10
+
+### Added
+
+- Add an operator-authenticated production smoke workflow that verifies tenant creation, token roles, direct and organization-wide messaging, cross-tenant denials, session binding, suspension and restoration, and the administration audit trail before revoking its temporary founding credential and leaving its canary tenant suspended.
+
+### Fixed
+
+- Queue short bursts from recognized credentials for up to two seconds instead of rejecting an organization's simultaneously reconnecting agents at the per-tenant authentication concurrency limit.
+- Keep unknown credentials outside the wait queue, bound pending recognized work globally and per tenant, and return an explicit retry interval when authentication capacity is exhausted.
+
 ## [0.4.3.0] - 2026-08-10
 
 ### Fixed

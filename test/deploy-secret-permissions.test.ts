@@ -236,10 +236,26 @@ test("workflow resumes runtime credentials through the reachable admin database"
   expect(deployPosition).toBeGreaterThan(applyPosition);
 });
 
+test("production smoke masks privileged credentials before live isolation checks", async (): Promise<void> => {
+  const workflow: string = await Bun.file(".github/workflows/production-smoke.yml").text();
+  expect(workflow).toContain("workflow_dispatch:");
+  expect(workflow).not.toContain("pull_request:");
+  expect(workflow).not.toContain("push:");
+  const operatorReadPosition: number = workflow.indexOf("--secret MURMUR_OPERATOR_TOKEN");
+  const operatorMaskPosition: number = workflow.indexOf('echo "::add-mask::$operator_token"');
+  const verificationPosition: number = workflow.indexOf("bun scripts/verify-production-hosted.ts");
+  expect(operatorReadPosition).toBeGreaterThan(-1);
+  expect(operatorMaskPosition).toBeGreaterThan(operatorReadPosition);
+  expect(verificationPosition).toBeGreaterThan(operatorMaskPosition);
+  expect(workflow).not.toContain("MURMUR_API_TOKEN");
+  expect(workflow).not.toContain("MURMUR_LIVE_FOUNDING_TOKEN");
+});
+
 test("workflows pin every GitHub Action to an immutable commit", async (): Promise<void> => {
   const workflowPaths: readonly string[] = [
     ".github/workflows/ci.yml",
     ".github/workflows/deploy.yml",
+    ".github/workflows/production-smoke.yml",
   ];
   for (const workflowPath of workflowPaths) {
     const workflow: string = await Bun.file(workflowPath).text();

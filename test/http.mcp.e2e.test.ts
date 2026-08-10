@@ -160,6 +160,66 @@ class AdmissionTestAuthenticator extends HostedAuthenticator {
   }
 }
 
+class TenantBurstAuthenticator extends HostedAuthenticator {
+  private activeAuthentications: number;
+  private readonly activeWaiters: Array<() => void>;
+  private readonly knownTokens: ReadonlySet<string>;
+  private readonly releaseAuthentications: () => void;
+  private readonly authenticationsReleased: Promise<void>;
+
+  public constructor(knownTokens: readonly string[]) {
+    super({
+      allowBootstrap: false,
+      controlPlane: null,
+      legacyToken: null,
+      mode: "legacy",
+      tenantOnboardingEnabled: false,
+    });
+    this.activeAuthentications = 0;
+    this.activeWaiters = [];
+    this.knownTokens = new Set<string>(knownTokens);
+    let release: (() => void) | undefined;
+    this.authenticationsReleased = new Promise<void>((resolve: () => void): void => {
+      release = resolve;
+    });
+    if (release === undefined) throw new Error("Authentication release was not initialized");
+    this.releaseAuthentications = release;
+  }
+
+  public override credentialAdmission(token: string): CredentialAdmission | null {
+    return this.knownTokens.has(token)
+      ? { key: credentialAdmissionKey(token), tenantKey: "burst-tenant-admission-key" }
+      : null;
+  }
+
+  public override async authenticate(token: string): Promise<HostedPrincipal | null> {
+    if (!this.knownTokens.has(token)) return null;
+    this.activeAuthentications += 1;
+    this.activeWaiters.splice(0).forEach((resolve: () => void): void => {
+      resolve();
+    });
+    await this.authenticationsReleased;
+    return {
+      kind: "tenant",
+      role: "agent",
+      tenantId: TenantId.founding(),
+      tokenId: credentialAdmissionKey(token),
+    };
+  }
+
+  public release(): void {
+    this.releaseAuthentications();
+  }
+
+  public async waitForActive(count: number): Promise<void> {
+    while (this.activeAuthentications < count) {
+      await new Promise<void>((resolve: () => void): void => {
+        this.activeWaiters.push(resolve);
+      });
+    }
+  }
+}
+
 async function initializeSession(url: URL): Promise<string> {
   const response: Response = await postJson(url, initializeRequest(1), null);
   expect(response.status).toBe(200);
@@ -239,6 +299,111 @@ test("remote MCP reserves authentication capacity for a valid first request", as
   }
 });
 
+test("remote MCP queues a recognized tenant authentication burst", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-http-auth-burst-"));
+  const validTokens: readonly string[] = [
+    "burst0001",
+    "burst0002",
+    "burst0003",
+    "burst0004",
+    "burst0005",
+  ].map((keyId: string): string => `mur_${keyId}_${"v".repeat(43)}`);
+  const authenticator: TenantBurstAuthenticator = new TenantBurstAuthenticator(validTokens);
+  const server: MurmurHttpServer = await startHttpServer(
+    {
+      ...testEnvironment(join(directory, "messages.db")),
+      MURMUR_AUTHENTICATION_WAIT_MS: "1000",
+      MURMUR_MAX_CONCURRENT_AUTHENTICATIONS: "4",
+    },
+    { authenticator },
+  );
+  try {
+    let completed: number = 0;
+    const requests: Promise<Response>[] = validTokens.map(
+      async (token: string, index: number): Promise<Response> => {
+        const response: Response = await postJsonWithToken(
+          server.mcpUrl,
+          initializeRequest(90 + index, `burst-${index}`),
+          token,
+        );
+        completed += 1;
+        return response;
+      },
+    );
+    await authenticator.waitForActive(2);
+    await Bun.sleep(50);
+    expect(completed).toBe(0);
+    authenticator.release();
+    const responses: Response[] = await Promise.all(requests);
+    expect(responses.map((response: Response): number => response.status)).toEqual([
+      200, 200, 200, 200, 200,
+    ]);
+  } finally {
+    authenticator.release();
+    await server.stop();
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("remote MCP releases recognized authentication queue capacity after timeout", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-http-auth-timeout-"));
+  const validTokens: readonly string[] = ["timeout01", "timeout02", "timeout03", "timeout04"].map(
+    (keyId: string): string => `mur_${keyId}_${"t".repeat(43)}`,
+  );
+  const authenticator: TenantBurstAuthenticator = new TenantBurstAuthenticator(validTokens);
+  const server: MurmurHttpServer = await startHttpServer(
+    {
+      ...testEnvironment(join(directory, "messages.db")),
+      MURMUR_AUTHENTICATION_WAIT_MS: "100",
+      MURMUR_MAX_CONCURRENT_AUTHENTICATIONS: "4",
+      MURMUR_MAX_PENDING_AUTHENTICATIONS_PER_TENANT: "1",
+    },
+    { authenticator },
+  );
+  try {
+    const activeRequests: Promise<Response>[] = validTokens
+      .slice(0, 2)
+      .map(
+        async (token: string, index: number): Promise<Response> =>
+          await postJsonWithToken(
+            server.mcpUrl,
+            initializeRequest(120 + index, `timeout-active-${index}`),
+            token,
+          ),
+      );
+    await authenticator.waitForActive(2);
+
+    const timedOut: Response = await postJsonWithToken(
+      server.mcpUrl,
+      initializeRequest(122, "timeout-waiter"),
+      validTokens[2] ?? "",
+    );
+    expect(timedOut.status).toBe(503);
+    expect(timedOut.headers.get("retry-after")).toBe("1");
+
+    let replacementCompleted: boolean = false;
+    const replacement: Promise<Response> = postJsonWithToken(
+      server.mcpUrl,
+      initializeRequest(123, "replacement-waiter"),
+      validTokens[3] ?? "",
+    ).then((response: Response): Response => {
+      replacementCompleted = true;
+      return response;
+    });
+    await Bun.sleep(25);
+    expect(replacementCompleted).toBe(false);
+    authenticator.release();
+    expect((await replacement).status).toBe(200);
+    expect(
+      (await Promise.all(activeRequests)).map((response: Response): number => response.status),
+    ).toEqual([200, 200]);
+  } finally {
+    authenticator.release();
+    await server.stop();
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
 test("remote MCP does not reserve capacity for a formerly active credential", async (): Promise<void> => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-http-stale-admission-"));
   const validToken: string = `mur_valid000_${"v".repeat(43)}`;
@@ -274,6 +439,7 @@ test("remote MCP does not reserve capacity for a formerly active credential", as
       validToken,
     );
     expect(staleValid.status).toBe(503);
+    expect(staleValid.headers.get("retry-after")).toBe("1");
 
     authenticator.releaseForged();
     const forgedResponses: Response[] = await Promise.all(forgedRequests);
