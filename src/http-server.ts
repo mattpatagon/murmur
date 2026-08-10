@@ -33,6 +33,9 @@ const DEFAULT_MAX_PENDING_AUTHENTICATIONS_PER_TENANT: number = 8;
 const DEFAULT_MAX_ACTIVE_REQUESTS: number = 64;
 const DEFAULT_MAX_ACTIVE_REQUESTS_PER_PRINCIPAL: number = 8;
 const DEFAULT_MAX_ACTIVE_REQUESTS_PER_TENANT: number = 20;
+const DEFAULT_MAX_ACTIVE_STREAMS: number = 64;
+const DEFAULT_MAX_ACTIVE_STREAMS_PER_PRINCIPAL: number = 32;
+const DEFAULT_MAX_ACTIVE_STREAMS_PER_TENANT: number = 32;
 const DEFAULT_SESSION_IDLE_MS: number = 15 * 60 * 1_000;
 const DEFAULT_RATE_LIMIT_PER_MINUTE: number = 600;
 const DEFAULT_TENANT_RATE_LIMIT_PER_MINUTE: number = 3_000;
@@ -168,6 +171,16 @@ function jsonResponse(status: number, body: Record<string, unknown>): Response {
 function authenticationCapacityResponse(): Response {
   return Response.json(
     { error: "Authentication capacity reached" },
+    {
+      headers: { "cache-control": "no-store", "retry-after": "1" },
+      status: 503,
+    },
+  );
+}
+
+function streamCapacityResponse(): Response {
+  return Response.json(
+    { error: "MCP stream capacity reached" },
     {
       headers: { "cache-control": "no-store", "retry-after": "1" },
       status: 503,
@@ -326,6 +339,21 @@ export async function startHttpServer(
     "MURMUR_MAX_ACTIVE_REQUESTS_PER_TENANT",
     DEFAULT_MAX_ACTIVE_REQUESTS_PER_TENANT,
   );
+  const maxActiveStreams: number = positiveIntegerEnvironment(
+    environment,
+    "MURMUR_MAX_ACTIVE_STREAMS",
+    DEFAULT_MAX_ACTIVE_STREAMS,
+  );
+  const maxActiveStreamsPerPrincipal: number = positiveIntegerEnvironment(
+    environment,
+    "MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL",
+    DEFAULT_MAX_ACTIVE_STREAMS_PER_PRINCIPAL,
+  );
+  const maxActiveStreamsPerTenant: number = positiveIntegerEnvironment(
+    environment,
+    "MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT",
+    DEFAULT_MAX_ACTIVE_STREAMS_PER_TENANT,
+  );
   const sessionIdleMs: number = positiveIntegerEnvironment(
     environment,
     "MURMUR_SESSION_IDLE_MS",
@@ -356,6 +384,8 @@ export async function startHttpServer(
   const initializingByTenant: Map<string, number> = new Map<string, number>();
   const activeRequestsByPrincipal: Map<string, number> = new Map<string, number>();
   const activeRequestsByTenant: Map<string, number> = new Map<string, number>();
+  const activeStreamsByPrincipal: Map<string, number> = new Map<string, number>();
+  const activeStreamsByTenant: Map<string, number> = new Map<string, number>();
   const activeAuthenticationsByCredential: Map<string, number> = new Map<string, number>();
   const activeAuthenticationsByTenant: Map<string, number> = new Map<string, number>();
   const pendingAuthenticationsByTenant: Map<string, number> = new Map<string, number>();
@@ -363,6 +393,7 @@ export async function startHttpServer(
   let activeAuthentications: number = 0;
   let pendingAuthentications: number = 0;
   let activeRequests: number = 0;
+  let activeStreams: number = 0;
   let initializingSessions: number = 0;
   let stopped: boolean = false;
 
@@ -482,6 +513,43 @@ export async function startHttpServer(
         const remainingForTenant: number = (activeRequestsByTenant.get(tenantId) ?? 1) - 1;
         if (remainingForTenant === 0) activeRequestsByTenant.delete(tenantId);
         else activeRequestsByTenant.set(tenantId, remainingForTenant);
+      }
+    };
+  };
+
+  const reserveStreamCapacity: (
+    principalIdentity: string,
+    tenantId: string | null,
+  ) => (() => void) | null = (
+    principalIdentity: string,
+    tenantId: string | null,
+  ): (() => void) | null => {
+    const principalStreams: number = activeStreamsByPrincipal.get(principalIdentity) ?? 0;
+    const tenantStreams: number =
+      tenantId === null ? 0 : (activeStreamsByTenant.get(tenantId) ?? 0);
+    if (
+      activeStreams >= maxActiveStreams ||
+      principalStreams >= maxActiveStreamsPerPrincipal ||
+      (tenantId !== null && tenantStreams >= maxActiveStreamsPerTenant)
+    ) {
+      return null;
+    }
+    activeStreams += 1;
+    activeStreamsByPrincipal.set(principalIdentity, principalStreams + 1);
+    if (tenantId !== null) activeStreamsByTenant.set(tenantId, tenantStreams + 1);
+    let released: boolean = false;
+    return (): void => {
+      if (released) return;
+      released = true;
+      activeStreams -= 1;
+      const remainingForPrincipal: number =
+        (activeStreamsByPrincipal.get(principalIdentity) ?? 1) - 1;
+      if (remainingForPrincipal === 0) activeStreamsByPrincipal.delete(principalIdentity);
+      else activeStreamsByPrincipal.set(principalIdentity, remainingForPrincipal);
+      if (tenantId !== null) {
+        const remainingForTenant: number = (activeStreamsByTenant.get(tenantId) ?? 1) - 1;
+        if (remainingForTenant === 0) activeStreamsByTenant.delete(tenantId);
+        else activeStreamsByTenant.set(tenantId, remainingForTenant);
       }
     };
   };
@@ -629,12 +697,14 @@ export async function startHttpServer(
 
     const principalIdentity: string = authenticator.identity(principal);
     const tenantId: string | null = principal.kind === "tenant" ? principal.tenantId.value : null;
-    const releaseRequestCapacity: (() => void) | null = reserveRequestCapacity(
-      principalIdentity,
-      tenantId,
-    );
-    if (releaseRequestCapacity === null) {
-      return jsonResponse(503, { error: "MCP request capacity reached" });
+    const isStandaloneStream: boolean = request.method === "GET";
+    const releaseResponseCapacity: (() => void) | null = isStandaloneStream
+      ? reserveStreamCapacity(principalIdentity, tenantId)
+      : reserveRequestCapacity(principalIdentity, tenantId);
+    if (releaseResponseCapacity === null) {
+      return isStandaloneStream
+        ? streamCapacityResponse()
+        : jsonResponse(503, { error: "MCP request capacity reached" });
     }
     let responseHandedOff: boolean = false;
     try {
@@ -792,12 +862,12 @@ export async function startHttpServer(
       })();
       const capacityTrackedResponse: Response = responseWithFinish(
         response,
-        releaseRequestCapacity,
+        releaseResponseCapacity,
       );
       responseHandedOff = true;
       return capacityTrackedResponse;
     } finally {
-      if (!responseHandedOff) releaseRequestCapacity();
+      if (!responseHandedOff) releaseResponseCapacity();
     }
   };
 

@@ -220,15 +220,51 @@ class TenantBurstAuthenticator extends HostedAuthenticator {
   }
 }
 
-async function initializeSession(url: URL): Promise<string> {
-  const response: Response = await postJson(url, initializeRequest(1), null);
+class StreamCapacityAuthenticator extends HostedAuthenticator {
+  private readonly principals: ReadonlyMap<string, HostedPrincipal>;
+
+  public constructor(credentials: ReadonlyArray<readonly [string, HostedPrincipal]>) {
+    super({
+      allowBootstrap: false,
+      controlPlane: null,
+      legacyToken: null,
+      mode: "legacy",
+      tenantOnboardingEnabled: false,
+    });
+    this.principals = new Map<string, HostedPrincipal>(
+      credentials.map(
+        ([token, principal]: readonly [string, HostedPrincipal]): [string, HostedPrincipal] => [
+          token,
+          principal,
+        ],
+      ),
+    );
+  }
+
+  public override credentialAdmission(token: string): CredentialAdmission | null {
+    const principal: HostedPrincipal | undefined = this.principals.get(token);
+    if (principal === undefined) return null;
+    return {
+      key: credentialAdmissionKey(token),
+      tenantKey: principal.kind === "tenant" ? principal.tenantId.value : null,
+    };
+  }
+
+  public override async authenticate(token: string): Promise<HostedPrincipal | null> {
+    return this.principals.get(token) ?? null;
+  }
+}
+
+async function initializeSession(url: URL, token: string = API_TOKEN): Promise<string> {
+  const response: Response = await postJsonWithToken(url, initializeRequest(1), token);
   expect(response.status).toBe(200);
   JsonRpcEnvelopeSchema.parse(await responsePayload(response));
   const sessionId: string | null = response.headers.get("mcp-session-id");
   if (sessionId === null) throw new Error("MCP initialize response did not include a session ID");
-  const initialized: Response = await postJson(
+  const initialized: Response = await postJsonWithToken(
     url,
     { jsonrpc: "2.0", method: "notifications/initialized" },
+    token,
     sessionId,
   );
   expect(initialized.status).toBe(202);
@@ -583,13 +619,123 @@ test("remote MCP keeps sessions with active SSE responses alive", async (): Prom
   }
 });
 
-test("remote MCP reserves request capacity across long-lived streams", async (): Promise<void> => {
+test("remote MCP rejects invalid stream capacity settings", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-http-capacity-config-"));
+  const invalidSettings: ReadonlyArray<readonly [string, string]> = [
+    ["MURMUR_MAX_ACTIVE_STREAMS", "0"],
+    ["MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL", "1.5"],
+    ["MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT", "not-a-number"],
+  ];
+  try {
+    for (const [name, value] of invalidSettings) {
+      await expect(
+        startHttpServer({
+          ...testEnvironment(join(directory, `${name}.db`)),
+          [name]: value,
+        }),
+      ).rejects.toThrow();
+    }
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("remote MCP enforces credential, tenant, and global stream limits independently", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-http-capacity-scope-"));
+  const firstTenant: TenantId = TenantId.founding();
+  const credentials: ReadonlyArray<readonly [string, HostedPrincipal]> = [
+    [
+      "stream-token-a",
+      { kind: "tenant", role: "agent", tenantId: firstTenant, tokenId: "token-a" },
+    ],
+    [
+      "stream-token-b",
+      { kind: "tenant", role: "agent", tenantId: firstTenant, tokenId: "token-b" },
+    ],
+    [
+      "stream-token-c",
+      { kind: "tenant", role: "agent", tenantId: firstTenant, tokenId: "token-c" },
+    ],
+    [
+      "stream-token-d",
+      {
+        credentialHash: Buffer.alloc(32),
+        keyId: "operator-d",
+        kind: "operator",
+        tokenId: "token-d",
+      },
+    ],
+    [
+      "stream-token-e",
+      {
+        credentialHash: Buffer.alloc(32),
+        keyId: "operator-e",
+        kind: "operator",
+        tokenId: "token-e",
+      },
+    ],
+  ];
+  const server: MurmurHttpServer = await startHttpServer(
+    {
+      ...testEnvironment(join(directory, "messages.db")),
+      MURMUR_MAX_ACTIVE_STREAMS: "3",
+      MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL: "1",
+      MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT: "2",
+    },
+    { authenticator: new StreamCapacityAuthenticator(credentials) },
+  );
+  const abortControllers: AbortController[] = [];
+  const openStream: (token: string, sessionId: string) => Promise<Response> = async (
+    token: string,
+    sessionId: string,
+  ): Promise<Response> => {
+    const abortController: AbortController = new AbortController();
+    abortControllers.push(abortController);
+    return await fetch(server.mcpUrl, {
+      headers: requestHeaders(sessionId, token),
+      signal: abortController.signal,
+    });
+  };
+  try {
+    const sessionA: string = await initializeSession(server.mcpUrl, "stream-token-a");
+    expect((await openStream("stream-token-a", sessionA)).status).toBe(200);
+
+    const secondSessionA: string = await initializeSession(server.mcpUrl, "stream-token-a");
+    expect((await openStream("stream-token-a", secondSessionA)).status).toBe(503);
+
+    const sessionB: string = await initializeSession(server.mcpUrl, "stream-token-b");
+    expect((await openStream("stream-token-b", sessionB)).status).toBe(200);
+
+    const sessionC: string = await initializeSession(server.mcpUrl, "stream-token-c");
+    expect((await openStream("stream-token-c", sessionC)).status).toBe(503);
+
+    const sessionD: string = await initializeSession(server.mcpUrl, "stream-token-d");
+    expect((await openStream("stream-token-d", sessionD)).status).toBe(200);
+
+    const sessionE: string = await initializeSession(server.mcpUrl, "stream-token-e");
+    expect((await openStream("stream-token-e", sessionE)).status).toBe(503);
+  } finally {
+    abortControllers.forEach((abortController: AbortController): void => {
+      abortController.abort();
+    });
+    await server.stop();
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("remote MCP keeps request capacity available while bounding long-lived streams", async (): Promise<void> => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-http-capacity-"));
   const server: MurmurHttpServer = await startHttpServer({
     ...testEnvironment(join(directory, "messages.db")),
+    MURMUR_MAX_ACTIVE_REQUESTS: "1",
     MURMUR_MAX_ACTIVE_REQUESTS_PER_PRINCIPAL: "1",
+    MURMUR_MAX_ACTIVE_REQUESTS_PER_TENANT: "1",
+    MURMUR_MAX_ACTIVE_STREAMS: "1",
+    MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL: "1",
+    MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT: "1",
   });
   const streamAbortController: AbortController = new AbortController();
+  const recoveredStreamAbortController: AbortController = new AbortController();
   try {
     const sessionId: string = await initializeSession(server.mcpUrl);
     const streamResponse: Response = await fetch(server.mcpUrl, {
@@ -598,24 +744,76 @@ test("remote MCP reserves request capacity across long-lived streams", async ():
     });
     expect(streamResponse.status).toBe(200);
 
-    const limited: Response = await postJson(
+    const available: Response = await postJson(
       server.mcpUrl,
       { id: 2, jsonrpc: "2.0", method: "tools/list", params: {} },
       sessionId,
     );
-    expect(limited.status).toBe(503);
-    expect(await limited.json()).toEqual({ error: "MCP request capacity reached" });
+    expect(available.status).toBe(200);
+
+    const registered: Response = await postJson(
+      server.mcpUrl,
+      {
+        id: 3,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: {
+          arguments: { agent_id: "capacity-agent", display_name: "Capacity Agent" },
+          name: "register_agent",
+        },
+      },
+      sessionId,
+    );
+    expect(registered.status).toBe(200);
+    const waitingRequest: Promise<Response> = postJson(
+      server.mcpUrl,
+      {
+        id: 4,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: {
+          arguments: { agent_id: "capacity-agent", timeout_seconds: 1 },
+          name: "wait_for_messages",
+        },
+      },
+      sessionId,
+    );
+    await Bun.sleep(25);
+    const limitedRequest: Response = await postJson(
+      server.mcpUrl,
+      { id: 5, jsonrpc: "2.0", method: "tools/list", params: {} },
+      sessionId,
+    );
+    expect(limitedRequest.status).toBe(503);
+    expect(await limitedRequest.json()).toEqual({ error: "MCP request capacity reached" });
+    const completedRequest: Response = await waitingRequest;
+    expect(completedRequest.status).toBe(200);
+    await responsePayload(completedRequest);
+    const recoveredRequest: Response = await postJson(
+      server.mcpUrl,
+      { id: 6, jsonrpc: "2.0", method: "tools/list", params: {} },
+      sessionId,
+    );
+    expect(recoveredRequest.status).toBe(200);
+
+    const secondSessionId: string = await initializeSession(server.mcpUrl);
+    const limitedStream: Response = await fetch(server.mcpUrl, {
+      headers: requestHeaders(secondSessionId),
+    });
+    expect(limitedStream.status).toBe(503);
+    expect(limitedStream.headers.get("retry-after")).toBe("1");
+    expect(await limitedStream.json()).toEqual({ error: "MCP stream capacity reached" });
 
     streamAbortController.abort();
     await Bun.sleep(25);
-    const recovered: Response = await postJson(
-      server.mcpUrl,
-      { id: 3, jsonrpc: "2.0", method: "tools/list", params: {} },
-      sessionId,
-    );
-    expect(recovered.status).toBe(200);
+    const recoveredStream: Response = await fetch(server.mcpUrl, {
+      headers: requestHeaders(secondSessionId),
+      signal: recoveredStreamAbortController.signal,
+    });
+    expect(recoveredStream.status).toBe(200);
   } finally {
     streamAbortController.abort();
+    recoveredStreamAbortController.abort();
     await server.stop();
     rmSync(directory, { force: true, recursive: true });
   }

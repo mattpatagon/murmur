@@ -597,10 +597,15 @@ security delete-generic-password -a murmur -s murmur-cloud-database-url
 ```
 
 Remote HTTP additionally bounds request bodies, concurrent authentications,
-active requests globally/per tenant/per credential, global and per-tenant
-sessions, principal and tenant request rates, and idle sessions. The default
-active-request ceiling is 64, below the production Cloud Run concurrency of 80,
-so one tenant cannot consume every request slot with SSE streams or long polls.
+short-lived active requests, long-lived SSE streams, global and per-tenant
+sessions, principal and tenant request rates, and idle sessions. Requests and
+streams have separate global/per-tenant/per-credential counters, so connected
+agents cannot consume the capacity needed by initialization, tool, and long-poll
+POSTs. The default stream ceilings are 64 globally, 32 per tenant, and 32 per
+credential. The tenant ceiling prevents one organization from consuming the
+global stream pool. Against the production Cloud Run concurrency of 80, the
+global ceiling preserves at least 16 slots for short-lived requests even when
+every stream slot is active. The separate short-lived request ceiling remains 64.
 Concurrent authentication is limited to four, matching the control-plane pool
 instead of allowing invalid credentials to build a database queue. Credentials
 already recognized by the active-token admission cache may wait for a bounded two
