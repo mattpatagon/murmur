@@ -3,6 +3,12 @@ import { AgentClient, BranchName, RepositoryName } from "../domain/value-objects
 const BRANCH_HEADER: string = "x-murmur-branch";
 const CLIENT_HEADER: string = "x-murmur-client";
 const REPOSITORY_HEADER: string = "x-murmur-repository";
+const SAFE_MCP_NAME: RegExp = /^[A-Za-z][A-Za-z0-9_./-]{0,127}$/u;
+
+export type McpRequestMetadata = {
+  readonly method: string | null;
+  readonly tool: string | null;
+};
 
 export class RequestBodyTooLargeError extends Error {
   public constructor(limit: number) {
@@ -61,6 +67,25 @@ export function clientFromRequest(request: Request): AgentClient | null {
 export function requestSessionId(request: Request): string | null {
   const value: string | null = request.headers.get("mcp-session-id");
   return value === null || value.trim() === "" ? null : value;
+}
+
+function isObject(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function safeMcpName(value: unknown): string | null {
+  return typeof value === "string" && SAFE_MCP_NAME.test(value) ? value : null;
+}
+
+export function mcpRequestMetadata(body: unknown): McpRequestMetadata {
+  if (!isObject(body)) return { method: null, tool: null };
+  const method: string | null = safeMcpName(body["method"]);
+  if (method !== "tools/call") return { method, tool: null };
+  const params: unknown = body["params"];
+  return {
+    method,
+    tool: isObject(params) ? safeMcpName(params["name"]) : null,
+  };
 }
 
 async function requestBodyBytes(request: Request, maxBytes: number): Promise<Uint8Array> {

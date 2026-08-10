@@ -26,6 +26,7 @@ import {
   TenantId,
   ThreadId,
 } from "../domain/value-objects.js";
+import { logSafeError } from "../safe-errors.js";
 import type { InboxSubscription, InboxUpdateHandler, MessageStore } from "./message-store.js";
 import { broadcastSqliteMessage } from "./sqlite-broadcast-store.js";
 import { migrateSqliteDatabase } from "./sqlite-message-migrations.js";
@@ -76,7 +77,7 @@ class SqliteInboxSubscription implements InboxSubscription {
         this.previousSequence = currentSequence;
       }
     } catch (error: unknown) {
-      console.error("Murmur SQLite inbox watcher error:", error);
+      logSafeError("Murmur SQLite inbox watcher error", error);
     } finally {
       this.running = false;
     }

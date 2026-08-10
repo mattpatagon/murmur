@@ -201,6 +201,7 @@ test("checks a real Streamable HTTP Murmur inbox", async (): Promise<void> => {
     MURMUR_API_TOKEN: token,
     MURMUR_DB_PATH: databasePath,
     MURMUR_HTTP_HOST: "127.0.0.1",
+    MURMUR_LOG_LEVEL: "off",
     PORT: "0",
   });
   try {

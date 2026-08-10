@@ -17,6 +17,7 @@ export function testEnvironment(databasePath: string): NodeJS.ProcessEnv {
     MURMUR_API_TOKEN: API_TOKEN,
     MURMUR_DB_PATH: databasePath,
     MURMUR_HTTP_HOST: "127.0.0.1",
+    MURMUR_LOG_LEVEL: "off",
     PORT: "0",
   };
 }

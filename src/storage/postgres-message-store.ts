@@ -27,6 +27,7 @@ import {
   type PostgresTlsConfiguration,
   postgresSslOptions,
 } from "../postgres-tls.js";
+import { logSafeError } from "../safe-errors.js";
 import type { InboxSubscription, InboxUpdateHandler, MessageStore } from "./message-store.js";
 import { broadcastPostgresMessage } from "./postgres-broadcast-store.js";
 import { sendPostgresMessage } from "./postgres-direct-message-store.js";
@@ -207,7 +208,7 @@ export class PostgresMessageStore implements MessageStore {
       try {
         await task();
       } catch (error: unknown) {
-        console.error("Murmur Postgres inbox listener error:", error);
+        logSafeError("Murmur Postgres inbox listener error", error);
       }
     };
     this.shared.notificationQueue = this.shared.notificationQueue.then(guardedTask, guardedTask);

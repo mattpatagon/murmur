@@ -1,10 +1,27 @@
-const DATABASE_URL_CREDENTIALS: RegExp = /(postgres(?:ql)?:\/\/)[^\s/@]*@/giu;
+import {
+  createOperationalLogger,
+  type StructuredLogger,
+} from "./observability/structured-logger.js";
+import { redactSensitiveText } from "./redaction.js";
+
+let defaultLogger: StructuredLogger | null = null;
+
+function operationalLogger(): StructuredLogger {
+  if (defaultLogger === null) defaultLogger = createOperationalLogger();
+  return defaultLogger;
+}
 
 export function safeErrorMessage(error: unknown): string {
   const message: string = error instanceof Error ? error.message : String(error);
-  return message.replace(DATABASE_URL_CREDENTIALS, "$1[redacted]@");
+  return redactSensitiveText(message);
 }
 
 export function logSafeError(context: string, error: unknown): void {
-  console.error(`${context}: ${safeErrorMessage(error)}`);
+  const errorMessage: string = safeErrorMessage(error);
+  operationalLogger().error("operation.failed", {
+    context,
+    error_class: error instanceof Error ? error.constructor.name : typeof error,
+    error_message: errorMessage,
+    message: `${context}: ${errorMessage}`,
+  });
 }
