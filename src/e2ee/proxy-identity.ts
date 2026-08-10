@@ -31,6 +31,7 @@ import {
 
 const AGENT_KEY_DAYS: number = 90;
 const PREKEY_DAYS: number = 37;
+const MINIMUM_ENVELOPE_DAYS: number = 30;
 const ONE_TIME_PREKEY_TARGET: number = 20;
 const MAX_CLAIM_TTL_MS: number = 5 * 60 * 1000;
 const MAX_CLOCK_SKEW_MS: number = 5 * 60 * 1000;
@@ -57,13 +58,15 @@ function availablePrekeys(
   now: Instant,
 ): readonly StoredPrekey[] {
   const nowMillis: number = now.toEpochMilliseconds();
+  const minimumExpiry: number = now.addDays(MINIMUM_ENVELOPE_DAYS).toEpochMilliseconds();
   return vault.keys
     .listPrekeys(agentId, prekeyClass)
     .filter(
       (prekey: StoredPrekey): boolean =>
         prekey.privateKey !== null &&
         prekey.certificate.agentSigningKeyId === agentSigningKeyId &&
-        Date.parse(prekey.certificate.expiresAt) > nowMillis,
+        Date.parse(prekey.certificate.expiresAt) > nowMillis &&
+        Date.parse(prekey.certificate.expiresAt) >= minimumExpiry,
     );
 }
 
@@ -95,6 +98,7 @@ export async function publishLocalIdentity(
     agentId,
     now.toISOString(),
     now.addDays(AGENT_KEY_DAYS).toISOString(),
+    now.addDays(MINIMUM_ENVELOPE_DAYS).toISOString(),
   );
   let fallbackKeys: readonly StoredPrekey[] = availablePrekeys(
     vault,

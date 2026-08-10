@@ -167,6 +167,20 @@ test("rotates expired agent keys while retaining prekey generation identity thro
         "2026-11-09T17:00:00.000Z",
       );
       expect(rotated.certificate.signingKeyId).not.toBe(first.certificate.signingKeyId);
+      const proactive: StoredAgentKey = await vault.keys.getOrCreateAgent(
+        "proactive",
+        "2026-08-10T17:00:00.000Z",
+        "2026-11-08T17:00:00.000Z",
+      );
+      const proactivelyRotated: StoredAgentKey = await vault.keys.getOrCreateAgent(
+        "proactive",
+        "2026-10-10T17:00:00.000Z",
+        "2027-01-08T17:00:00.000Z",
+        "2026-11-09T17:00:00.000Z",
+      );
+      expect(proactivelyRotated.certificate.signingKeyId).not.toBe(
+        proactive.certificate.signingKeyId,
+      );
       const oldPrekey: StoredPrekey | undefined = prekeys[0];
       if (oldPrekey === undefined) throw new Error("Expected old fallback prekey");
       const retained: StoredPrekey | null = vault.keys.getPrekey(oldPrekey.certificate.prekeyId);

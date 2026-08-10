@@ -107,18 +107,22 @@ export class LocalVaultKeys {
     agentId: string,
     createdAt: string,
     expiresAt: string,
+    minimumValidUntil: string = createdAt,
   ): Promise<StoredAgentKey> {
     const existing: StoredAgentKey | null = this.getAgent(agentId);
     const createdMillis: number = Date.parse(createdAt);
     const expiresMillis: number = Date.parse(expiresAt);
+    const minimumValidMillis: number = Date.parse(minimumValidUntil);
     if (
       !Number.isFinite(createdMillis) ||
       !Number.isFinite(expiresMillis) ||
-      expiresMillis <= createdMillis
+      !Number.isFinite(minimumValidMillis) ||
+      minimumValidMillis < createdMillis ||
+      expiresMillis <= minimumValidMillis
     ) {
       throw new Error("Agent key validity window is invalid");
     }
-    if (existing !== null && Date.parse(existing.certificate.expiresAt) > createdMillis) {
+    if (existing !== null && Date.parse(existing.certificate.expiresAt) > minimumValidMillis) {
       return existing;
     }
     const root: StoredRootKey = await this.getOrCreateRoot(createdAt);
@@ -138,7 +142,7 @@ export class LocalVaultKeys {
     this.#database.exec("BEGIN IMMEDIATE");
     try {
       const current: StoredAgentKey | null = this.getAgent(agentId);
-      if (current !== null && Date.parse(current.certificate.expiresAt) > createdMillis) {
+      if (current !== null && Date.parse(current.certificate.expiresAt) > minimumValidMillis) {
         this.#database.exec("COMMIT");
         sodium.memzero(pair.privateKey);
         return current;
