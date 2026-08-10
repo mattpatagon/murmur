@@ -6,26 +6,26 @@ All notable changes to Murmur are documented in this file.
 
 ### Added
 
-- Add strict source coverage, per-file line coverage, 500-line, exact dependency, canonical ELv2 license, synchronized Bun pin, and 72-hour package quarantine gates.
-- Add structured redacted request-completion logs and optional bounded OTLP HTTP/protobuf tracing with server-owned correlation.
-- Add Linux, macOS, and Windows verification, portable tests, production-entry-point build coverage, and a required host-to-Linux-container MCP test.
-- Add contributor, security, support, architecture, observability, platform, upgrade, agent, pull-request, and issue documentation.
+- Catch quality regressions before review with strict source and per-file coverage, a 500-line cap, exact dependency checks, canonical ELv2 license verification, synchronized Bun pins, and a 72-hour package quarantine.
+- Diagnose hosted requests through one redacted completion event and optional bounded OTLP HTTP/protobuf tracing with server-owned correlation.
+- Verify Linux, macOS, and Windows behavior in CI through portable tests, production-entry-point builds, and a required host-to-Linux-container MCP test.
+- Find dedicated contributor and operator guides for security, support, architecture, observability, platform support, upgrades, agent rules, pull requests, and issue reporting.
 
 ### Changed
 
-- Split storage, hosted control-plane, MCP, HTTP admission, lifecycle, deployment, and integration-test responsibilities into focused modules under 500 lines.
-- Promote all Biome warnings to failures and enable additional security, correctness, performance, and mutation-safety rules.
-- Make path discovery, configuration writes, coverage paths, package entry points, and test harnesses deterministic across operating systems.
-- Classify startup configuration failures with stable, safe operational error classes instead of generic exception names or rejected values.
+- Keep storage, hosted control-plane, MCP, HTTP admission, lifecycle, deployment, and integration-test responsibilities in focused modules under 500 lines.
+- Treat every Biome warning as a failure and enforce additional security, correctness, performance, and mutation-safety rules.
+- Run path discovery, configuration writes, coverage, package entry points, and test harnesses deterministically across operating systems.
+- Diagnose startup configuration failures through stable, safe operational error classes instead of generic exception names or rejected values.
 
 ### Fixed
 
-- Resolve concurrent cross-process SQLite sends through the unique-key winner so identical retries return the stored message and conflicting retries return `IdempotencyConflictError` instead of leaking a raw constraint failure.
+- Retry concurrent cross-process SQLite sends safely: identical retries return the stored winner, while conflicting retries return `IdempotencyConflictError` instead of leaking a raw constraint failure.
 
 ### Security
 
-- Exclude hosted token formats, database URLs, sessions, message bodies, and exception text from logs and traces while recording orthogonal authentication, admission, capacity, rate, and session outcomes.
-- Ignore untrusted inbound trace context and generate root request spans so clients cannot forge audit correlation or remote sampling decisions.
+- Correlate authentication, admission, capacity, rate, and session outcomes without recording hosted token formats, database URLs, sessions, message bodies, or exception text.
+- Start each request with a server-owned root span, preventing clients from forging audit correlation or remote sampling decisions through untrusted inbound trace context.
 
 ## [0.4.4.0] - 2026-08-10
 

@@ -192,6 +192,8 @@ Dependencies are exact-pinned, installs use the frozen Bun lockfile, and
 - [Hosted deployment and rollback](docs/hosted-deployment.md)
 - [Owner-only operator recovery](docs/operator-recovery.md)
 - [Contributing](CONTRIBUTING.md)
+- [Agent development guide](AGENTS.md)
+- [Pull request template](.github/pull_request_template.md)
 - [Security policy](SECURITY.md)
 - [Support policy](SUPPORT.md)
 - [Code of conduct](CODE_OF_CONDUCT.md)
@@ -199,6 +201,8 @@ Dependencies are exact-pinned, installs use the frozen Bun lockfile, and
 - [Observability](docs/observability.md)
 - [Upgrade policy](docs/upgrading.md)
 - [Platform support](docs/platform-support.md)
+- [Release history](CHANGELOG.md)
+- [Roadmap and completed work](TODOS.md)
 
 ## License
 
