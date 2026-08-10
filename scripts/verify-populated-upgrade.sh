@@ -71,8 +71,12 @@ delete from murmur.messages
 where message_id = '41000000-0000-4000-8000-000000000002';
 SQL
 
-for migration in supabase/migrations/20260809*.sql; do
-  cp "$migration" "$work_directory/supabase/migrations/${migration##*/}"
+for migration in supabase/migrations/*.sql; do
+  migration_name="${migration##*/}"
+  if [[ "$migration_name" > '20260809004137_tenant_key_contract.sql' ||
+    "$migration_name" == '20260809004137_tenant_key_contract.sql' ]]; then
+    cp "$migration" "$work_directory/supabase/migrations/$migration_name"
+  fi
 done
 bunx supabase db push --workdir "$work_directory" --db-url "$upgrade_url" --include-all --yes
 
