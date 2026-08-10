@@ -40,6 +40,39 @@ import {
 const SQLITE_WATCH_INTERVAL_MS: number = 200;
 type IntervalHandle = ReturnType<typeof setInterval>;
 
+function existingMessageResult(
+  database: Database,
+  command: SendMessageCommand,
+): SendMessageResult | null {
+  if (command.idempotencyKey === null) return null;
+  const statement: Statement<unknown, [string, string]> = database.query(`
+    SELECT * FROM messages WHERE sender_id = ? AND idempotency_key = ?
+  `);
+  const rawRow: unknown = statement.get(command.senderId.value, command.idempotencyKey.value);
+  if (rawRow === null) return null;
+  const existing: Message = mapMessageRow(rawRow);
+  const sameThread: boolean =
+    command.threadId === null || existing.threadId.value === command.threadId.value;
+  const sameRequest: boolean =
+    existing.recipientId.equals(command.recipientId) &&
+    existing.content.value === command.content.value &&
+    ((existing.branchName === null && command.branchName === null) ||
+      (existing.branchName !== null &&
+        command.branchName !== null &&
+        existing.branchName.equals(command.branchName))) &&
+    ((existing.client === null && command.client === null) ||
+      (existing.client !== null &&
+        command.client !== null &&
+        existing.client.equals(command.client))) &&
+    ((existing.repositoryName === null && command.repositoryName === null) ||
+      (existing.repositoryName !== null &&
+        command.repositoryName !== null &&
+        existing.repositoryName.equals(command.repositoryName))) &&
+    sameThread;
+  if (!sameRequest) throw new IdempotencyConflictError(command.idempotencyKey.value);
+  return { duplicate: true, message: existing };
+}
+
 class SqliteInboxSubscription implements InboxSubscription {
   private readonly agentId: AgentId;
   private readonly handler: InboxUpdateHandler;
@@ -189,38 +222,8 @@ export class SqliteMessageStore implements MessageStore {
     this.requireAgent(command.senderId);
     this.requireAgent(command.recipientId);
 
-    if (command.idempotencyKey !== null) {
-      const existingStatement: Statement<unknown, [string, string]> = this.database.query(`
-        SELECT * FROM messages WHERE sender_id = ? AND idempotency_key = ?
-      `);
-      const existingRow: unknown = existingStatement.get(
-        command.senderId.value,
-        command.idempotencyKey.value,
-      );
-      if (existingRow !== null) {
-        const existing: Message = mapMessageRow(existingRow);
-        const sameThread: boolean =
-          command.threadId === null || existing.threadId.value === command.threadId.value;
-        const sameRequest: boolean =
-          existing.recipientId.equals(command.recipientId) &&
-          existing.content.value === command.content.value &&
-          ((existing.branchName === null && command.branchName === null) ||
-            (existing.branchName !== null &&
-              command.branchName !== null &&
-              existing.branchName.equals(command.branchName))) &&
-          ((existing.client === null && command.client === null) ||
-            (existing.client !== null &&
-              command.client !== null &&
-              existing.client.equals(command.client))) &&
-          ((existing.repositoryName === null && command.repositoryName === null) ||
-            (existing.repositoryName !== null &&
-              command.repositoryName !== null &&
-              existing.repositoryName.equals(command.repositoryName))) &&
-          sameThread;
-        if (!sameRequest) throw new IdempotencyConflictError(command.idempotencyKey.value);
-        return { duplicate: true, message: existing };
-      }
-    }
+    const existing: SendMessageResult | null = existingMessageResult(this.database, command);
+    if (existing !== null) return existing;
 
     const messageId: MessageId = MessageId.generate();
     const threadId: ThreadId = command.threadId === null ? ThreadId.generate() : command.threadId;
@@ -252,8 +255,9 @@ export class SqliteMessageStore implements MessageStore {
         message_id, thread_id, sender_id, recipient_id, content,
         repository_name, branch_name, client_name, idempotency_key, created_at, expires_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(sender_id, idempotency_key) DO NOTHING
     `);
-    insertStatement.run(
+    const inserted: Changes = insertStatement.run(
       messageId.value,
       threadId.value,
       command.senderId.value,
@@ -266,6 +270,13 @@ export class SqliteMessageStore implements MessageStore {
       createdAt,
       expiresAt,
     );
+    if (inserted.changes === 0) {
+      const winner: SendMessageResult | null = existingMessageResult(this.database, command);
+      if (winner === null) {
+        throw new Error("Idempotent message conflict had no stored winner");
+      }
+      return winner;
+    }
     const updateAgentStatement: Statement<unknown, [string, string]> = this.database.query(
       "UPDATE agents SET last_seen_at = ? WHERE agent_id = ?",
     );

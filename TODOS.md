@@ -1,19 +1,5 @@
 # TODOS
 
-## Storage
-
-### Make SQLite idempotent sends atomic across processes
-
-**What:** Replace the SQLite check-then-insert path with an atomic conflict-aware insert and winner lookup.
-
-**Why:** Two local MCP processes can race on the same idempotency key and expose a unique-constraint error instead of a duplicate result.
-
-**Context:** Mirror the `ON CONFLICT DO NOTHING` flow in `PostgresMessageStore.sendMessage`, then fetch and compare the stored message.
-
-**Effort:** M
-**Priority:** P1
-**Depends on:** None
-
 ## Remote MCP
 
 ### Decide whether sender context should be attested
@@ -29,6 +15,11 @@
 **Depends on:** Per-client authentication design
 
 ## Completed
+
+- Make SQLite idempotent sends atomic across processes with a conflict-aware insert and stored-winner
+  comparison.
+
+  **Completed:** Unreleased (2026-08-10)
 
 - Expire abandoned HTTP sessions while preserving active SSE responses; bound global and
   per-tenant session capacity.
