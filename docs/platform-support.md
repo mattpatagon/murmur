@@ -38,7 +38,10 @@ setup resolves:
 
 The setup command validates every selected output before writing any file, preserves unrelated
 settings, and stores the name `MURMUR_API_TOKEN`, never its value. Project configuration contains no
-home-directory paths. See `murmur setup --help` before using `--replace`.
+home-directory paths. New configuration files use mode `0600` on macOS and Linux. Windows does not
+enforce POSIX mode bits; files are written inside the selected user profile and inherit its Windows
+ACLs, so operators must keep that profile restricted to the intended account. See `murmur setup
+--help` before using `--replace`.
 
 ## Local development
 

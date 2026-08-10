@@ -272,11 +272,14 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
   expect(shellQuote("/opt/murmur-hook")).toBe("/opt/murmur-hook");
   expect(shellQuote("/it's here/murmur-hook")).toBe("'/it'\"'\"'s here/murmur-hook'");
   expect(
-    defaultUserConfigurationPaths({
-      CLAUDE_CONFIG_DIR: "/config/claude",
-      CODEX_HOME: "/config/codex",
-      HOME: "/users/test",
-    }),
+    defaultUserConfigurationPaths(
+      {
+        CLAUDE_CONFIG_DIR: "/config/claude",
+        CODEX_HOME: "/config/codex",
+        HOME: "/users/test",
+      },
+      "linux",
+    ),
   ).toEqual({
     claudeMcp: "/config/claude/.claude.json",
     claudeSettings: "/config/claude/settings.json",
@@ -314,7 +317,7 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
   });
 });
 
-test("creates user configuration files with private permissions", (): void => {
+test("creates user configuration files with platform-appropriate protection", (): void => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-private-config-"));
   const paths: UserConfigurationPaths = {
     claudeMcp: join(directory, ".claude.json"),
@@ -328,7 +331,11 @@ test("creates user configuration files with private permissions", (): void => {
       hookExecutable: "/usr/local/bin/murmur-hook",
       paths,
     });
-    for (const path of Object.values(paths)) expect(statSync(path).mode & 0o777).toBe(0o600);
+    for (const path of Object.values(paths)) {
+      const status: ReturnType<typeof statSync> = statSync(path);
+      expect(status.isFile()).toBe(true);
+      if (process.platform !== "win32") expect(status.mode & 0o777).toBe(0o600);
+    }
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }
