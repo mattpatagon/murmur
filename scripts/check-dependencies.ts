@@ -12,20 +12,30 @@ const EXACT_SEMVER: RegExp =
 const PackageManifestSchema: z.ZodObject<{
   dependencies: z.ZodRecord<z.ZodString, z.ZodString>;
   devDependencies: z.ZodRecord<z.ZodString, z.ZodString>;
+  engines: z.ZodObject<{ bun: z.ZodString }>;
   license: z.ZodLiteral<"Elastic-2.0">;
   optionalDependencies: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodString>>;
   overrides: z.ZodRecord<z.ZodString, z.ZodString>;
   packageManager: z.ZodString;
   peerDependencies: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodString>>;
+  scripts: z.ZodRecord<z.ZodString, z.ZodString>;
 }> = z.object({
   dependencies: z.record(z.string(), z.string()),
   devDependencies: z.record(z.string(), z.string()),
+  engines: z.object({ bun: z.string() }),
   license: z.literal("Elastic-2.0"),
   optionalDependencies: z.record(z.string(), z.string()).default({}),
   overrides: z.record(z.string(), z.string()),
   packageManager: z.string(),
   peerDependencies: z.record(z.string(), z.string()).default({}),
+  scripts: z.record(z.string(), z.string()),
 });
+
+export type BunPinSurfaces = {
+  readonly ciWorkflow: string;
+  readonly deployWorkflow: string;
+  readonly dockerfile: string;
+};
 
 type DependencySections = {
   readonly dependencies: Readonly<Record<string, string>>;
@@ -87,9 +97,64 @@ function auditBunConfiguration(bunfigText: string, errors: string[]): void {
   if (releaseAgeCount > 1) errors.push("bunfig.toml must declare minimumReleaseAge exactly once");
 }
 
+function countOccurrences(contents: string, expected: string): number {
+  let count: number = 0;
+  let cursor: number = 0;
+  let match: number = contents.indexOf(expected, cursor);
+  while (match !== -1) {
+    count += 1;
+    cursor = match + expected.length;
+    match = contents.indexOf(expected, cursor);
+  }
+  return count;
+}
+
+function auditBunPins(
+  packageManagerVersion: string,
+  engineVersion: string,
+  testLinux: string | undefined,
+  surfaces: BunPinSurfaces,
+  errors: string[],
+): void {
+  const expectedEngine: string = `>=${packageManagerVersion}`;
+  if (engineVersion !== expectedEngine) {
+    errors.push(
+      `engines.bun must declare compatibility from the pinned Bun release '${expectedEngine}'; ` +
+        `received '${engineVersion}'`,
+    );
+  }
+
+  const expectedImage: string = `oven/bun:${packageManagerVersion}`;
+  if (testLinux === undefined || countOccurrences(testLinux, expectedImage) !== 1) {
+    errors.push(`scripts.test:linux must use the pinned Bun image '${expectedImage}' exactly once`);
+  }
+
+  const expectedDockerFrom: string = `FROM ${expectedImage}`;
+  if (
+    countOccurrences(surfaces.dockerfile, "FROM oven/bun:") !== 2 ||
+    countOccurrences(surfaces.dockerfile, expectedDockerFrom) !== 2
+  ) {
+    errors.push(`Dockerfile must use the pinned Bun image '${expectedImage}' in both stages`);
+  }
+
+  const expectedWorkflowPin: string = `bun-version: ${packageManagerVersion}`;
+  const workflows: readonly [string, string][] = [
+    [".github/workflows/ci.yml", surfaces.ciWorkflow],
+    [".github/workflows/deploy.yml", surfaces.deployWorkflow],
+  ];
+  workflows.forEach((entry: readonly [string, string]): void => {
+    const declaredPins: number = countOccurrences(entry[1], "bun-version:");
+    const matchingPins: number = countOccurrences(entry[1], expectedWorkflowPin);
+    if (declaredPins === 0 || matchingPins !== declaredPins) {
+      errors.push(`${entry[0]} must install the pinned Bun release '${packageManagerVersion}'`);
+    }
+  });
+}
+
 export function auditDependencyPolicy(
   packageJsonText: string,
   bunfigText: string,
+  bunPinSurfaces: BunPinSurfaces,
 ): readonly string[] {
   const errors: string[] = [];
   let packageJson: unknown;
@@ -117,6 +182,14 @@ export function auditDependencyPolicy(
       errors.push(
         `packageManager must pin one exact Bun release; received '${parsed.data.packageManager}'`,
       );
+    } else {
+      auditBunPins(
+        packageManagerVersion,
+        parsed.data.engines.bun,
+        parsed.data.scripts["test:linux"],
+        bunPinSurfaces,
+        errors,
+      );
     }
     auditVersions("dependencies", sections.dependencies, errors);
     auditVersions("devDependencies", sections.devDependencies, errors);
@@ -132,7 +205,16 @@ function main(): void {
   try {
     const packageJsonText: string = readFileSync("package.json", "utf8");
     const bunfigText: string = readFileSync("bunfig.toml", "utf8");
-    const errors: readonly string[] = auditDependencyPolicy(packageJsonText, bunfigText);
+    const bunPinSurfaces: BunPinSurfaces = {
+      ciWorkflow: readFileSync(".github/workflows/ci.yml", "utf8"),
+      deployWorkflow: readFileSync(".github/workflows/deploy.yml", "utf8"),
+      dockerfile: readFileSync("Dockerfile", "utf8"),
+    };
+    const errors: readonly string[] = auditDependencyPolicy(
+      packageJsonText,
+      bunfigText,
+      bunPinSurfaces,
+    );
     if (errors.length > 0) {
       errors.forEach((error: string): void => {
         process.stderr.write(`Dependency policy: ${error}\n`);
@@ -141,7 +223,7 @@ function main(): void {
       return;
     }
     process.stdout.write(
-      "Dependency policy passed: exact versions, frozen Bun release, ELv2 metadata, and 72-hour package quarantine.\n",
+      "Dependency policy passed: exact versions, synchronized Bun pins, ELv2 metadata, and 72-hour package quarantine.\n",
     );
   } catch (error: unknown) {
     const detail: string = error instanceof Error ? error.message : String(error);

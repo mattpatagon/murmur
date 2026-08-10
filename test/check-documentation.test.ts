@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 
 import { auditDocumentation } from "../scripts/check-documentation.js";
 
@@ -9,7 +10,7 @@ function completeRepository(): Map<string, string> {
     ["CLAUDE.md", "@AGENTS.md\n"],
     ["CODE_OF_CONDUCT.md", "# Conduct\n"],
     ["CONTRIBUTING.md", "# Contributing\n"],
-    ["LICENSE", "Elastic License 2.0\nhttps://www.elastic.co/licensing/elastic-license\n"],
+    ["LICENSE", readFileSync("LICENSE", "utf8")],
     [
       "README.md",
       // biome-ignore lint/security/noSecrets: This is synthetic Markdown, not credential material.
@@ -59,7 +60,7 @@ describe("documentation policy", (): void => {
     const errors: readonly string[] = auditDocumentation(files);
     expect(errors.some((error: string): boolean => error.startsWith("VERSION"))).toBe(true);
     expect(errors).toContain(
-      "LICENSE must contain the canonical Elastic License 2.0 notice and URL",
+      "LICENSE must match the canonical Elastic License 2.0 text byte-for-byte",
     );
     expect(errors).toContain("CLAUDE.md must import the authoritative AGENTS.md contract");
   });

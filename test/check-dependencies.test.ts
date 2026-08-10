@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { auditDependencyPolicy } from "../scripts/check-dependencies.js";
+import { auditDependencyPolicy, type BunPinSurfaces } from "../scripts/check-dependencies.js";
 
 const VALID_BUNFIG: string = `[install]
 minimumReleaseAge = 259200
@@ -9,6 +9,12 @@ minimumReleaseAge = 259200
 coverageSkipTestFiles = true
 `;
 
+const VALID_BUN_PIN_SURFACES: BunPinSurfaces = {
+  ciWorkflow: "bun-version: 1.3.11\n",
+  deployWorkflow: "bun-version: 1.3.11\n",
+  dockerfile: "FROM oven/bun:1.3.11\nFROM oven/bun:1.3.11\n",
+};
+
 function manifest(overrides: Readonly<Record<string, unknown>> = {}): string {
   return JSON.stringify({
     dependencies: { zod: "4.4.3" },
@@ -16,13 +22,23 @@ function manifest(overrides: Readonly<Record<string, unknown>> = {}): string {
     license: "Elastic-2.0",
     overrides: { zod: "4.4.3" },
     packageManager: "bun@1.3.11",
+    engines: { bun: ">=1.3.11" },
+    scripts: { "test:linux": "MURMUR_TEST_DOCKER_IMAGE=oven/bun:1.3.11 bun test" },
     ...overrides,
   });
 }
 
+function audit(
+  packageJsonText: string,
+  bunfigText: string,
+  surfaces: BunPinSurfaces = VALID_BUN_PIN_SURFACES,
+): readonly string[] {
+  return auditDependencyPolicy(packageJsonText, bunfigText, surfaces);
+}
+
 describe("dependency policy", (): void => {
   test("accepts exact versions and a 72-hour package quarantine", (): void => {
-    expect(auditDependencyPolicy(manifest(), VALID_BUNFIG)).toEqual([]);
+    expect(audit(manifest(), VALID_BUNFIG)).toEqual([]);
   });
 
   test("rejects version ranges, aliases, and mutable dependency references", (): void => {
@@ -35,7 +51,7 @@ describe("dependency policy", (): void => {
       "git+https://example.invalid/dependency.git",
     ];
     cases.forEach((version: string): void => {
-      const errors: readonly string[] = auditDependencyPolicy(
+      const errors: readonly string[] = audit(
         manifest({ dependencies: { unsafe: version } }),
         VALID_BUNFIG,
       );
@@ -44,19 +60,15 @@ describe("dependency policy", (): void => {
       ).toBe(true);
     });
     expect(
-      auditDependencyPolicy(manifest({ optionalDependencies: { unsafe: "^1.0.0" } }), VALID_BUNFIG),
+      audit(manifest({ optionalDependencies: { unsafe: "^1.0.0" } }), VALID_BUNFIG),
     ).not.toEqual([]);
-    expect(
-      auditDependencyPolicy(manifest({ peerDependencies: { unsafe: "*" } }), VALID_BUNFIG),
-    ).not.toEqual([]);
+    expect(audit(manifest({ peerDependencies: { unsafe: "*" } }), VALID_BUNFIG)).not.toEqual([]);
   });
 
   test("rejects the wrong license, package manager, or release age", (): void => {
-    expect(auditDependencyPolicy(manifest({ license: "MIT" }), VALID_BUNFIG)).not.toEqual([]);
-    expect(
-      auditDependencyPolicy(manifest({ packageManager: "bun@latest" }), VALID_BUNFIG),
-    ).not.toEqual([]);
-    expect(auditDependencyPolicy(manifest(), "[install]\nminimumReleaseAge = 86400\n")).toEqual([
+    expect(audit(manifest({ license: "MIT" }), VALID_BUNFIG)).not.toEqual([]);
+    expect(audit(manifest({ packageManager: "bun@latest" }), VALID_BUNFIG)).not.toEqual([]);
+    expect(audit(manifest(), "[install]\nminimumReleaseAge = 86400\n")).toEqual([
       "minimumReleaseAge must be 259200 seconds (72 hours); received 86400",
     ]);
   });
@@ -70,7 +82,35 @@ describe("dependency policy", (): void => {
       `[install]\nminimumReleaseAge = ${"$"}{RELEASE_AGE}\n`,
     ];
     invalidBunfigs.forEach((bunfig: string): void => {
-      expect(auditDependencyPolicy(manifest(), bunfig)).not.toEqual([]);
+      expect(audit(manifest(), bunfig)).not.toEqual([]);
     });
+  });
+
+  test("rejects drift between package, container, and workflow Bun pins", (): void => {
+    expect(audit(manifest({ engines: { bun: ">=1.3.10" } }), VALID_BUNFIG)).not.toEqual([]);
+    expect(
+      audit(
+        manifest({ scripts: { "test:linux": "MURMUR_TEST_DOCKER_IMAGE=oven/bun:1.3.10" } }),
+        VALID_BUNFIG,
+      ),
+    ).not.toEqual([]);
+    expect(
+      audit(manifest(), VALID_BUNFIG, {
+        ...VALID_BUN_PIN_SURFACES,
+        dockerfile: "FROM oven/bun:1.3.10\nFROM oven/bun:1.3.10\n",
+      }),
+    ).not.toEqual([]);
+    expect(
+      audit(manifest(), VALID_BUNFIG, {
+        ...VALID_BUN_PIN_SURFACES,
+        ciWorkflow: "bun-version: 1.3.10\n",
+      }),
+    ).not.toEqual([]);
+    expect(
+      audit(manifest(), VALID_BUNFIG, {
+        ...VALID_BUN_PIN_SURFACES,
+        deployWorkflow: "bun-version: 1.3.10\n",
+      }),
+    ).not.toEqual([]);
   });
 });

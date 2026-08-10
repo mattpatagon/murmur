@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import process from "node:process";
 import { posix } from "node:path";
 
@@ -35,6 +36,12 @@ const REQUIRED_FILES: readonly string[] = [
 const PackageVersionSchema: z.ZodObject<{ version: z.ZodString }> = z.object({
   version: z.string().regex(/^\d+\.\d+\.\d+\.\d+$/u),
 });
+
+// Elastic publishes ELv2 as fixed license text. Pinning the complete file prevents a recognizable
+// heading and URL from disguising a modified grant or limitation.
+const ELASTIC_LICENSE_2_0_SHA256: string =
+  // biome-ignore lint/security/noSecrets: This is a public SHA-256 integrity digest.
+  "48255018b41fc0e965b1115af7e6779bc218bb8a6747d561da800d5022622aa2";
 
 function linkTarget(rawTarget: string): string | null {
   if (
@@ -94,12 +101,11 @@ export function auditDocumentation(files: ReadonlyMap<string, string>): readonly
     errors.push("CLAUDE.md must import the authoritative AGENTS.md contract");
   }
   const license: string | undefined = files.get("LICENSE");
-  if (
-    license !== undefined &&
-    (!license.startsWith("Elastic License 2.0\n") ||
-      !license.includes("https://www.elastic.co/licensing/elastic-license"))
-  ) {
-    errors.push("LICENSE must contain the canonical Elastic License 2.0 notice and URL");
+  if (license !== undefined) {
+    const licenseSha256: string = createHash("sha256").update(license, "utf8").digest("hex");
+    if (licenseSha256 !== ELASTIC_LICENSE_2_0_SHA256) {
+      errors.push("LICENSE must match the canonical Elastic License 2.0 text byte-for-byte");
+    }
   }
 
   const packageJsonText: string | undefined = files.get("package.json");
