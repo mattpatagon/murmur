@@ -42,6 +42,7 @@ import {
   type StoredAgentRow,
   storedPostgresAgent,
   supersedePostgresSessions,
+  trimRetainedPostgresSessions,
 } from "./postgres-agent-lifecycle-rows.js";
 
 function agentSelect(now: Instant): string {
@@ -105,7 +106,7 @@ export async function renewPostgresSessionInTransaction(
   now: Instant,
   createIfMissing: boolean,
 ): Promise<Agent> {
-  await endExpiredPostgresSessions(transaction, now);
+  await endExpiredPostgresSessions(transaction, tenantId, now, agentId);
   const row: StoredAgentRow | null = await storedPostgresAgent(transaction, tenantId, agentId);
   if (row === null) throw new UnknownAgentError(agentId.value);
   if (row.closed_at !== null) {
@@ -182,6 +183,7 @@ export async function renewPostgresSessionInTransaction(
       ended_at = NULL,
       end_reason = NULL
   `;
+  await trimRetainedPostgresSessions(transaction, tenantId, agentId);
   await transaction`
     UPDATE murmur.agents SET last_seen_at = ${now.toISOString()}::timestamptz
     WHERE tenant_id = ${tenantId.value}::uuid AND agent_id = ${agentId.value}
@@ -206,7 +208,7 @@ export async function registerPostgresAgent(
     await lockPostgresRecipientCommitOrder(database, transaction, tenantId, [
       command.agentId.value,
     ]);
-    await endExpiredPostgresSessions(transaction, now);
+    await endExpiredPostgresSessions(transaction, tenantId, now, command.agentId);
     const existing: StoredAgentRow | null = await storedPostgresAgent(
       transaction,
       tenantId,
@@ -315,7 +317,7 @@ export async function listPostgresAgents(
 ): Promise<readonly Agent[]> {
   return await database.begin(async (transaction: TransactionSql): Promise<readonly Agent[]> => {
     await setPostgresTenantContext(transaction, tenantId);
-    await endExpiredPostgresSessions(transaction, now);
+    await endExpiredPostgresSessions(transaction, tenantId, now);
     const rawIds: unknown = await transaction`
       SELECT agent.agent_id FROM murmur.agents AS agent
       WHERE agent.tenant_id = ${tenantId.value}::uuid AND (

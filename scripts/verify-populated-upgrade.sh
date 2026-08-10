@@ -80,9 +80,16 @@ for migration in supabase/migrations/*.sql; do
 done
 bunx supabase db push --workdir "$work_directory" --db-url "$upgrade_url" --include-all --yes
 
+lifecycle_backfill="$(psql "$upgrade_url" --tuples-only --no-align --set ON_ERROR_STOP=1 \
+  --command "select (select count(*) from murmur.agent_sessions) || '|' || (select count(*) from murmur.agent_sessions where session_key = 'backfill' and generation = 1) || '|' || (select agent_count from murmur.tenant_resource_usage where tenant_id = '00000000-0000-4000-8000-000000000001')")"
+if [ "$lifecycle_backfill" != '3|3|3' ]; then
+  echo "Lifecycle backfill or agent recount was unexpected: $lifecycle_backfill" >&2
+  exit 1
+fi
+
 preserved_cursor="$(psql "$upgrade_url" --tuples-only --no-align --set ON_ERROR_STOP=1 \
-  --command "select sequence || '|' || tenant_sequence from murmur.messages where message_id = '41000000-0000-4000-8000-000000000001'")"
-if [ "$preserved_cursor" != '1|1' ]; then
+  --command "select sequence || '|' || tenant_sequence || '|' || sender_generation || '|' || recipient_generation from murmur.messages where message_id = '41000000-0000-4000-8000-000000000001'")"
+if [ "$preserved_cursor" != '1|1|1|1' ]; then
   echo "Existing cursor changed during backfill: $preserved_cursor" >&2
   exit 1
 fi
@@ -119,8 +126,8 @@ insert into murmur.messages(
 SQL
 
 compatible_cursor="$(psql "$upgrade_url" --tuples-only --no-align --set ON_ERROR_STOP=1 \
-  --command "select sequence || '|' || tenant_sequence from murmur.messages where message_id = '41000000-0000-4000-8000-000000000004'")"
-if [ "$compatible_cursor" != '4|4' ]; then
+  --command "select sequence || '|' || tenant_sequence || '|' || sender_generation || '|' || recipient_generation from murmur.messages where message_id = '41000000-0000-4000-8000-000000000004'")"
+if [ "$compatible_cursor" != '4|4|1|1' ]; then
   echo "Contract-v1 cursor diverged after a rollback gap: $compatible_cursor" >&2
   exit 1
 fi

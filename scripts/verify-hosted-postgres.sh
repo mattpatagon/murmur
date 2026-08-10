@@ -97,7 +97,7 @@ if [ -z "$second_tenant_id" ]; then
   echo 'Hosted verification did not create a second tenant for direct RLS probes' >&2
   exit 1
 fi
-for tenant_table in agents messages broadcasts access_tokens; do
+for tenant_table in agents agent_sessions messages broadcasts access_tokens notices; do
   expected_rows="$(psql "$admin_url" --tuples-only --no-align --quiet \
     --command "select count(*) from murmur.$tenant_table where tenant_id = '$founding_tenant_id'::uuid")"
   visible_rows="$(psql "$app_url" --tuples-only --no-align --quiet \

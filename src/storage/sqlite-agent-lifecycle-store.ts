@@ -32,6 +32,11 @@ import {
   JsonObjectSchema,
 } from "../domain/value-objects.js";
 import { mapAgentRow } from "./sqlite-message-rows.js";
+import {
+  endExpiredSqliteSessions,
+  sqliteLiveSessionCount,
+  trimRetainedSqliteSessions,
+} from "./sqlite-agent-session-rows.js";
 
 type StoredAgentRow = {
   readonly agent_id: string;
@@ -68,36 +73,6 @@ function storedAgent(database: Database, agentId: AgentId): StoredAgentRow | nul
     generation: Number(generation),
     metadata_json: String(Reflect.get(raw, "metadata_json")),
   };
-}
-
-function liveSessionCount(
-  database: Database,
-  agentId: AgentId,
-  generation: AgentGeneration,
-  now: Instant,
-): number {
-  const row: unknown = database
-    .query<unknown, [string, number, string]>(`
-      SELECT COUNT(*) AS count FROM agent_sessions
-      WHERE agent_id = ? AND generation = ? AND ended_at IS NULL AND lease_expires_at > ?
-    `)
-    .get(agentId.value, generation.value, now.toISOString());
-  if (row === null || typeof row !== "object") throw new Error("Session count is invalid");
-  const value: unknown = Reflect.get(row, "count");
-  if (typeof value !== "number" && typeof value !== "bigint") {
-    throw new Error("Session count is invalid");
-  }
-  return Number(value);
-}
-
-function endExpiredSessions(database: Database, now: Instant): void {
-  database
-    .query<unknown, [string, string]>(`
-      UPDATE agent_sessions
-      SET ended_at = ?, end_reason = 'expired'
-      WHERE ended_at IS NULL AND lease_expires_at <= ?
-    `)
-    .run(now.toISOString(), now.toISOString());
 }
 
 function mergeDivergentMetadata(currentJson: string, incoming: JsonObject): JsonObject {
@@ -145,7 +120,7 @@ export function renewSqliteSession(
   now: Instant,
   createIfMissing: boolean,
 ): Agent {
-  endExpiredSessions(database, now);
+  endExpiredSqliteSessions(database, now, agentId);
   const row: StoredAgentRow | null = storedAgent(database, agentId);
   if (row === null) throw new UnknownAgentError(agentId.value);
   if (row.closed_at !== null) {
@@ -180,7 +155,7 @@ export function renewSqliteSession(
     .get(agentId.value, generation.value, sessionKey.value, now.toISOString());
   if (
     existing === null &&
-    liveSessionCount(database, agentId, generation, now) >= MAX_LIVE_SESSIONS_PER_AGENT
+    sqliteLiveSessionCount(database, agentId, generation, now) >= MAX_LIVE_SESSIONS_PER_AGENT
   ) {
     database
       .query<unknown, [string, string, number]>(`
@@ -212,6 +187,7 @@ export function renewSqliteSession(
       now.toISOString(),
       now.addMinutes(AGENT_LEASE_MINUTES).toISOString(),
     );
+  trimRetainedSqliteSessions(database, agentId);
   database
     .query<unknown, [string, string]>("UPDATE agents SET last_seen_at = ? WHERE agent_id = ?")
     .run(now.toISOString(), agentId.value);
@@ -258,7 +234,7 @@ export function registerSqliteAgent(
 ): RegisterAgentResult {
   database.exec("BEGIN IMMEDIATE");
   try {
-    endExpiredSessions(database, now);
+    endExpiredSqliteSessions(database, now, command.agentId);
     const existing: StoredAgentRow | null = storedAgent(database, command.agentId);
     let generation: AgentGeneration = AgentGeneration.parse(
       existing === null ? 1 : existing.generation,
@@ -290,7 +266,12 @@ export function registerSqliteAgent(
         currentRepository !== null &&
         incomingRepository !== null &&
         currentRepository !== incomingRepository;
-      const currentLive: number = liveSessionCount(database, command.agentId, generation, now);
+      const currentLive: number = sqliteLiveSessionCount(
+        database,
+        command.agentId,
+        generation,
+        now,
+      );
       if (existing.closed_at !== null) {
         ensureOpenCapacity(database);
         const dormantSameRepository: boolean =
@@ -326,15 +307,16 @@ export function registerSqliteAgent(
           command.agentId.value,
         );
     }
-    renewSqliteSession(
+    const agent: Agent = renewSqliteSession(
       database,
       command.agentId,
       command.sessionKey ?? SessionKey.default(),
       now,
       true,
     );
+    const result: RegisterAgentResult = { agent, reopened, repositoryDiverged };
     database.exec("COMMIT");
-    return { agent: sqliteAgent(database, command.agentId, now), reopened, repositoryDiverged };
+    return result;
   } catch (error: unknown) {
     database.exec("ROLLBACK");
     throw error;
@@ -346,7 +328,7 @@ export function listSqliteAgents(
   query: ListAgentsQuery,
   now: Instant,
 ): readonly Agent[] {
-  endExpiredSessions(database, now);
+  endExpiredSqliteSessions(database, now);
   const ids: unknown[] = database
     .query<unknown, []>("SELECT agent_id FROM agents ORDER BY last_seen_at DESC, agent_id ASC")
     .all();
@@ -446,13 +428,15 @@ export function closeSqliteAgent(
       unreadRow === null || typeof unreadRow !== "object" ? 0 : Reflect.get(unreadRow, "count");
     const unreadCount: number =
       typeof unreadValue === "number" || typeof unreadValue === "bigint" ? Number(unreadValue) : 0;
-    database.exec("COMMIT");
-    return {
-      agent: sqliteAgent(database, command.agentId, now),
+    const agent: Agent = sqliteAgent(database, command.agentId, now);
+    const result: CloseAgentResult = {
+      agent,
       alreadyClosed,
       endedSessions,
       unreadCount,
     };
+    database.exec("COMMIT");
+    return result;
   } catch (error: unknown) {
     database.exec("ROLLBACK");
     throw error;

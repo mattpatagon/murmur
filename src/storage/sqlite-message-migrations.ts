@@ -180,7 +180,11 @@ export function migrateSqliteDatabase(database: Database): void {
         CREATE TABLE notices (
           notice_id TEXT PRIMARY KEY,
           kind TEXT NOT NULL CHECK(kind IN ('handoff', 'ownership', 'blocker', 'decision')),
-          creator_id TEXT NOT NULL CHECK(length(creator_id) BETWEEN 1 AND 200),
+          creator_id TEXT NOT NULL CHECK(
+            length(creator_id) BETWEEN 1 AND 200
+            AND creator_id GLOB '[A-Za-z0-9]*'
+            AND creator_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+          ),
           creator_generation INTEGER NOT NULL CHECK(creator_generation >= 1),
           repository_name TEXT NOT NULL,
           branch_name TEXT,
@@ -188,10 +192,18 @@ export function migrateSqliteDatabase(database: Database): void {
           idempotency_key TEXT,
           created_at TEXT NOT NULL,
           expires_at TEXT NOT NULL,
-          resolved_by_id TEXT,
+          resolved_by_id TEXT CHECK(resolved_by_id IS NULL OR (
+            length(resolved_by_id) BETWEEN 1 AND 200
+            AND resolved_by_id GLOB '[A-Za-z0-9]*'
+            AND resolved_by_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+          )),
           resolved_by_generation INTEGER CHECK(resolved_by_generation IS NULL OR resolved_by_generation >= 1),
           resolved_at TEXT,
-          withdrawn_by_id TEXT,
+          withdrawn_by_id TEXT CHECK(withdrawn_by_id IS NULL OR (
+            length(withdrawn_by_id) BETWEEN 1 AND 200
+            AND withdrawn_by_id GLOB '[A-Za-z0-9]*'
+            AND withdrawn_by_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+          )),
           withdrawn_by_generation INTEGER CHECK(withdrawn_by_generation IS NULL OR withdrawn_by_generation >= 1),
           withdrawn_at TEXT,
           resolution_note TEXT,

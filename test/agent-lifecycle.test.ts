@@ -4,7 +4,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { AgentGeneration, SessionKey } from "../src/domain/lifecycle-values.js";
+import {
+  AgentGeneration,
+  MAX_RETAINED_SESSIONS_PER_AGENT,
+  SessionKey,
+} from "../src/domain/lifecycle-values.js";
 import type {
   Agent,
   CloseAgentResult,
@@ -149,6 +153,31 @@ test("a ninth live session deterministically supersedes only the oldest lease", 
       expectedGeneration: null,
     });
     expect(closed.endedSessions).toBe(8);
+  });
+});
+
+test("random session keys remain bounded while all live panes are preserved", (): void => {
+  withLifecycle(({ path, store }: LifecycleFixture): void => {
+    for (let index: number = 1; index <= 100; index += 1) {
+      register(store, "alice", "mattpatagon/murmur", `pane-${index}`);
+    }
+    expect(requireAgent(store, "alice").liveSessionCount).toBe(8);
+    store.close();
+    const database: Database = new Database(path, { readonly: true });
+    try {
+      const row: unknown = database
+        .query<unknown, [string]>(`
+          SELECT COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE ended_at IS NULL) AS live
+          FROM agent_sessions WHERE agent_id = ?
+        `)
+        .get("alice");
+      if (row === null || typeof row !== "object") throw new Error("Expected session count");
+      expect(Number(Reflect.get(row, "total"))).toBe(MAX_RETAINED_SESSIONS_PER_AGENT);
+      expect(Number(Reflect.get(row, "live"))).toBe(8);
+    } finally {
+      database.close();
+    }
   });
 });
 

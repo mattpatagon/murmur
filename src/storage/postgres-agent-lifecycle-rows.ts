@@ -1,7 +1,10 @@
 import type { TransactionSql } from "postgres";
 import { z } from "zod";
 
-import type { AgentGeneration } from "../domain/lifecycle-values.js";
+import {
+  type AgentGeneration,
+  MAX_RETAINED_SESSIONS_PER_AGENT,
+} from "../domain/lifecycle-values.js";
 import type { AgentId, Instant, JsonObject, TenantId } from "../domain/value-objects.js";
 
 export type StoredAgentRow = {
@@ -20,12 +23,51 @@ const StoredAgentRowSchema: z.ZodType<StoredAgentRow> = z.strictObject({
 
 export async function endExpiredPostgresSessions(
   transaction: TransactionSql,
+  tenantId: TenantId,
   now: Instant,
+  agentId: AgentId | null = null,
 ): Promise<void> {
+  const agentIdValue: string | null = agentId === null ? null : agentId.value;
   await transaction`
     UPDATE murmur.agent_sessions
     SET ended_at = ${now.toISOString()}::timestamptz, end_reason = 'expired'
-    WHERE ended_at IS NULL AND lease_expires_at <= ${now.toISOString()}::timestamptz
+    WHERE tenant_id = ${tenantId.value}::uuid
+      AND (${agentIdValue}::text IS NULL OR agent_id = ${agentIdValue})
+      AND ended_at IS NULL
+      AND lease_expires_at <= ${now.toISOString()}::timestamptz
+  `;
+}
+
+export async function trimRetainedPostgresSessions(
+  transaction: TransactionSql,
+  tenantId: TenantId,
+  agentId: AgentId,
+): Promise<void> {
+  await transaction`
+    WITH counts AS (
+      SELECT COUNT(*) FILTER (WHERE ended_at IS NULL)::int AS live_count
+      FROM murmur.agent_sessions
+      WHERE tenant_id = ${tenantId.value}::uuid AND agent_id = ${agentId.value}
+    ), ranked AS (
+      SELECT generation, session_key,
+        ROW_NUMBER() OVER (
+          ORDER BY ended_at DESC, generation DESC, session_key DESC
+        ) AS ended_rank
+      FROM murmur.agent_sessions
+      WHERE tenant_id = ${tenantId.value}::uuid
+        AND agent_id = ${agentId.value}
+        AND ended_at IS NOT NULL
+    )
+    DELETE FROM murmur.agent_sessions AS target
+    USING ranked, counts
+    WHERE target.tenant_id = ${tenantId.value}::uuid
+      AND target.agent_id = ${agentId.value}
+      AND target.generation = ranked.generation
+      AND target.session_key = ranked.session_key
+      AND ranked.ended_rank > GREATEST(
+        ${MAX_RETAINED_SESSIONS_PER_AGENT} - counts.live_count,
+        0
+      )
   `;
 }
 

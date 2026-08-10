@@ -40,7 +40,7 @@ export async function verifyHostedTenantQuotas(scenario: HostedTenantScenario): 
         "register_agent",
         { agent_id: `quota-agent-${scenario.unique}`, display_name: "Quota rejected" },
       ),
-    ).toContain("tenant agent quota exceeded");
+    ).toContain("Open agent capacity reached");
     expect(
       await callToolExpectingError(
         scenario.server.mcpUrl,

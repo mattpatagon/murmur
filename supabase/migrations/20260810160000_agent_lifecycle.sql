@@ -1,5 +1,7 @@
 begin;
 
+set local lock_timeout = '5s';
+
 alter table murmur.agents
   add column generation integer not null default 1,
   add column closed_at timestamptz,

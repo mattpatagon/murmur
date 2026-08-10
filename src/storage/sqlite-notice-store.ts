@@ -146,8 +146,9 @@ export function postSqliteNotice(
       );
     const row: NoticeRow | null = noticeRow(database, noticeId);
     if (row === null) throw new Error("Inserted notice could not be read back");
+    const result: PostNoticeResult = { duplicate: false, notice: mapNoticeRow(row, now) };
     database.exec("COMMIT");
-    return { duplicate: false, notice: mapNoticeRow(row, now) };
+    return result;
   } catch (error: unknown) {
     database.exec("ROLLBACK");
     throw error;
@@ -232,8 +233,12 @@ export function resolveSqliteNotice(
     const row: NoticeRow = requireNotice(database, command.noticeId);
     if (row.repository_name !== command.repositoryName.value) throw new Error("Unknown notice");
     if (row.resolved_at !== null) {
+      const result: ResolveNoticeResult = {
+        alreadyResolved: true,
+        notice: mapNoticeRow(row, now),
+      };
       database.exec("COMMIT");
-      return { alreadyResolved: true, notice: mapNoticeRow(row, now) };
+      return result;
     }
     if (row.withdrawn_at !== null || !Instant.parse(row.expires_at).isAfter(now)) {
       throw new NoticeStateConflictError();
@@ -258,8 +263,12 @@ export function resolveSqliteNotice(
         command.noticeId.value,
       );
     const updated: NoticeRow = requireNotice(database, command.noticeId);
+    const result: ResolveNoticeResult = {
+      alreadyResolved: false,
+      notice: mapNoticeRow(updated, now),
+    };
     database.exec("COMMIT");
-    return { alreadyResolved: false, notice: mapNoticeRow(updated, now) };
+    return result;
   } catch (error: unknown) {
     database.exec("ROLLBACK");
     throw error;
@@ -277,8 +286,12 @@ export function withdrawSqliteNotice(
     if (row.repository_name !== command.repositoryName.value) throw new Error("Unknown notice");
     if (row.creator_id !== command.actorId.value) throw new NoticeOwnershipError();
     if (row.withdrawn_at !== null) {
+      const result: WithdrawNoticeResult = {
+        alreadyWithdrawn: true,
+        notice: mapNoticeRow(row, now),
+      };
       database.exec("COMMIT");
-      return { alreadyWithdrawn: true, notice: mapNoticeRow(row, now) };
+      return result;
     }
     if (row.resolved_at !== null || !Instant.parse(row.expires_at).isAfter(now)) {
       throw new NoticeStateConflictError();
@@ -303,8 +316,12 @@ export function withdrawSqliteNotice(
         command.noticeId.value,
       );
     const updated: NoticeRow = requireNotice(database, command.noticeId);
+    const result: WithdrawNoticeResult = {
+      alreadyWithdrawn: false,
+      notice: mapNoticeRow(updated, now),
+    };
     database.exec("COMMIT");
-    return { alreadyWithdrawn: false, notice: mapNoticeRow(updated, now) };
+    return result;
   } catch (error: unknown) {
     database.exec("ROLLBACK");
     throw error;

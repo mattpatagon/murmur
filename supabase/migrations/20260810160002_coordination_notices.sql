@@ -1,5 +1,7 @@
 begin;
 
+set local lock_timeout = '5s';
+
 alter table murmur.tenant_resource_usage
   add column notice_count bigint not null default 0,
   add column notice_content_bytes bigint not null default 0,

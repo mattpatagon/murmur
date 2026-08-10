@@ -233,11 +233,11 @@ async function changeNotice(
       if (action === "resolve" && row.resolved_at !== null) {
         return { alreadyChanged: true, notice: mapNoticeRow(row, now) };
       }
-      if (action === "withdraw" && row.withdrawn_at !== null) {
-        return { alreadyChanged: true, notice: mapNoticeRow(row, now) };
-      }
       if (action === "withdraw" && row.creator_id !== command.actorId.value) {
         throw new NoticeOwnershipError();
+      }
+      if (action === "withdraw" && row.withdrawn_at !== null) {
+        return { alreadyChanged: true, notice: mapNoticeRow(row, now) };
       }
       if (
         row.resolved_at !== null ||

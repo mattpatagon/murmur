@@ -70,6 +70,7 @@ import {
 } from "./postgres-notice-store.js";
 import { verifyPostgresMessageSchema } from "./postgres-message-schema.js";
 import { setPostgresTenantContext } from "./postgres-message-transactions.js";
+import { normalizePostgresStorageError } from "./postgres-storage-errors.js";
 
 export { POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED } from "./postgres-message-transactions.js";
 
@@ -273,7 +274,11 @@ export class PostgresMessageStore implements MessageStore {
 
   public async registerAgent(command: RegisterAgentCommand): Promise<RegisterAgentResult> {
     this.ensureOpen();
-    return await registerPostgresAgent(this.database, this.tenantId, command, this.clock.now());
+    try {
+      return await registerPostgresAgent(this.database, this.tenantId, command, this.clock.now());
+    } catch (error: unknown) {
+      throw normalizePostgresStorageError(error);
+    }
   }
 
   public async getAgent(agentId: AgentId): Promise<Agent | null> {
@@ -294,7 +299,11 @@ export class PostgresMessageStore implements MessageStore {
 
   public async closeAgent(command: CloseAgentCommand): Promise<CloseAgentResult> {
     this.ensureOpen();
-    return await closePostgresAgent(this.database, this.tenantId, command, this.clock.now());
+    try {
+      return await closePostgresAgent(this.database, this.tenantId, command, this.clock.now());
+    } catch (error: unknown) {
+      throw normalizePostgresStorageError(error);
+    }
   }
 
   public async broadcastMessage(command: BroadcastMessageCommand): Promise<BroadcastMessageResult> {
@@ -337,7 +346,11 @@ export class PostgresMessageStore implements MessageStore {
     this.ensureOpen();
     const now: Instant = this.clock.now();
     await this.pruneExpired(now);
-    return await postPostgresNotice(this.database, this.tenantId, command, now);
+    try {
+      return await postPostgresNotice(this.database, this.tenantId, command, now);
+    } catch (error: unknown) {
+      throw normalizePostgresStorageError(error);
+    }
   }
 
   public async listNotices(query: ListNoticesQuery): Promise<readonly Notice[]> {
@@ -414,17 +427,21 @@ export class PostgresMessageStore implements MessageStore {
 
   public async pruneExpired(now: Instant): Promise<number> {
     this.ensureOpen();
-    const messageChanges: number = await pruneExpiredPostgresMessages(
-      this.database,
-      this.tenantId,
-      now,
-    );
-    await this.database.begin(async (transaction: TransactionSql): Promise<void> => {
-      await this.setTenantContext(transaction);
-      await prunePostgresNotices(transaction, this.tenantId, now);
-      await prunePostgresLifecycle(transaction, this.tenantId, now);
-    });
-    return messageChanges;
+    try {
+      const messageChanges: number = await pruneExpiredPostgresMessages(
+        this.database,
+        this.tenantId,
+        now,
+      );
+      await this.database.begin(async (transaction: TransactionSql): Promise<void> => {
+        await this.setTenantContext(transaction);
+        await prunePostgresNotices(transaction, this.tenantId, now);
+        await prunePostgresLifecycle(transaction, this.tenantId, now);
+      });
+      return messageChanges;
+    } catch (error: unknown) {
+      throw normalizePostgresStorageError(error);
+    }
   }
 
   public async close(): Promise<void> {

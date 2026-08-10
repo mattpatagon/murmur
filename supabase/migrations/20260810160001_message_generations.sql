@@ -1,17 +1,24 @@
 begin;
 
+set local lock_timeout = '5s';
+
 alter table murmur.messages
   add column sender_generation integer not null default 1,
   add column recipient_generation integer not null default 1,
-  add constraint messages_sender_generation_positive check (sender_generation >= 1),
-  add constraint messages_recipient_generation_positive check (recipient_generation >= 1);
+  add constraint messages_sender_generation_positive check (sender_generation >= 1) not valid,
+  add constraint messages_recipient_generation_positive
+    check (recipient_generation >= 1) not valid;
 
 alter table murmur.broadcasts
   add column sender_generation integer not null default 1,
-  add constraint broadcasts_sender_generation_positive check (sender_generation >= 1);
+  add constraint broadcasts_sender_generation_positive check (sender_generation >= 1) not valid;
 
-create index messages_recipient_generation_sequence
-  on murmur.messages(tenant_id, recipient_id, recipient_generation, tenant_sequence);
+alter table murmur.messages
+  validate constraint messages_sender_generation_positive;
+alter table murmur.messages
+  validate constraint messages_recipient_generation_positive;
+alter table murmur.broadcasts
+  validate constraint broadcasts_sender_generation_positive;
 
 create function murmur.snapshot_message_generations()
 returns trigger

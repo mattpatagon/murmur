@@ -195,6 +195,16 @@ test("any actor resolves, only the stable creator withdraws, and generation bump
       throw new Error("Expected notice withdrawal generation");
     }
     expect(withdrawnGeneration.value).toBe(2);
+    expect(
+      (): WithdrawNoticeResult =>
+        store.withdrawNotice({
+          actorId: AgentId.parse("bob"),
+          noticeId: ownership.notice.noticeId,
+          repositoryName: RepositoryName.parse("mattpatagon/murmur"),
+          resolutionNote: ResolutionNote.parse("still not mine"),
+          sessionKey: SessionKey.parse("bob-pane"),
+        }),
+    ).toThrow("creating agent identity");
   });
 });
 
@@ -212,6 +222,29 @@ test("state filtering happens before pagination", (): void => {
     const page: readonly Notice[] = list(store, "open", 1);
     expect(page).toHaveLength(1);
     expect(requireNotice(page).noticeId.value).toBe(olderOpen.notice.noticeId.value);
+  });
+});
+
+test("SQLite rejects notice actor identifiers that PostgreSQL cannot store", (): void => {
+  withNotices(({ path, store }: NoticeFixture): void => {
+    store.close();
+    const database: Database = new Database(path);
+    try {
+      expect((): void => {
+        database.exec(`
+          INSERT INTO notices(
+            notice_id, kind, creator_id, creator_generation, repository_name,
+            content, created_at, expires_at
+          ) VALUES (
+            '00000000-0000-4000-8000-000000000001', 'handoff', 'invalid creator', 1,
+            'mattpatagon/murmur', 'must fail', '2026-04-01T00:00:00.000Z',
+            '2026-04-02T00:00:00.000Z'
+          )
+        `);
+      }).toThrow("CHECK constraint failed");
+    } finally {
+      database.close();
+    }
   });
 });
 
