@@ -2,6 +2,13 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.4.3.0] - 2026-08-10
+
+### Fixed
+
+- Resume least-privilege database credential rotation through the reachable Supabase admin pooler instead of probing Cloud Run's direct database endpoint from GitHub-hosted runners.
+- Recover safely from interruptions on either side of the database password commit by recognizing staged runtime credentials locally and idempotently reapplying their password before deployment.
+
 ## [0.4.2.0] - 2026-08-09
 
 ### Fixed

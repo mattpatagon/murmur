@@ -208,6 +208,34 @@ test("workflow performs authoritative secret reads before applying migrations", 
   }
 });
 
+test("workflow resumes runtime credentials through the reachable admin database", async (): Promise<void> => {
+  const workflow: string = await Bun.file(".github/workflows/deploy.yml").text();
+  expect(workflow).not.toContain('psql "$candidate_url"');
+  const inspectPosition: number = workflow.indexOf("MURMUR_RUNTIME_DATABASE_URL_TO_INSPECT");
+  const buildPosition: number = workflow.indexOf("Build production image", inspectPosition);
+  const pushPosition: number = workflow.indexOf("Push production image", buildPosition);
+  const compatibilityPosition: number = workflow.indexOf(
+    "Deploy compatibility revision before runtime credential rotation",
+    pushPosition,
+  );
+  const recoverPosition: number = workflow.indexOf(
+    "Recover staged runtime database credential",
+    compatibilityPosition,
+  );
+  const applyPosition: number = workflow.indexOf(
+    "MURMUR_RUNTIME_DATABASE_CREDENTIAL_URL",
+    recoverPosition,
+  );
+  const deployPosition: number = workflow.indexOf("Deploy Cloud Run revision", applyPosition);
+  expect(inspectPosition).toBeGreaterThan(-1);
+  expect(buildPosition).toBeGreaterThan(inspectPosition);
+  expect(pushPosition).toBeGreaterThan(buildPosition);
+  expect(compatibilityPosition).toBeGreaterThan(pushPosition);
+  expect(recoverPosition).toBeGreaterThan(compatibilityPosition);
+  expect(applyPosition).toBeGreaterThan(recoverPosition);
+  expect(deployPosition).toBeGreaterThan(applyPosition);
+});
+
 test("workflows pin every GitHub Action to an immutable commit", async (): Promise<void> => {
   const workflowPaths: readonly string[] = [
     ".github/workflows/ci.yml",

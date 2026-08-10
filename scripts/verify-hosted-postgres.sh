@@ -14,15 +14,10 @@ if [ -z "$admin_url" ]; then
   ')"
 fi
 app_password="${MURMUR_VERIFY_APP_PASSWORD:-murmur_ci_runtime_password_with_32_bytes}"
-app_url="$(MURMUR_BASE_DATABASE_URL="$admin_url" MURMUR_RUNTIME_PASSWORD="$app_password" bun -e '
-  const value = process.env.MURMUR_BASE_DATABASE_URL;
-  const password = process.env.MURMUR_RUNTIME_PASSWORD;
-  if (value === undefined || password === undefined) process.exit(1);
-  const url = new URL(value);
-  url.username = "murmur_app";
-  url.password = password;
-  process.stdout.write(url.toString());
-')"
+app_url="$(MURMUR_RUNTIME_ADMIN_DATABASE_URL="$admin_url" \
+  MURMUR_RUNTIME_DATABASE_TEMPLATE_URL="$admin_url" \
+  MURMUR_RUNTIME_PASSWORD="$app_password" \
+  bun scripts/provision-runtime-database.ts)"
 
 psql "$admin_url" --set ON_ERROR_STOP=1 --command "
   do \$block\$
@@ -37,8 +32,14 @@ psql "$admin_url" --set ON_ERROR_STOP=1 --command "
   \$block\$;
 "
 bunx supabase db push --db-url "$admin_url" --include-all --yes
-psql "$admin_url" --set ON_ERROR_STOP=1 \
-  --command "select murmur.configure_runtime_role_password('$app_password')"
+for recovery_attempt in 1 2; do
+  MURMUR_RUNTIME_ADMIN_DATABASE_URL="$admin_url" \
+    MURMUR_RUNTIME_DATABASE_CREDENTIAL_URL="$app_url" \
+    MURMUR_RUNTIME_APPLY=1 \
+    MURMUR_DATABASE_TLS_INSECURE=1 \
+    bun scripts/provision-runtime-database.ts
+done
+unset recovery_attempt
 
 role_probe="$(psql "$app_url" --tuples-only --no-align \
   --command 'select rolsuper, rolbypassrls from pg_roles where rolname = current_user')"

@@ -183,8 +183,6 @@ jobs:
             --command 'select murmur.operator_has_active_token()')"
           legacy_adopted="$(psql "$database_url" --tuples-only --no-align \
             --command 'select legacy_imported_at is not null from murmur.platform_state where singleton_id = 1')"
-          runtime_provisioned="$(psql "$database_url" --tuples-only --no-align \
-            --command 'select runtime_role_provisioned_at is not null from murmur.platform_state where singleton_id = 1')"
           tenant_contract_version="$(psql "$database_url" --tuples-only --no-align \
             --command 'select tenant_contract_version from murmur.platform_state where singleton_id = 1')"
           if [ "$legacy_adopted" != 't' ]; then
@@ -212,20 +210,22 @@ jobs:
               candidate_url="$(MURMUR_DATABASE_URL_TO_VERIFY="$candidate_url" \
                 bun scripts/require-verified-database-url.ts)"
               echo "::add-mask::$candidate_url"
-              if runtime_role_probe="$(psql "$candidate_url" --tuples-only --no-align \
-                --command "select current_user = 'murmur_app'" 2>/dev/null)"; then
-                if [ "$runtime_role_probe" = 't' ]; then
-                  current_runtime_version="${candidate_version##*/}"
-                  runtime_role_ready=true
-                  unset candidate_url runtime_role_probe
-                  break
-                fi
-                if [ -z "$fallback_runtime_version" ]; then
-                  fallback_runtime_version="${candidate_version##*/}"
-                fi
-                unset candidate_url runtime_role_probe
+              candidate_kind="$(MURMUR_RUNTIME_DATABASE_URL_TO_INSPECT="$candidate_url" \
+                bun scripts/provision-runtime-database.ts)"
+              if [ "$candidate_kind" = 'runtime' ]; then
+                current_runtime_version="${candidate_version##*/}"
+                runtime_role_ready=true
+                unset candidate_url candidate_kind
+                break
               fi
-              unset candidate_url
+              if [ "$candidate_kind" != 'template' ]; then
+                echo "MURMUR_DATABASE_URL version ${candidate_version##*/} has an invalid credential kind" >&2
+                exit 1
+              fi
+              if [ -z "$fallback_runtime_version" ]; then
+                fallback_runtime_version="${candidate_version##*/}"
+              fi
+              unset candidate_url candidate_kind
             fi
           done < <(gcloud secrets versions list MURMUR_DATABASE_URL \
             --project "$PROJECT_ID" \
@@ -236,7 +236,7 @@ jobs:
             current_runtime_version="$fallback_runtime_version"
           fi
           if [ -z "$current_runtime_version" ]; then
-            echo 'MURMUR_DATABASE_URL has no enabled version that can connect' >&2
+            echo 'MURMUR_DATABASE_URL has no enabled version' >&2
             exit 1
           fi
           echo "RUNTIME_DATABASE_SECRET_VERSION=$current_runtime_version" >> "$GITHUB_ENV"
@@ -251,13 +251,11 @@ jobs:
             echo 'ADOPTION_REQUIRED=true' >> "$GITHUB_ENV"
           fi
           if [ "$runtime_role_ready" = 'true' ]; then
-            if [ "$runtime_provisioned" != 't' ]; then
-              psql "$database_url" --set ON_ERROR_STOP=1 \
-                --command 'update murmur.platform_state set runtime_role_provisioned_at = statement_timestamp() where singleton_id = 1'
-            fi
             echo 'RUNTIME_PROVISION_REQUIRED=false' >> "$GITHUB_ENV"
+            echo 'RUNTIME_DATABASE_RECOVERY_REQUIRED=true' >> "$GITHUB_ENV"
           else
             echo 'RUNTIME_PROVISION_REQUIRED=true' >> "$GITHUB_ENV"
+            echo 'RUNTIME_DATABASE_RECOVERY_REQUIRED=false' >> "$GITHUB_ENV"
           fi
           case "$tenant_contract_version" in
             1)
@@ -326,6 +324,37 @@ jobs:
             --timeout 3600 \
             --quiet
           curl --fail --silent --show-error "$PRODUCTION_URL/health" >/dev/null
+
+      - name: Recover staged runtime database credential
+        if: env.RUNTIME_DATABASE_RECOVERY_REQUIRED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          admin_database_url="$(gcloud secrets versions access latest \
+            --project "$PROJECT_ID" \
+            --secret MURMUR_CI_DATABASE_URL)"
+          echo "::add-mask::$admin_database_url"
+          admin_database_url="$(MURMUR_DATABASE_URL_TO_VERIFY="$admin_database_url" \
+            bun scripts/require-verified-database-url.ts)"
+          echo "::add-mask::$admin_database_url"
+          runtime_database_url="$(gcloud secrets versions access "$RUNTIME_DATABASE_SECRET_VERSION" \
+            --project "$PROJECT_ID" \
+            --secret MURMUR_DATABASE_URL)"
+          echo "::add-mask::$runtime_database_url"
+          runtime_database_url="$(MURMUR_DATABASE_URL_TO_VERIFY="$runtime_database_url" \
+            bun scripts/require-verified-database-url.ts)"
+          echo "::add-mask::$runtime_database_url"
+          runtime_database_kind="$(MURMUR_RUNTIME_DATABASE_URL_TO_INSPECT="$runtime_database_url" \
+            bun scripts/provision-runtime-database.ts)"
+          if [ "$runtime_database_kind" != 'runtime' ]; then
+            echo 'The staged runtime database credential changed after migration verification' >&2
+            exit 1
+          fi
+          MURMUR_RUNTIME_ADMIN_DATABASE_URL="$admin_database_url" \
+            MURMUR_RUNTIME_DATABASE_CREDENTIAL_URL="$runtime_database_url" \
+            MURMUR_RUNTIME_APPLY=1 \
+            bun scripts/provision-runtime-database.ts
+          unset admin_database_url runtime_database_kind runtime_database_url
 
       - name: Rotate least-privilege runtime database credential
         if: env.RUNTIME_PROVISION_REQUIRED == 'true'
