@@ -11,6 +11,7 @@
 - [ ] `bun run verify`
 - [ ] `bun run test`
 - [ ] `bun run test:portability`
+- [ ] `bun run test:linux`, or not applicable with reason below
 - [ ] `bun run build`
 - [ ] `bun run build:http`
 - [ ] Hosted PostgreSQL/RLS/upgrade/coverage gate, or not applicable with reason below

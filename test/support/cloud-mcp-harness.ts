@@ -10,6 +10,7 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Sql } from "postgres";
 import type { z } from "zod";
 
+import { databaseUrlForDocker } from "../../scripts/require-cross-platform-test.js";
 import { FOUNDING_TENANT_ID } from "../../src/domain/value-objects.js";
 import { POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED } from "../../src/storage/postgres-message-store.js";
 
@@ -168,6 +169,8 @@ export async function connectDockerClient(
       "run",
       "--rm",
       "--interactive",
+      "--add-host",
+      "host.docker.internal:host-gateway",
       "--mount",
       `type=bind,source=${PROJECT_ROOT},target=/workspace,readonly`,
       "--workdir",
@@ -188,7 +191,7 @@ export async function connectDockerClient(
       "src/server.ts",
     ],
     command: "docker",
-    env: hostChildEnvironment(databaseUrl),
+    env: hostChildEnvironment(databaseUrlForDocker(databaseUrl)),
     stderr: "inherit",
   });
   await client.connect(transport);

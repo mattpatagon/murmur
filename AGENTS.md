@@ -41,7 +41,9 @@ without its provisioned hosted-test environment. The authoritative gate is
 every included source file's line coverage must exceed 80%, and no source file may disappear from
 the report.
 Run `bun run test:portability` when changing paths, configuration, storage, entry points, or HTTP
-behavior. See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete command table.
+behavior. Run `bun run test:linux` with disposable PostgreSQL when changing packaging, Docker, or
+cross-process database behavior; CI must execute this host-to-container gate without skips. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the complete command table.
 
 Never weaken a threshold, exclusion, rule, or pinned exception to make a change pass. Fix the
 implementation or add meaningful tests. Any unavoidable exception needs a narrow scope, a reason,

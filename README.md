@@ -181,6 +181,8 @@ broadcast snapshots, process-to-process delivery, hosted role boundaries,
 tenant isolation, RLS, request limits, operator bootstrap/rotation, migrations,
 deployment ordering, and cross-platform configuration. Cloud tests require
 `MURMUR_TEST_DATABASE_URL`; Linux-container portability also requires Docker.
+CI runs that host-to-container test against disposable PostgreSQL 17; loopback database addresses
+are translated only at the Docker boundary so the child container reaches the runner service.
 
 Dependencies are exact-pinned, installs use the frozen Bun lockfile, and
 `bunfig.toml` rejects package releases newer than 72 hours.

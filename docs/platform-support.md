@@ -9,8 +9,9 @@ configuration for Codex and Claude, stdio package entry points, HTTP logic, and 
 Every pull request runs `bun install --frozen-lockfile`, `bun run verify`,
 `bun run test:portability`, `bun run build`, and `bun run build:http` on Ubuntu, macOS, and Windows.
 Ubuntu additionally runs PostgreSQL 17, TLS, RLS, populated upgrades, hosted integration, and the
-authoritative coverage gate. Linux-only deployment scripts are separately exercised by CI and the
-production workflow.
+authoritative coverage gate. It also starts Murmur once on the runner and once in a clean Linux Bun
+container, then proves bidirectional MCP delivery through the shared PostgreSQL service. Linux-only
+deployment scripts are separately exercised by CI and the production workflow.
 
 Platform support means a change cannot merge when a matrix job fails. It does not mean every
 operator convenience script is portable.
@@ -59,6 +60,9 @@ SQLite local mode needs no external service. PostgreSQL integration requires a r
 17 instance and TLS configuration; the authoritative scripts additionally require Bash, Docker, and
 PostgreSQL client tools on Linux. Cloud Run deployment requires the tools listed in
 [hosted-deployment.md](hosted-deployment.md).
+
+The host-to-container gate rewrites only loopback database hostnames to Docker's runner gateway and
+adds that gateway explicitly on Linux. Remote PostgreSQL hostnames are preserved unchanged.
 
 ## Reporting a platform defect
 

@@ -37,6 +37,7 @@ hosted verifier creates isolated roles and databases; never aim it at production
 | `bun run verify` | Strict types, zero-warning Biome, safety AST, 500-line, dependency, and format gates |
 | `bun run test` | Environment-independent full suite; hosted and cross-machine cases report explicit skips when their external fixtures are absent |
 | `bun run test:portability` | Platform-safe unit and integration suite used on Linux, macOS, and Windows |
+| `bun run test:linux` | Required host-to-Linux-container MCP test; needs Docker and `MURMUR_TEST_DATABASE_URL` for disposable PostgreSQL 17 |
 | `bun run test:coverage` | Strict coverage for an already-provisioned hosted-test environment; fails early instead of auditing skipped hosted code |
 | `MURMUR_VERIFY_COVERAGE=1 bash scripts/verify-hosted-postgres.sh` | Authoritative PostgreSQL 17, RLS, upgrade, and hosted coverage gate |
 | `bun run build` | Bundles the stdio MCP entry point |
@@ -44,8 +45,9 @@ hosted verifier creates isolated roles and databases; never aim it at production
 | `bun run format` | Applies deterministic Biome formatting |
 
 The full hosted test needs an isolated database administrator URL as documented by the script. CI
-supplies it through a disposable PostgreSQL service. Environment-backed tests may skip locally;
-that does not replace the required CI result.
+supplies it through a disposable PostgreSQL service, then runs the Linux-container test against the
+same service. Environment-backed tests may skip in `bun run test`; that does not replace either
+required CI result.
 
 ## Change design
 

@@ -5,7 +5,10 @@ import { expect, test } from "bun:test";
 import { z } from "zod";
 
 import { validateHostedCoverageEnvironment } from "../scripts/require-hosted-coverage.js";
-import { validateCrossPlatformTestEnvironment } from "../scripts/require-cross-platform-test.js";
+import {
+  databaseUrlForDocker,
+  validateCrossPlatformTestEnvironment,
+} from "../scripts/require-cross-platform-test.js";
 
 const projectRoot: string = resolve(".");
 
@@ -123,6 +126,7 @@ test("CI enforces the portable contract on Linux, macOS, and Windows", (): void 
   expect(workflow).toContain("bun install --frozen-lockfile");
   expect(workflow).toContain("bun run verify");
   expect(workflow).toContain("bun run test:portability");
+  expect(workflow).toContain("bun run test:linux");
   expect(workflow).toContain("bun run build\n");
   expect(workflow).toContain("bun run build:http");
 });
@@ -149,6 +153,18 @@ test("the Linux-container command cannot silently skip its required environment"
       "/usr/bin/docker",
     ),
   ).not.toThrow();
+});
+
+test("the Linux-container database URL crosses the runner boundary", (): void => {
+  expect(databaseUrlForDocker("postgresql://database.example/murmur")).toBe(
+    "postgresql://database.example/murmur",
+  );
+  expect(databaseUrlForDocker("postgresql://localhost:5432/murmur")).toBe(
+    "postgresql://host.docker.internal:5432/murmur",
+  );
+  expect(databaseUrlForDocker("postgres://127.0.0.1:5432/murmur?sslmode=disable")).toBe(
+    "postgres://host.docker.internal:5432/murmur?sslmode=disable",
+  );
 });
 
 test("strict coverage cannot silently skip its hosted PostgreSQL environment", (): void => {

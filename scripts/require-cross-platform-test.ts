@@ -2,6 +2,19 @@ import process from "node:process";
 
 import { parseDatabaseUrl } from "../src/database-url.js";
 
+const DOCKER_HOST_NAME: string = "host.docker.internal";
+const LOOPBACK_HOST_NAMES: ReadonlySet<string> = new Set<string>([
+  "127.0.0.1",
+  "[::1]",
+  "localhost",
+]);
+
+export function databaseUrlForDocker(databaseUrl: string): string {
+  const parsed: URL = parseDatabaseUrl(databaseUrl);
+  if (LOOPBACK_HOST_NAMES.has(parsed.hostname)) parsed.hostname = DOCKER_HOST_NAME;
+  return parsed.toString();
+}
+
 export function validateCrossPlatformTestEnvironment(
   environment: NodeJS.ProcessEnv,
   dockerExecutable: string | null,
