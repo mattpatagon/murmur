@@ -1,6 +1,6 @@
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 
 import { expect, test } from "bun:test";
 
@@ -58,23 +58,23 @@ test("derives a stable agent ID from machine, client, and workspace", (): void =
 
 test("resolves hook cache roots consistently across operating systems", (): void => {
   expect(defaultHookCacheDirectory({ XDG_CACHE_HOME: "/var/cache/test" }, "linux")).toBe(
-    join("/var/cache/test", "murmur", "hooks"),
+    posix.join("/var/cache/test", "murmur", "hooks"),
   );
   expect(
     defaultHookCacheDirectory({ LOCALAPPDATA: "C:\\Users\\test\\AppData\\Local" }, "win32"),
-  ).toBe(join("C:\\Users\\test\\AppData\\Local", "murmur", "hooks"));
+  ).toBe(win32.join("C:\\Users\\test\\AppData\\Local", "murmur", "hooks"));
   expect(defaultHookCacheDirectory({ USERPROFILE: "C:\\Users\\test" }, "win32")).toBe(
-    join("C:\\Users\\test", "AppData", "Local", "murmur", "hooks"),
+    win32.join("C:\\Users\\test", "AppData", "Local", "murmur", "hooks"),
   );
   expect(defaultHookCacheDirectory({ HOME: "/home/test" }, "linux")).toBe(
-    join("/home/test", ".cache", "murmur", "hooks"),
+    posix.join("/home/test", ".cache", "murmur", "hooks"),
   );
   expect(
     defaultHookCacheDirectory(
       { LOCALAPPDATA: "", USERPROFILE: "C:\\Users\\test", XDG_CACHE_HOME: " " },
       "win32",
     ),
-  ).toBe(join("C:\\Users\\test", "AppData", "Local", "murmur", "hooks"));
+  ).toBe(win32.join("C:\\Users\\test", "AppData", "Local", "murmur", "hooks"));
 });
 
 test("builds metadata-only notification output and a Claude terminal signal", (): void => {

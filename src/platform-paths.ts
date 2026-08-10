@@ -1,6 +1,12 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { posix, win32 } from "node:path";
 import process from "node:process";
+
+export type PathJoin = (...paths: string[]) => string;
+
+export function pathJoinForPlatform(platform: NodeJS.Platform): PathJoin {
+  return platform === "win32" ? win32.join : posix.join;
+}
 
 export function environmentPath(environment: NodeJS.ProcessEnv, name: string): string | null {
   const value: string | undefined = environment[name];
@@ -28,6 +34,7 @@ export function defaultHookCacheDirectory(
   environment: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
 ): string {
+  const join: PathJoin = pathJoinForPlatform(platform);
   const xdgCacheHome: string | null = environmentPath(environment, "XDG_CACHE_HOME");
   if (xdgCacheHome !== null) return join(xdgCacheHome, "murmur", "hooks");
   if (platform === "win32") {
