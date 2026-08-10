@@ -79,16 +79,16 @@ function baseHeaderInput(): EnvelopeHeaderInput {
     messageKind: "message",
     orchestratorPolicyId: null,
     pairCounter: 1,
-    recipientAgentKeyId: "mak_recipient",
+    recipientAgentKeyId: `mak_${"A".repeat(43)}`,
     recipientId: "machine-b:codex:repo-b:recipient",
     recipientPrekeyClass: "one_time",
-    recipientPrekeyId: "mpk_recipient",
-    recipientRootKeyId: "mrk_recipient",
+    recipientPrekeyId: `mpk_${"B".repeat(43)}`,
+    recipientRootKeyId: `mrk_${"C".repeat(43)}`,
     repositoryName: "mattpatagon/murmur",
-    senderAgentKeyId: "mak_sender",
+    senderAgentKeyId: `mak_${"D".repeat(43)}`,
     senderAuthority: "peer",
     senderId: "machine-a:codex:repo-a:sender",
-    senderRootKeyId: "mrk_sender",
+    senderRootKeyId: `mrk_${"E".repeat(43)}`,
     tenantId: "22222222-2222-4222-8222-222222222222",
     threadId: "33333333-3333-4333-8333-333333333333",
   };
@@ -271,13 +271,13 @@ test("uses fixed canonical buckets and a stable outer-header vector", async (): 
   expect(paddedInnerLength(512)).toBe(512);
   expect(paddedInnerLength(513)).toBe(1024);
   expect((): number => paddedInnerLength(512 * 1024 + 1)).toThrow("exceeds");
-  const header: EnvelopeHeader = completeEnvelopeHeader(baseHeaderInput(), 512);
+  const header: EnvelopeHeader = completeEnvelopeHeader(baseHeaderInput(), 1024);
   const encoded: Uint8Array = encodeEnvelopeHeader(header);
   const digest: Uint8Array = sodium.crypto_generichash(32, encoded, null);
-  expect(encoded.byteLength).toBe(532);
+  expect(encoded.byteLength).toBe(708);
   expect(sodium.to_hex(digest)).toBe(
     // biome-ignore lint/security/noSecrets: This is the documented public vector digest, not secret material.
-    "b723ef14605f2d1f3244fbcf93f75c0aa8108d0f2be024a6004a71d513eb2de7",
+    "feac7159f60e1f6760d2c2e589b19fd221279b71e12d226feda484d4ec2cd95a",
   );
   sodium.memzero(digest);
 });

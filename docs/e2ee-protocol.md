@@ -88,15 +88,28 @@ ephemeral X25519 key and `crypto_box_easy`; signing uses the sender agent's Ed25
 
 ## Fixed vector
 
-`test/e2ee-protocol.test.ts` defines the complete input for the first public vector. With a padded
-length of 512, the canonical outer header is 532 bytes and has BLAKE2b-256 digest:
+`test/e2ee-protocol.test.ts` defines the complete input for the first public vector. Its key IDs use
+the production prefix plus full 32-byte-digest shape. With a padded length of 1,024, the canonical
+outer header is 708 bytes and has BLAKE2b-256 digest:
 
 ```text
-b723ef14605f2d1f3244fbcf93f75c0aa8108d0f2be024a6004a71d513eb2de7
+feac7159f60e1f6760d2c2e589b19fd221279b71e12d226feda484d4ec2cd95a
 ```
 
 Implementations must reproduce this digest before attempting envelope interoperability. Runtime
 encryption chooses a larger bucket when the outer copy plus plaintext cannot fit in 512 bytes.
+
+`scripts/e2ee-independent-verifier.ts` independently reimplements the canonical encoder and public
+certificate/signature checks without importing runtime E2E modules. Run its bounded CLI with:
+
+```sh
+bun run scripts/verify-e2ee-capture.ts CAPTURE.json 2026-08-10T18:00:00.000Z
+```
+
+The capture contains the public sender/recipient chains and the encrypted envelope only. A passing
+result proves integrity relative to those public roots and reports their full fingerprints; it does
+not make a self-presented root trusted. Compare the sender root fingerprint with an out-of-band pin
+or verified organization policy before treating the sender identity as verified.
 
 ## Required receiver order
 
