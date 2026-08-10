@@ -7,6 +7,7 @@ import type {
 
 const FETCH_TIMEOUT_MS: number = 30_000;
 const MAX_RESPONSE_BYTES: number = 64 * 1024 * 1024;
+const SESSION_ID_PATTERN: RegExp = /^[\x21-\x7e]{1,128}$/u;
 
 function responseMediaType(response: Response): string {
   const contentType: string | null = response.headers.get("content-type");
@@ -152,7 +153,13 @@ export class BoundedHttpClientTransport implements Transport {
         signal,
       });
       const sessionId: string | null = response.headers.get("mcp-session-id");
-      if (sessionId !== null && sessionId.trim() !== "") this.#sessionId = sessionId;
+      if (sessionId !== null) {
+        if (!SESSION_ID_PATTERN.test(sessionId)) {
+          if (response.body !== null) await response.body.cancel();
+          throw new Error("The encrypted Murmur HTTP session identifier is invalid");
+        }
+        this.#sessionId = sessionId;
+      }
       if (!response.ok) {
         if (response.body !== null) await response.body.cancel();
         throw new Error("The encrypted Murmur HTTP service rejected the request");

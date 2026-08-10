@@ -196,6 +196,42 @@ test("connects over bounded Streamable HTTP with authenticated project context",
   }
 });
 
+test("rejects an unbounded or non-visible hosted session identifier", async (): Promise<void> => {
+  const server: ReturnType<typeof Bun.serve> = Bun.serve({
+    fetch: async (request: Request): Promise<Response> => {
+      const input: unknown = await request.json();
+      if (typeof input !== "object" || input === null || Array.isArray(input)) {
+        return Response.json({ error: "invalid" }, { status: 400 });
+      }
+      const id: unknown = Reflect.get(input, "id");
+      return Response.json(
+        {
+          id,
+          jsonrpc: "2.0",
+          result: {
+            capabilities: { tools: {} },
+            protocolVersion: "2025-11-25",
+            serverInfo: { name: "test-murmur", version: "1.0.0" },
+          },
+        },
+        { headers: { "mcp-session-id": "x".repeat(129) } },
+      );
+    },
+    hostname: "127.0.0.1",
+    port: 0,
+  });
+  try {
+    await expect(
+      E2eeHttpRemoteClient.connect({
+        ...CONFIG,
+        endpoint: `http://127.0.0.1:${server.port}/mcp`,
+      }),
+    ).rejects.toThrow("encrypted Murmur service connection failed");
+  } finally {
+    server.stop(true);
+  }
+});
+
 test("rejects insecure external endpoints and unsafe configuration before connecting", async (): Promise<void> => {
   await expect(
     E2eeHttpRemoteClient.connect({ ...CONFIG, endpoint: "http://example.com/mcp" }),
