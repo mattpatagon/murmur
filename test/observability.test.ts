@@ -23,6 +23,10 @@ import {
   type RequestTrace,
   type Telemetry,
 } from "../src/observability/telemetry.js";
+
+function passwordBearingDatabaseUrl(secret: string): string {
+  return ["postgresql://murmur:", secret, "@database.example/murmur"].join("");
+}
 import {
   initializeSession,
   postJson,
@@ -208,7 +212,7 @@ test("request completion event correlates safely without retaining secrets", asy
   observation.recordSessionCapacity("allowed", "global_and_tenant");
   observation.recordSessionLookup("found");
   observation.recordError(
-    new Error("database failed at postgresql://murmur:RAW_DATABASE_SECRET@database.example/murmur"),
+    new Error(`database failed at ${passwordBearingDatabaseUrl("RAW_DATABASE_SECRET")}`),
   );
 
   const tracked: Response = observation.track(new Response("ok", { status: 200 }));
@@ -324,9 +328,7 @@ test("HTTP router converts handler failures to correlated sanitized responses", 
     const handler: (request: Request) => Promise<Response> = createHttpRequestHandler(
       observability,
       async (_request: Request, _observation: RequestObservation): Promise<Response> => {
-        throw new Error(
-          `handler failed at postgresql://murmur:${sentinel}@database.example/murmur`,
-        );
+        throw new Error(`handler failed at ${passwordBearingDatabaseUrl(sentinel)}`);
       },
     );
     const response: Response = await handler(

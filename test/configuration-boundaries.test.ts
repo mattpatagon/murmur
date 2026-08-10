@@ -23,11 +23,12 @@ import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
 
 test("database URL errors are explicit and redact the rejected value", (): void => {
   const sentinel: string = "invalid-database-password";
-  expect((): URL => parseDatabaseUrl(`postgresql://user:${sentinel}@[`)).toThrow(
+  const malformedUrl: string = ["postgresql://user:", sentinel, "@["].join("");
+  expect((): URL => parseDatabaseUrl(malformedUrl)).toThrow(
     "The configured Postgres database URL is invalid",
   );
   try {
-    parseDatabaseUrl(`postgresql://user:${sentinel}@[`);
+    parseDatabaseUrl(malformedUrl);
     throw new Error("Malformed URL unexpectedly parsed");
   } catch (error: unknown) {
     expect(String(error)).not.toContain(sentinel);
