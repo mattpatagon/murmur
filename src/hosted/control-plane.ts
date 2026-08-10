@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
 
-import postgres, { type Sql, type TransactionSql } from "postgres";
+import postgres, { type Sql } from "postgres";
 import { z } from "zod";
 
-import { type Instant, TenantId } from "../domain/value-objects.js";
+import type { OrchestratorPolicyId, PersonalId } from "../domain/orchestration.js";
+import type { AgentId, Instant, RepositoryName, TenantId } from "../domain/value-objects.js";
 import { type PostgresSslOptions, postgresSslOptions } from "../postgres-tls.js";
 import type {
   AdminAuditEvent,
+  AskOrchestratorCommand,
   CredentialAdmission,
+  EffectiveOrchestrator,
   HostedControlPlane,
   HostedPrincipal,
   HostedTlsConfiguration,
@@ -15,7 +18,11 @@ import type {
   IssuedToken,
   OperatorPrincipal,
   OperatorTokenSummary,
+  OrchestrationRequestResult,
+  OrchestratorPolicy,
+  OrchestratorScope,
   Page,
+  TenantPrincipal,
   TenantSummary,
   TenantTokenRole,
   TokenSummary,
@@ -29,24 +36,40 @@ import {
 import {
   BooleanRowSchema,
   mapOperatorToken,
-  mapTenant,
-  mapToken,
   NullableTokenIdRowSchema,
   OperatorTokenRowSchema,
   onlyRow,
   page,
-  TenantRowSchema,
-  type TokenIdRow,
-  TokenIdRowSchema,
-  TokenRowSchema,
 } from "./control-plane-rows.js";
 import { HostedAuthenticator } from "./hosted-authenticator.js";
-import { issueOperatorToken, issueToken, providedOperatorToken } from "./token-issuance.js";
+import {
+  changePostgresTenantStatus,
+  createPostgresTenant,
+  listPostgresTenants,
+  mintPostgresTenantAdminToken,
+} from "./operator-tenant-control-plane.js";
+import {
+  askPostgresOrchestrator,
+  clearPostgresOrchestratorPolicy,
+  getPostgresDelegation,
+  resolvePostgresOrchestrator,
+  setPostgresOrchestratorPolicy,
+} from "./orchestration-control-plane.js";
+import { listPostgresOrchestratorPolicies } from "./orchestration-policy-list.js";
+import {
+  createPostgresOrchestratorToken,
+  createPostgresTenantToken,
+  listPostgresTenantTokens,
+  revokePostgresTenantToken,
+} from "./tenant-token-control-plane.js";
+import { issueOperatorToken, providedOperatorToken } from "./token-issuance.js";
 
 export type {
   AdminAuditEvent,
+  AskOrchestratorCommand,
   BootstrapPrincipal,
   CredentialAdmission,
+  EffectiveOrchestrator,
   HostedControlPlane,
   HostedPrincipal,
   HostedTlsConfiguration,
@@ -54,6 +77,9 @@ export type {
   IssuedToken,
   OperatorPrincipal,
   OperatorTokenSummary,
+  OrchestrationRequestResult,
+  OrchestratorPolicy,
+  OrchestratorScope,
   Page,
   TenantPrincipal,
   TenantStatus,
@@ -108,12 +134,6 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
 
   private async ensureSchema(): Promise<void> {
     await verifyHostedControlPlaneSchema(this.database);
-  }
-
-  private async setTenantContext(transaction: TransactionSql, tenantId: TenantId): Promise<void> {
-    await transaction`
-      SELECT pg_catalog.set_config('murmur.tenant_id', ${tenantId.value}, true)
-    `;
   }
 
   public async authenticate(token: string): Promise<HostedPrincipal | null> {
@@ -247,105 +267,119 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
   }
 
   public async createToken(
-    tenantId: TenantId,
+    principal: TenantPrincipal,
     role: TenantTokenRole,
     name: string,
     expiresAt: Instant | null,
+    personalId: PersonalId | null,
+    repositoryName: RepositoryName | null,
   ): Promise<IssuedToken> {
     this.ensureOpen();
-    const issued: ReturnType<typeof issueToken> = issueToken(tenantId, role, name, expiresAt);
-    await this.database.begin(async (transaction: TransactionSql): Promise<void> => {
-      await this.setTenantContext(transaction, tenantId);
-      await transaction`
-        DELETE FROM murmur.access_tokens
-        WHERE tenant_id = ${tenantId.value}::uuid
-          AND (
-            revoked_at IS NOT NULL
-            OR expires_at <= pg_catalog.statement_timestamp()
-          )
-      `;
-      await transaction`
-        INSERT INTO murmur.access_tokens(
-          token_id, tenant_id, key_id, secret_hash, token_role, name, expires_at
-        ) VALUES (
-          ${issued.token.tokenId}::uuid,
-          ${tenantId.value}::uuid,
-          ${issued.token.keyId},
-          ${issued.hash},
-          ${role},
-          ${name},
-          ${expiresAt === null ? null : expiresAt.toISOString()}::timestamptz
-        )
-      `;
-    });
+    const token: IssuedToken = await createPostgresTenantToken(
+      this.database,
+      principal,
+      role,
+      name,
+      expiresAt,
+      personalId,
+      repositoryName,
+    );
     await this.refreshCredentialAdmissions();
-    return issued.token;
+    return token;
   }
 
   public async listTokens(
-    tenantId: TenantId,
+    principal: TenantPrincipal,
     cursor: string | null,
     limit: number,
   ): Promise<Page<TokenSummary>> {
     this.ensureOpen();
-    return await this.database.begin(
-      async (transaction: TransactionSql): Promise<Page<TokenSummary>> => {
-        await this.setTenantContext(transaction, tenantId);
-        const rawRows: unknown = await transaction`
-          SELECT
-            token_id::text AS token_id,
-            key_id,
-            token_role,
-            name,
-            to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
-            CASE WHEN expires_at IS NULL THEN NULL ELSE
-              to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-            END AS expires_at,
-            CASE WHEN revoked_at IS NULL THEN NULL ELSE
-              to_char(revoked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-            END AS revoked_at,
-            CASE WHEN last_used_at IS NULL THEN NULL ELSE
-              to_char(last_used_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-            END AS last_used_at
-          FROM murmur.access_tokens
-          WHERE tenant_id = ${tenantId.value}::uuid
-            AND (
-              ${cursor}::uuid IS NULL
-              OR (created_at, token_id) < (
-                SELECT cursor_token.created_at, cursor_token.token_id
-                FROM murmur.access_tokens AS cursor_token
-                WHERE cursor_token.tenant_id = ${tenantId.value}::uuid
-                  AND cursor_token.token_id = ${cursor}::uuid
-              )
-            )
-          ORDER BY created_at DESC, token_id DESC
-          LIMIT ${limit + 1}
-        `;
-        const items: readonly TokenSummary[] = z.array(TokenRowSchema).parse(rawRows).map(mapToken);
-        return page(items, limit, (item: TokenSummary): string => item.tokenId);
-      },
+    return await listPostgresTenantTokens(this.database, principal, cursor, limit);
+  }
+
+  public async revokeToken(principal: TenantPrincipal, keyId: string): Promise<string | null> {
+    this.ensureOpen();
+    const tokenId: string | null = await revokePostgresTenantToken(this.database, principal, keyId);
+    await this.refreshCredentialAdmissions();
+    return tokenId;
+  }
+
+  public async createOrchestratorToken(
+    principal: TenantPrincipal,
+    agentId: AgentId,
+    name: string,
+    expiresAt: Instant | null,
+    personalId: PersonalId | null,
+    repositoryName: RepositoryName | null,
+  ): Promise<IssuedToken> {
+    this.ensureOpen();
+    const token: IssuedToken = await createPostgresOrchestratorToken(
+      this.database,
+      principal,
+      agentId,
+      name,
+      expiresAt,
+      personalId,
+      repositoryName,
+    );
+    await this.refreshCredentialAdmissions();
+    return token;
+  }
+
+  public async setOrchestratorPolicy(
+    principal: TenantPrincipal,
+    scope: OrchestratorScope,
+    orchestratorKeyId: string,
+    instructions: string,
+  ): Promise<OrchestratorPolicy> {
+    this.ensureOpen();
+    return await setPostgresOrchestratorPolicy(
+      this.database,
+      principal,
+      scope,
+      orchestratorKeyId,
+      instructions,
     );
   }
 
-  public async revokeToken(tenantId: TenantId, keyId: string): Promise<string | null> {
+  public async clearOrchestratorPolicy(
+    principal: TenantPrincipal,
+    scope: OrchestratorScope,
+  ): Promise<boolean> {
     this.ensureOpen();
-    const tokenId: string | null = await this.database.begin(
-      async (transaction: TransactionSql): Promise<string | null> => {
-        await this.setTenantContext(transaction, tenantId);
-        const rawRows: unknown = await transaction`
-          UPDATE murmur.access_tokens
-          SET revoked_at = pg_catalog.statement_timestamp()
-          WHERE tenant_id = ${tenantId.value}::uuid
-            AND key_id = ${keyId}
-            AND revoked_at IS NULL
-          RETURNING token_id::text AS token_id
-        `;
-        const row: TokenIdRow | undefined = z.array(TokenIdRowSchema).parse(rawRows)[0];
-        return row === undefined ? null : row.token_id;
-      },
-    );
-    await this.refreshCredentialAdmissions();
-    return tokenId;
+    return await clearPostgresOrchestratorPolicy(this.database, principal, scope);
+  }
+
+  public async listOrchestratorPolicies(
+    principal: TenantPrincipal,
+    cursor: string | null,
+    limit: number,
+  ): Promise<Page<OrchestratorPolicy>> {
+    this.ensureOpen();
+    return await listPostgresOrchestratorPolicies(this.database, principal, cursor, limit);
+  }
+
+  public async resolveOrchestrator(
+    principal: TenantPrincipal,
+  ): Promise<EffectiveOrchestrator | null> {
+    this.ensureOpen();
+    return await resolvePostgresOrchestrator(this.database, principal);
+  }
+
+  public async askOrchestrator(
+    principal: TenantPrincipal,
+    command: AskOrchestratorCommand,
+  ): Promise<OrchestrationRequestResult> {
+    this.ensureOpen();
+    return await askPostgresOrchestrator(this.database, principal, command);
+  }
+
+  public async getDelegation(
+    principal: TenantPrincipal,
+    policyId: OrchestratorPolicyId,
+  ): Promise<OrchestratorPolicy | null> {
+    this.ensureOpen();
+    return await getPostgresDelegation(this.database, principal, policyId);
   }
 
   public async createTenant(
@@ -354,39 +388,10 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
     displayName: string,
   ): Promise<{ readonly tenant: TenantSummary; readonly token: IssuedToken }> {
     this.ensureOpen();
-    const tenantId: TenantId = TenantId.generate();
-    const issued: ReturnType<typeof issueToken> = issueToken(
-      tenantId,
-      "tenant_admin",
-      "Initial tenant administrator",
-      null,
-    );
-    const rawRows: unknown = await this.database`
-      SELECT
-        tenant_id::text AS tenant_id,
-        slug,
-        display_name,
-        status,
-        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
-        CASE WHEN suspended_at IS NULL THEN NULL ELSE
-          to_char(suspended_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-        END AS suspended_at
-      FROM murmur.operator_create_tenant(
-        ${principal.credentialHash},
-        ${tenantId.value}::uuid,
-        ${slug},
-        ${displayName},
-        ${issued.token.tokenId}::uuid,
-        ${issued.token.keyId},
-        ${issued.hash},
-        ${issued.token.name}
-      )
-    `;
-    const tenant: TenantSummary = mapTenant(
-      onlyRow(z.array(TenantRowSchema).parse(rawRows), "create tenant"),
-    );
+    const created: { readonly tenant: TenantSummary; readonly token: IssuedToken } =
+      await createPostgresTenant(this.database, principal, slug, displayName);
     await this.refreshCredentialAdmissions();
-    return { tenant, token: issued.token };
+    return created;
   }
 
   public async listTenants(
@@ -395,24 +400,7 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
     limit: number,
   ): Promise<Page<TenantSummary>> {
     this.ensureOpen();
-    const rawRows: unknown = await this.database`
-      SELECT
-        tenant_id::text AS tenant_id,
-        slug,
-        display_name,
-        status,
-        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
-        CASE WHEN suspended_at IS NULL THEN NULL ELSE
-          to_char(suspended_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-        END AS suspended_at
-      FROM murmur.operator_list_tenants(
-        ${principal.credentialHash},
-        ${cursor}::uuid,
-        ${limit + 1}
-      )
-    `;
-    const items: readonly TenantSummary[] = z.array(TenantRowSchema).parse(rawRows).map(mapTenant);
-    return page(items, limit, (item: TenantSummary): string => item.tenantId.value);
+    return await listPostgresTenants(this.database, principal, cursor, limit);
   }
 
   public async mintTenantAdminToken(
@@ -422,25 +410,15 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
     expiresAt: Instant | null,
   ): Promise<IssuedToken> {
     this.ensureOpen();
-    const issued: ReturnType<typeof issueToken> = issueToken(
+    const token: IssuedToken = await mintPostgresTenantAdminToken(
+      this.database,
+      principal,
       tenantId,
-      "tenant_admin",
       name,
       expiresAt,
     );
-    await this.database`
-      SELECT murmur.operator_mint_tenant_admin_token(
-        ${principal.credentialHash},
-        ${tenantId.value}::uuid,
-        ${issued.token.tokenId}::uuid,
-        ${issued.token.keyId},
-        ${issued.hash},
-        ${name},
-        ${expiresAt === null ? null : expiresAt.toISOString()}::timestamptz
-      )
-    `;
     await this.refreshCredentialAdmissions();
-    return issued.token;
+    return token;
   }
 
   private async changeTenantStatus(
@@ -449,22 +427,12 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
     tenantId: TenantId,
   ): Promise<boolean> {
     this.ensureOpen();
-    const rawRows: unknown =
-      functionName === "suspend"
-        ? await this.database`
-            SELECT murmur.operator_suspend_tenant(
-              ${principal.credentialHash}, ${tenantId.value}::uuid
-            ) AS changed
-          `
-        : await this.database`
-            SELECT murmur.operator_restore_tenant(
-              ${principal.credentialHash}, ${tenantId.value}::uuid
-            ) AS changed
-          `;
-    const changed: boolean = onlyRow(
-      z.array(BooleanRowSchema).parse(rawRows),
-      `${functionName} tenant`,
-    ).changed;
+    const changed: boolean = await changePostgresTenantStatus(
+      this.database,
+      principal,
+      functionName,
+      tenantId,
+    );
     await this.refreshCredentialAdmissions();
     return changed;
   }

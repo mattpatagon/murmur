@@ -11,7 +11,7 @@ import { toHistoryMessageDto, type HistoryMessageDto } from "../src/domain/histo
 import type { SendMessageResult } from "../src/domain/models.js";
 import { type StoreFixture, baseMessageCommand, withFixture } from "./support/store-fixture.js";
 
-test("legacy message and inbox wire keys remain frozen while history exposes generations", (): void => {
+test("current inbox provenance stays generation-free while history exposes generations", (): void => {
   withFixture((fixture: StoreFixture): void => {
     const sent: SendMessageResult = fixture.store.sendMessage(baseMessageCommand());
     const legacy: MessageDto = toMessageDto(sent.message);
@@ -21,12 +21,16 @@ test("legacy message and inbox wire keys remain frozen while history exposes gen
       "created_at",
       "expires_at",
       "message_id",
+      "message_kind",
+      "orchestrator_policy_id",
       "read_at",
       "recipient_id",
+      "sender_authority",
       "sender_id",
       "sequence",
       "thread_id",
     ]);
+    expect(legacy.sender_authority).toBe("peer");
     expect(MessageDtoSchema.parse(legacy)).toEqual(legacy);
     expect((): unknown => MessageDtoSchema.parse({ ...legacy, sender_generation: 1 })).toThrow();
     const inbox: InboxOutput = {
@@ -39,5 +43,8 @@ test("legacy message and inbox wire keys remain frozen while history exposes gen
     const history: HistoryMessageDto = toHistoryMessageDto(sent.message);
     expect(history.sender_generation).toBe(1);
     expect(history.recipient_generation).toBe(1);
+    expect(history.sender_authority).toBe("peer");
+    expect(history.message_kind).toBe("message");
+    expect(history.orchestrator_policy_id).toBeNull();
   });
 });

@@ -5,9 +5,11 @@ import {
   type AgentGeneration,
   MAX_RETAINED_SESSIONS_PER_AGENT,
 } from "../domain/lifecycle-values.js";
+import type { SenderAuthority } from "../domain/orchestration.js";
 import type { AgentId, Instant, JsonObject, TenantId } from "../domain/value-objects.js";
 
 export type StoredAgentRow = {
+  readonly authority: SenderAuthority;
   readonly closed_at: string | null;
   readonly close_reason: string | null;
   readonly generation: number;
@@ -15,6 +17,7 @@ export type StoredAgentRow = {
 };
 
 const StoredAgentRowSchema: z.ZodType<StoredAgentRow> = z.strictObject({
+  authority: z.enum(["peer", "orchestrator"]),
   closed_at: z.string().nullable(),
   close_reason: z.string().nullable(),
   generation: z.number().int().positive(),
@@ -121,7 +124,8 @@ export async function storedPostgresAgent(
   agentId: AgentId,
 ): Promise<StoredAgentRow | null> {
   const raw: unknown = await transaction`
-    SELECT generation, closed_at::text AS closed_at, close_reason, metadata::text AS metadata_json
+    SELECT authority, generation, closed_at::text AS closed_at,
+      close_reason, metadata::text AS metadata_json
     FROM murmur.agents
     WHERE tenant_id = ${tenantId.value}::uuid AND agent_id = ${agentId.value}
   `;

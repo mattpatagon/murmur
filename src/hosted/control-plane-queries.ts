@@ -31,8 +31,10 @@ export async function verifyHostedControlPlaneSchema(database: Sql): Promise<voi
   const rawRows: unknown = await database`
     SELECT
       to_regprocedure('murmur.authenticate_principal(bytea)') IS NOT NULL
+      AND to_regprocedure('murmur.authenticate_principal_v2(bytea)') IS NOT NULL
       AND to_regprocedure('murmur.active_credential_hints()') IS NOT NULL
-      AND to_regclass('murmur.operator_tokens') IS NOT NULL AS changed,
+      AND to_regclass('murmur.operator_tokens') IS NOT NULL
+      AND to_regclass('murmur.orchestrator_policies') IS NOT NULL AS changed,
       current_user AS current_role,
       role.rolsuper AS is_superuser,
       role.rolbypassrls AS bypasses_rls

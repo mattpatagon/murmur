@@ -65,6 +65,7 @@ import type {
   SendMessageCommand,
   SendMessageResult,
 } from "../domain/models.js";
+import { ordinaryMessageProvenance, type SenderAuthority } from "../domain/orchestration.js";
 import {
   type AgentClient,
   AgentId,
@@ -81,6 +82,11 @@ import type {
   MessageStore,
 } from "../storage/message-store.js";
 import { toolResult } from "./murmur-tool-results.js";
+import {
+  agentDtoForClient,
+  authorizedActorId,
+  messageDtoForClient,
+} from "./murmur-data-tool-helpers.js";
 import { callHistoryTool } from "./murmur-history-tools.js";
 import { callLifecycleTool } from "./murmur-lifecycle-tools.js";
 import { callNoticeTool } from "./murmur-notice-tools.js";
@@ -88,11 +94,14 @@ import { callNoticeTool } from "./murmur-notice-tools.js";
 const INBOX_PREFIX: string = "murmur://inbox/";
 
 export type DataToolContext = {
+  readonly boundAgentId: AgentId | null;
   readonly branchName: BranchName | null;
   readonly client: AgentClient | null;
+  readonly legacyMessageShape: boolean;
   readonly notifyResourceListChanged: () => Promise<void>;
   readonly recordRepositoryDivergence: () => void;
   readonly repositoryName: RepositoryName | null;
+  readonly senderAuthority: SenderAuthority;
   readonly store: MessageStore | null;
 };
 
@@ -124,10 +133,18 @@ function inboxUri(agentId: AgentId): string {
   return `${INBOX_PREFIX}${encodeURIComponent(agentId.value)}`;
 }
 
-function messagesQuery(input: GetMessagesInput): GetMessagesQuery {
+function authorizedAgentId(input: string, context: DataToolContext): AgentId {
+  const agentId: AgentId = AgentId.parse(input);
+  if (context.boundAgentId !== null && !context.boundAgentId.equals(agentId)) {
+    throw new Error("This credential is bound to a different agent ID");
+  }
+  return agentId;
+}
+
+function messagesQuery(input: GetMessagesInput, context: DataToolContext): GetMessagesQuery {
   return {
     afterSequence: parseSequence(input.after_sequence),
-    agentId: AgentId.parse(input.agent_id),
+    agentId: authorizedAgentId(input.agent_id, context),
     generation: null,
     limit: input.limit,
     sessionKey: nullableSessionKey(input.session_key),
@@ -177,8 +194,9 @@ function requiredMessageContext(
 async function waitForMessages(
   store: MessageStore,
   input: WaitForMessagesInput,
+  context: DataToolContext,
 ): Promise<CallToolResult> {
-  const agentId: AgentId = AgentId.parse(input.agent_id);
+  const agentId: AgentId = authorizedAgentId(input.agent_id, context);
   const afterSequence: Sequence = parseSequence(input.after_sequence);
   const query: GetMessagesQuery = {
     afterSequence,
@@ -213,11 +231,16 @@ async function waitForMessages(
       await subscription.close();
     }
   }
-  const output: WaitForMessagesOutput = WaitForMessagesOutputSchema.parse({
+  const rawOutput: Record<string, unknown> = {
     agent_id: agentId.value,
-    messages: messages.map(toMessageDto),
+    messages: messages.map(
+      (message: Message): Record<string, unknown> =>
+        messageDtoForClient(message, context.legacyMessageShape),
+    ),
     timed_out: timedOut && messages.length === 0,
-  });
+  };
+  if (context.legacyMessageShape) return toolResult(rawOutput);
+  const output: WaitForMessagesOutput = WaitForMessagesOutputSchema.parse(rawOutput);
   return toolResult(output);
 }
 
@@ -234,43 +257,60 @@ export async function callDataTool(
     argumentsValue,
     store,
     context.notifyResourceListChanged,
+    async (input: string): Promise<AgentId> =>
+      await authorizedActorId(authorizedAgentId(input, context), context.senderAuthority, store),
   );
   if (lifecycleResult !== null) return lifecycleResult;
-  const historyResult: CallToolResult | null = await callHistoryTool(name, argumentsValue, store);
+  const historyResult: CallToolResult | null = await callHistoryTool(
+    name,
+    argumentsValue,
+    store,
+    (input: string): AgentId => authorizedAgentId(input, context),
+  );
   if (historyResult !== null) return historyResult;
   const noticeResult: CallToolResult | null = await callNoticeTool(
     name,
     argumentsValue,
     store,
     context.repositoryName,
+    async (input: string): Promise<AgentId> =>
+      await authorizedActorId(authorizedAgentId(input, context), context.senderAuthority, store),
   );
   if (noticeResult !== null) return noticeResult;
   switch (name) {
     case "register_agent": {
       const input: RegisterAgentInput = RegisterAgentInputSchema.parse(argumentsValue);
       const parsed: RegisterAgentCommand = registerAgentCommand(input);
-      const inferredMachine: MachineName | null = machineNameFromAgentId(parsed.agentId);
+      const agentId: AgentId = authorizedAgentId(parsed.agentId.value, context);
+      const inferredMachine: MachineName | null = machineNameFromAgentId(agentId);
       const metadata: JsonObject = BoundedJsonObjectSchema.parse({
         ...(inferredMachine === null ? {} : { machine: inferredMachine.value }),
         ...parsed.metadata,
         ...(context.client === null ? {} : { client: context.client.value }),
         ...(context.repositoryName === null ? {} : { repository: context.repositoryName.value }),
       });
-      const command: RegisterAgentCommand = { ...parsed, metadata };
+      const command: RegisterAgentCommand = {
+        ...parsed,
+        agentId,
+        authority: context.senderAuthority,
+        metadata,
+      };
       const previous: Agent | null = await store.getAgent(command.agentId);
       const result: RegisterAgentResult = await store.registerAgent(command);
       if (result.repositoryDiverged) context.recordRepositoryDivergence();
       if ((previous === null || previous.state !== "active") && result.agent.state === "active") {
         await context.notifyResourceListChanged();
       }
-      const output: RegisterAgentOutput = RegisterAgentOutputSchema.parse({
-        agent: toAgentDto(result.agent),
+      const rawOutput: Record<string, unknown> = {
+        agent: agentDtoForClient(result.agent, context.legacyMessageShape),
         inbox_uri: inboxUri(command.agentId),
         lease_minutes: AGENT_LEASE_MINUTES,
         reopened: result.reopened,
         repository_diverged: result.repositoryDiverged,
         retention_days: RETENTION_DAYS,
-      });
+      };
+      if (context.legacyMessageShape) return toolResult(rawOutput);
+      const output: RegisterAgentOutput = RegisterAgentOutputSchema.parse(rawOutput);
       return toolResult(output);
     }
     case "list_agents": {
@@ -295,7 +335,8 @@ export async function callDataTool(
         content: parseContent(input.content),
         idempotencyKey: nullableIdempotencyKey(input.idempotency_key),
         recipientId: AgentId.parse(input.recipient_id),
-        senderId: AgentId.parse(input.sender_id),
+        provenance: ordinaryMessageProvenance(context.senderAuthority),
+        senderId: authorizedAgentId(input.sender_id, context),
         sessionKey:
           input.session_key === undefined
             ? SessionKey.default()
@@ -321,7 +362,8 @@ export async function callDataTool(
         ...messageContext,
         content: parseContent(input.content),
         idempotencyKey: nullableIdempotencyKey(input.idempotency_key),
-        senderId: AgentId.parse(input.sender_id),
+        senderAuthority: context.senderAuthority,
+        senderId: authorizedAgentId(input.sender_id, context),
         sessionKey:
           input.session_key === undefined
             ? SessionKey.default()
@@ -352,23 +394,28 @@ export async function callDataTool(
     }
     case "get_messages": {
       const input: GetMessagesInput = GetMessagesInputSchema.parse(argumentsValue);
-      const query: GetMessagesQuery = messagesQuery(input);
+      const query: GetMessagesQuery = messagesQuery(input, context);
       const messages: readonly Message[] = await store.getMessages(query);
-      const output: InboxOutput = InboxOutputSchema.parse({
+      const rawOutput: Record<string, unknown> = {
         agent_id: query.agentId.value,
         inbox_version: (await store.getInboxVersion(query.agentId)).value,
-        messages: messages.map(toMessageDto),
-      });
+        messages: messages.map(
+          (message: Message): Record<string, unknown> =>
+            messageDtoForClient(message, context.legacyMessageShape),
+        ),
+      };
+      if (context.legacyMessageShape) return toolResult(rawOutput);
+      const output: InboxOutput = InboxOutputSchema.parse(rawOutput);
       return toolResult(output);
     }
     case "wait_for_messages": {
       const input: WaitForMessagesInput = WaitForMessagesInputSchema.parse(argumentsValue);
-      return await waitForMessages(store, input);
+      return await waitForMessages(store, input, context);
     }
     case "mark_messages_read": {
       const input: MarkMessagesReadInput = MarkMessagesReadInputSchema.parse(argumentsValue);
       const result: MarkMessagesReadResult = await store.markMessagesRead({
-        agentId: AgentId.parse(input.agent_id),
+        agentId: authorizedAgentId(input.agent_id, context),
         generation: null,
         messageIds: parseMessageIds(input.message_ids),
         sessionKey: nullableSessionKey(input.session_key),

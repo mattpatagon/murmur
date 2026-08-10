@@ -1,4 +1,5 @@
 import type { MurmurClient } from "./setup/user-configuration.js";
+import type { HookOrchestrationState } from "./hook-orchestration.js";
 
 export type AgentIdentity = {
   readonly agentId: string;
@@ -12,10 +13,12 @@ export type AgentIdentity = {
 };
 
 export type InboxSummary = {
-  readonly agentGeneration: number;
+  readonly agentGeneration?: number | undefined;
   readonly inboxVersion: number;
   readonly messageCount: number;
   readonly noticeCount?: number | undefined;
+  readonly orchestration?: HookOrchestrationState | undefined;
+  readonly orchestratorMessageCount?: number | undefined;
   readonly senderIds: readonly string[];
 };
 

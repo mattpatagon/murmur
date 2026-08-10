@@ -3,7 +3,7 @@ import { readdir } from "node:fs/promises";
 
 test("lifecycle migration phases are independently tracked and replayable", async (): Promise<void> => {
   const migrationNames: string[] = (await readdir("supabase/migrations"))
-    .filter((name: string): boolean => name.startsWith("2026081016") && name.endsWith(".sql"))
+    .filter((name: string): boolean => name.startsWith("202608101600") && name.endsWith(".sql"))
     .sort();
   expect(migrationNames).toEqual([
     "20260810160000_agent_lifecycle_columns.sql",

@@ -7,6 +7,8 @@ import {
 import {
   type IssuedOperatorTokenOutput,
   IssuedOperatorTokenOutputSchema,
+  type IssuedTokenOutput,
+  IssuedTokenOutputSchema,
   type ListOperatorTokensOutput,
   ListOperatorTokensOutputSchema,
   type RevokeTokenOutput,
@@ -20,6 +22,11 @@ import {
   verifyHostedAgentLifecycleStorage,
 } from "./scenarios/hosted-agent-lifecycle.js";
 import { verifyHostedAgentLifecycleHardening } from "./scenarios/hosted-agent-lifecycle-hardening.js";
+import {
+  type HostedOrchestrationResult,
+  verifyHostedOrchestration,
+} from "./scenarios/hosted-orchestration.js";
+import { verifyHostedOrchestrationRollback } from "./scenarios/hosted-orchestration-rollback.js";
 import { verifyHostedTenantLifecycle } from "./scenarios/hosted-tenant-lifecycle.js";
 import { verifyHostedTenantMessaging } from "./scenarios/hosted-tenant-messaging.js";
 import {
@@ -183,6 +190,16 @@ test.skipIf(
         );
         expect(v1FoundingTools).toContain("register_agent");
         expect(v1FoundingTools).not.toContain("create_tenant");
+        const legacyCreatedToken: IssuedTokenOutput = await callTool(
+          server.mcpUrl,
+          bootstrapLegacyToken,
+          v1FoundingSession,
+          43,
+          "create_access_token",
+          { name: "Legacy-created rotation token", role: "agent" },
+          IssuedTokenOutputSchema,
+        );
+        expect(legacyCreatedToken.token.role).toBe("agent");
         if (configuredAdminDatabaseUrl === undefined) {
           throw new Error("Contract finalization requires the admin database URL");
         }
@@ -363,6 +380,8 @@ test.skipIf(
       await verifyHostedTenantQuotas(scenario);
       await verifyHostedTenantMessaging(scenario);
       await verifyHostedAgentLifecycleProtocol(scenario);
+      const orchestration: HostedOrchestrationResult = await verifyHostedOrchestration(scenario);
+      await verifyHostedOrchestrationRollback(configuredDatabaseUrl, orchestration.bossSecret);
       await verifyHostedTenantLifecycle(scenario);
       await verifyHostedAgentLifecycleStorage(scenario);
       await verifyHostedAgentLifecycleHardening(scenario);

@@ -139,6 +139,8 @@ isolated VMs and generic clients.
    completed, superseded, manually retired, or its workspace was deleted. Both destructive calls
    require the current `generation` returned by `register_agent` or `get_agent`.
 8. Reuse `thread_id` for replies and an `idempotency_key` for safe retries.
+9. In strict hosted mode, call `get_orchestrator` before escalating coordination questions to the
+   human; use `ask_orchestrator` when a human-configured delegation is active.
 
 An agent is `active` only while its current generation has a live 60-minute session lease. It is
 `inactive` after every lease ends or expires and `closed` after explicit or dormant cleanup.
@@ -167,14 +169,17 @@ generation is unavailable, the hook makes no destructive lifecycle call and the 
 
 | Role | Tools |
 | --- | --- |
-| Agent | `register_agent`, `get_agent`, `list_agents`, `send_message`, `broadcast_message`, `get_messages`, `wait_for_messages`, `mark_messages_read`, `get_message_history`, `end_session`, `close_agent`, `post_notice`, `list_notices`, `resolve_notice`, `withdraw_notice` |
-| Tenant admin | Agent tools plus `create_access_token`, `list_access_tokens`, `revoke_access_token` |
+| Agent | Data tools (`register_agent`, lifecycle, inbox, history, messaging, and notices) plus `get_orchestrator` and `ask_orchestrator` in strict hosted mode |
+| Orchestrator | Data tools bound to its reserved agent ID, plus `get_orchestrator` and `get_delegation` |
+| Tenant admin | Agent tools plus token lifecycle and orchestrator token/policy administration |
 | Operator | Tenant lifecycle, tenant-admin minting, operator-token rotation, and admin audit tools; no tenant data tools |
 | Bootstrap | `bootstrap_operator` only, until the first operator is committed |
 
 Every returned message includes ISO 8601 timestamps and repository, branch,
-and client context. Generic clients must supply any context the server cannot
-detect.
+and client context, plus verified `sender_authority`, `message_kind`, and policy attribution.
+Generic clients must supply any context the server cannot detect. Delegation instructions are
+private to the exact orchestrator credential and tenant administrators. See
+[orchestrator authority and delegation](docs/orchestration.md).
 
 ## Storage and security
 
@@ -237,6 +242,7 @@ Dependencies are exact-pinned, installs use the frozen Bun lockfile, and
 - [Support policy](SUPPORT.md)
 - [Code of conduct](CODE_OF_CONDUCT.md)
 - [Architecture](docs/architecture.md)
+- [Orchestrator authority and delegation](docs/orchestration.md)
 - [Observability](docs/observability.md)
 - [Upgrade policy](docs/upgrading.md)
 - [Platform support](docs/platform-support.md)

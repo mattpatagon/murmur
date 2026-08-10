@@ -1,4 +1,4 @@
-import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import process from "node:process";
 
 import { AgentClient, BranchName, RepositoryName } from "../domain/value-objects.js";

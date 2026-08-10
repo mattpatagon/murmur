@@ -33,6 +33,11 @@ import type {
   WithdrawNoticeResult,
 } from "../domain/notice-models.js";
 import {
+  type MessageProvenance,
+  ordinaryMessageProvenance,
+  validateMessageProvenance,
+} from "../domain/orchestration.js";
+import {
   type AgentId,
   type Clock,
   type Instant,
@@ -96,6 +101,10 @@ class ManagedSqliteDatabase extends Database {
     this.cachedStatements.clear();
     super.close(true);
   }
+}
+
+function provenanceFor(command: SendMessageCommand): MessageProvenance {
+  return command.provenance === undefined ? ordinaryMessageProvenance() : command.provenance;
 }
 
 class SqliteInboxSubscription implements InboxSubscription {
@@ -193,6 +202,9 @@ export class SqliteMessageStore implements MessageStore {
 
   public registerAgent(command: RegisterAgentCommand): RegisterAgentResult {
     this.ensureOpen();
+    if (command.authority !== undefined && command.authority !== "peer") {
+      throw new Error("SQLite storage cannot register orchestrator authority");
+    }
     return registerSqliteAgent(this.database, command, this.clock.now());
   }
 
@@ -222,6 +234,9 @@ export class SqliteMessageStore implements MessageStore {
 
   public broadcastMessage(command: BroadcastMessageCommand): BroadcastMessageResult {
     this.ensureOpen();
+    if (command.senderAuthority !== undefined && command.senderAuthority !== "peer") {
+      throw new Error("SQLite storage cannot persist orchestrator authority");
+    }
     const now: Instant = this.clock.now();
     this.pruneExpired(now);
     this.requireAgent(command.senderId);
@@ -230,6 +245,15 @@ export class SqliteMessageStore implements MessageStore {
 
   public sendMessage(command: SendMessageCommand): SendMessageResult {
     this.ensureOpen();
+    const provenance: MessageProvenance = provenanceFor(command);
+    validateMessageProvenance(provenance);
+    if (
+      provenance.senderAuthority !== "peer" ||
+      provenance.messageKind !== "message" ||
+      provenance.orchestratorPolicyId !== null
+    ) {
+      throw new Error("SQLite storage cannot persist orchestrator provenance");
+    }
     const now: Instant = this.clock.now();
     this.pruneExpired(now);
     return sendSqliteMessage(this.database, command, now);

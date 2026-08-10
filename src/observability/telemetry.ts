@@ -1,8 +1,8 @@
 import {
-  SpanKind,
-  SpanStatusCode,
   isSpanContextValid,
   type Span,
+  SpanKind,
+  SpanStatusCode,
   type Tracer,
 } from "@opentelemetry/api";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";

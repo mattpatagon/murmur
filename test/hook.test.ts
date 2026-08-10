@@ -1,22 +1,9 @@
+import { expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { expect, test } from "bun:test";
-
 import type { Agent, BroadcastMessageResult } from "../src/domain/models.js";
-import {
-  buildHookOutput,
-  checkRemoteInbox,
-  deriveAgentIdentity,
-  handleHook,
-  type AgentIdentity,
-  type HookOutput,
-  type InboxSummary,
-} from "../src/hook.js";
-import { startHttpServer, type MurmurHttpServer } from "../src/http-server.js";
-import { defaultHookCacheDirectory } from "../src/platform-paths.js";
-import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
 import {
   AgentClient,
   AgentId,
@@ -25,6 +12,23 @@ import {
   MessageContent,
   RepositoryName,
 } from "../src/domain/value-objects.js";
+import {
+  type AgentIdentity,
+  buildHookOutput,
+  checkRemoteInbox,
+  deriveAgentIdentity,
+  type HookOutput,
+  handleHook,
+  type InboxSummary,
+} from "../src/hook.js";
+import {
+  type HookOrchestrationState,
+  hookOrchestrationGuidance,
+  hookOrchestrationState,
+} from "../src/hook-orchestration.js";
+import { type MurmurHttpServer, startHttpServer } from "../src/http-server.js";
+import { defaultHookCacheDirectory } from "../src/platform-paths.js";
+import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
 
 function requireOutput(output: HookOutput | null): HookOutput {
   if (output === null) throw new Error("Expected hook output");
@@ -228,6 +232,8 @@ test("checks a real Streamable HTTP Murmur inbox", async (): Promise<void> => {
       agentGeneration: 1,
       inboxVersion: 0,
       messageCount: 0,
+      orchestration: { kind: "unavailable" },
+      orchestratorMessageCount: 0,
       senderIds: [],
     });
     const verificationStore: SqliteMessageStore = new SqliteMessageStore(databasePath);
@@ -400,6 +406,38 @@ test("deduplicates sender IDs in hook notification text", async (): Promise<void
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }
+});
+
+test("renders only verified orchestrator guidance and notification authority", (): void => {
+  const configured: HookOrchestrationState = hookOrchestrationState({
+    caller_authority: "peer",
+    orchestrator: {
+      agent_id: "boss-agent",
+      policy_id: "00000000-0000-4000-8000-000000000001",
+      scope: {
+        personal_id: null,
+        repository: "mattpatagon/murmur",
+        scope_kind: "organization",
+      },
+    },
+  });
+  expect(hookOrchestrationGuidance(configured)).toContain("boss-agent");
+  expect(hookOrchestrationGuidance({ kind: "orchestrator" })).toContain("get_delegation");
+  expect(hookOrchestrationGuidance({ kind: "none" })).toContain("human");
+  expect(hookOrchestrationState({ caller_authority: "peer", instructions: "private" })).toEqual({
+    kind: "unavailable",
+  });
+  const identity: AgentIdentity = deriveAgentIdentity("codex", "/work/repo", {
+    MURMUR_MACHINE_ID: "vm",
+  });
+  const output: HookOutput = buildHookOutput({
+    client: "codex",
+    eventName: "PostToolUse",
+    identity,
+    notification: "Murmur: 2 unread messages (1 from a verified orchestrator).",
+    orchestration: configured,
+  });
+  expect(requireContext(output)).toContain("sender_authority=orchestrator");
 });
 
 test("advances the notification watermark one fetched page at a time", async (): Promise<void> => {

@@ -60,15 +60,19 @@ import {
   TenantStatusOutputSchema,
 } from "../hosted/contracts.js";
 import type { HostedPrincipal } from "../hosted/control-plane.js";
-
+import {
+  bossOrchestrationTools,
+  tenantAdminOrchestrationTools,
+  workerOrchestrationTools,
+} from "./murmur-orchestration-tool-definitions.js";
 export type ToolExposure = {
   readonly bootstrapEnabled: boolean;
   readonly legacyAdoptionEnabled: boolean;
+  readonly orchestrationEnabled?: boolean | undefined;
   readonly principal: HostedPrincipal | null;
   readonly tenantOnboardingEnabled: boolean;
 };
-
-function toolDefinition<Input, Output>(
+export function toolDefinition<Input, Output>(
   name: string,
   title: string,
   description: string,
@@ -91,7 +95,6 @@ function toolDefinition<Input, Output>(
     title,
   };
 }
-
 function dataTools(): Tool[] {
   return [
     toolDefinition(
@@ -276,7 +279,6 @@ function dataTools(): Tool[] {
     ),
   ];
 }
-
 function tenantAdminTools(): Tool[] {
   return [
     toolDefinition(
@@ -320,7 +322,6 @@ function tenantAdminTools(): Tool[] {
     ),
   ];
 }
-
 function bootstrapTools(): Tool[] {
   return [
     toolDefinition(
@@ -338,7 +339,6 @@ function bootstrapTools(): Tool[] {
     ),
   ];
 }
-
 function operatorTools(exposure: ToolExposure): Tool[] {
   const tools: Tool[] = [
     toolDefinition(
@@ -476,9 +476,25 @@ export function toolsForPrincipal(exposure: ToolExposure): Tool[] {
     return exposure.bootstrapEnabled ? bootstrapTools() : [];
   }
   if (principal !== null && principal.kind === "operator") return operatorTools(exposure);
+  if (
+    principal !== null &&
+    principal.kind === "tenant" &&
+    principal.role === "orchestrator" &&
+    exposure.orchestrationEnabled !== true
+  ) {
+    return [];
+  }
   const tools: Tool[] = dataTools();
+  if (principal !== null && principal.kind === "tenant" && exposure.orchestrationEnabled === true) {
+    if (principal.role === "orchestrator") {
+      tools.push(...bossOrchestrationTools());
+    } else {
+      tools.push(...workerOrchestrationTools());
+    }
+  }
   if (principal !== null && principal.kind === "tenant" && principal.role === "tenant_admin") {
     tools.push(...tenantAdminTools());
+    if (exposure.orchestrationEnabled === true) tools.push(...tenantAdminOrchestrationTools());
   }
   return tools;
 }
