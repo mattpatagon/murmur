@@ -111,6 +111,31 @@ test("round trips strict public wire envelopes without plaintext or private keys
   const parsed: EncryptedEnvelope = parseSerializedEnvelope(serialized);
   expect(await decryptEnvelope(parsed, sender.publicKey, recipient.privateKey)).toBe(plaintext);
   expect(envelopeToDto(parsed)).toEqual(envelopeToDto(envelope));
+
+  const changedPolicy: EncryptedEnvelope = {
+    ...parsed,
+    header: {
+      ...parsed.header,
+      orchestratorPolicyId: "55555555-5555-4555-8555-555555555555",
+    },
+  };
+  await expect(
+    decryptEnvelope(changedPolicy, sender.publicKey, recipient.privateKey),
+  ).rejects.toThrow("Encrypted message verification failed");
+  const changedAuthority: EncryptedEnvelope = {
+    ...parsed,
+    header: { ...parsed.header, senderAuthority: "peer" },
+  };
+  await expect(
+    decryptEnvelope(changedAuthority, sender.publicKey, recipient.privateKey),
+  ).rejects.toThrow("Encrypted message verification failed");
+  const changedKind: EncryptedEnvelope = {
+    ...parsed,
+    header: { ...parsed.header, messageKind: "message" },
+  };
+  await expect(
+    decryptEnvelope(changedKind, sender.publicKey, recipient.privateKey),
+  ).rejects.toThrow("Encrypted message verification failed");
 });
 
 test("rejects noncanonical, malformed, and length-conflicting envelope bytes", async (): Promise<void> => {

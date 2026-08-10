@@ -189,39 +189,49 @@ export const PublicAgentSigningChainDtoSchema: z.ZodType<PublicAgentSigningChain
       context.addIssue({ code: "custom", message: "Signing chain root identifiers do not match" });
     }
   });
-const EnvelopeHeaderDtoSchema: z.ZodType<EnvelopeHeaderDto> = z.strictObject({
-  branch_name: z.string().min(1).max(500).nullable(),
-  broadcast_id: UuidSchema.nullable(),
-  cipher_suite: z.literal(E2EE_CIPHER_SUITE),
-  client: z.enum(["claude", "codex"]).nullable(),
-  created_at: InstantSchema,
-  expires_at: InstantSchema,
-  idempotency_key: z.string().min(1).max(200),
-  message_id: UuidSchema,
-  message_kind: z.enum(["message", "orchestration_request"]),
-  orchestrator_policy_id: UuidSchema.nullable(),
-  padded_length: z
-    .number()
-    .int()
-    .min(512)
-    .max(512 * 1024)
-    .refine((value: number): boolean => (value & (value - 1)) === 0),
-  padding_scheme: z.literal(E2EE_PADDING_SCHEME),
-  pair_counter: z.number().int().positive().safe(),
-  protocol: z.literal(E2EE_PROTOCOL),
-  recipient_agent_key_id: AgentKeyIdSchema,
-  recipient_id: AgentIdSchema,
-  recipient_prekey_class: z.enum(["fallback", "one_time"]),
-  recipient_prekey_id: PrekeyIdSchema,
-  recipient_root_key_id: RootKeyIdSchema,
-  repository_name: RepositoryNameSchema.nullable(),
-  sender_agent_key_id: AgentKeyIdSchema,
-  sender_authority: z.enum(["orchestrator", "peer"]),
-  sender_id: AgentIdSchema,
-  sender_root_key_id: RootKeyIdSchema,
-  tenant_id: UuidSchema,
-  thread_id: z.string().min(1).max(200),
-});
+const EnvelopeHeaderDtoSchema: z.ZodType<EnvelopeHeaderDto> = z
+  .strictObject({
+    branch_name: z.string().min(1).max(500).nullable(),
+    broadcast_id: UuidSchema.nullable(),
+    cipher_suite: z.literal(E2EE_CIPHER_SUITE),
+    client: z.enum(["claude", "codex"]).nullable(),
+    created_at: InstantSchema,
+    expires_at: InstantSchema,
+    idempotency_key: z.string().min(1).max(200),
+    message_id: UuidSchema,
+    message_kind: z.enum(["message", "orchestration_request"]),
+    orchestrator_policy_id: UuidSchema.nullable(),
+    padded_length: z
+      .number()
+      .int()
+      .min(512)
+      .max(512 * 1024)
+      .refine((value: number): boolean => (value & (value - 1)) === 0),
+    padding_scheme: z.literal(E2EE_PADDING_SCHEME),
+    pair_counter: z.number().int().positive().safe(),
+    protocol: z.literal(E2EE_PROTOCOL),
+    recipient_agent_key_id: AgentKeyIdSchema,
+    recipient_id: AgentIdSchema,
+    recipient_prekey_class: z.enum(["fallback", "one_time"]),
+    recipient_prekey_id: PrekeyIdSchema,
+    recipient_root_key_id: RootKeyIdSchema,
+    repository_name: RepositoryNameSchema.nullable(),
+    sender_agent_key_id: AgentKeyIdSchema,
+    sender_authority: z.enum(["orchestrator", "peer"]),
+    sender_id: AgentIdSchema,
+    sender_root_key_id: RootKeyIdSchema,
+    tenant_id: UuidSchema,
+    thread_id: z.string().min(1).max(200),
+  })
+  .superRefine((header: EnvelopeHeaderDto, context: z.core.$RefinementCtx): void => {
+    const isOrchestration: boolean = header.message_kind === "orchestration_request";
+    if (
+      isOrchestration !== (header.sender_authority === "orchestrator") ||
+      isOrchestration !== (header.orchestrator_policy_id !== null)
+    ) {
+      context.addIssue({ code: "custom", message: "Envelope provenance is inconsistent" });
+    }
+  });
 export const EncryptedEnvelopeDtoSchema: z.ZodType<EncryptedEnvelopeDto> = z.strictObject({
   ciphertext: Base64UrlSchema.max(700_000),
   ephemeral_public_key: Base64UrlSchema.length(43),

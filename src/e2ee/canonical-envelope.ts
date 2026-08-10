@@ -35,6 +35,13 @@ function validateHeader(header: EnvelopeHeader): void {
   if (!Number.isSafeInteger(header.paddedLength) || header.paddedLength < 0) {
     throw new Error("Padded length must be a nonnegative safe integer");
   }
+  const isOrchestration: boolean = header.messageKind === "orchestration_request";
+  if (
+    isOrchestration !== (header.senderAuthority === "orchestrator") ||
+    isOrchestration !== (header.orchestratorPolicyId !== null)
+  ) {
+    throw new Error("Envelope provenance is inconsistent");
+  }
 }
 
 export function encodeEnvelopeHeader(header: EnvelopeHeader): Uint8Array {
