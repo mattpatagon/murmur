@@ -29,6 +29,11 @@ import {
 } from "../support/hosted-mcp-harness.js";
 import { verifyExpiredOrchestratorRotation } from "./hosted-orchestration-expiry.js";
 import {
+  verifyAskIdempotencyConflicts,
+  verifyConcurrentSameScopePolicies,
+  verifyPersonalPolicyOwnership,
+} from "./hosted-orchestration-completion.js";
+import {
   createWorker,
   requireOrchestrator,
   resolveWorker,
@@ -49,7 +54,13 @@ import {
 } from "./hosted-orchestration-races.js";
 import type { HostedTenantScenario } from "./hosted-tenant-provisioning.js";
 
-export type HostedOrchestrationResult = { readonly bossSecret: string };
+export type HostedOrchestrationResult = {
+  readonly bossAgentId: string;
+  readonly bossSecret: string;
+  readonly requestMessageId: string;
+  readonly requestPolicyId: string;
+  readonly tenantId: string;
+};
 
 export async function verifyHostedOrchestration(
   scenario: HostedTenantScenario,
@@ -145,6 +156,13 @@ export async function verifyHostedOrchestration(
       display_name: "Forbidden alias",
     }),
   ).toContain("bound to a different agent ID");
+  await verifyPersonalPolicyOwnership(scenario, boss.token.key_id);
+  await verifyConcurrentSameScopePolicies({
+    bossAgentId,
+    bossKeyId: boss.token.key_id,
+    bossTokenId: boss.token.token_id,
+    scenario,
+  });
   await verifyInactiveOrchestratorPruning(scenario);
 
   const organizationWorker: Worker = await createWorker(scenario, "organization-worker", {});
@@ -255,6 +273,12 @@ export async function verifyHostedOrchestration(
       (message: InboxOutput["messages"][number]): string => message.message_id,
     ),
   ).toContain(request.message.message_id);
+  await verifyAskIdempotencyConflicts({
+    idempotencyKey: `orchestration-question-${scenario.unique}`,
+    originalContent: "Please settle the merge-order disagreement.",
+    scenario,
+    worker: personalRepoWorker,
+  });
   await verifyBoundOrchestratorLifecycle({
     bossAgentId,
     bossSecret: boss.token.secret,
@@ -445,5 +469,11 @@ export async function verifyHostedOrchestration(
   );
   expect(rotatedDuplicate.duplicate).toBe(true);
   expect(rotatedDuplicate.message.message_id).toBe(request.message.message_id);
-  return { bossSecret: rotatedBoss.token.secret };
+  return {
+    bossAgentId,
+    bossSecret: rotatedBoss.token.secret,
+    requestMessageId: request.message.message_id,
+    requestPolicyId: personalRepoPolicy.policy.policy_id,
+    tenantId: scenario.tenantA.tenant.tenant_id,
+  };
 }
