@@ -25,9 +25,13 @@ import type {
 
 export class EncryptionClaimExpiredError extends Error {
   public constructor() {
-    super("The encryption prekey claim expired; re-encryption is required");
+    super(ENCRYPTION_CLAIM_EXPIRED_MESSAGE);
+    this.name = "EncryptionClaimExpiredError";
   }
 }
+
+export const ENCRYPTION_CLAIM_EXPIRED_MESSAGE: string =
+  "The encryption prekey claim expired; re-encryption is required";
 
 export interface E2eeRemoteClient {
   capability(): Promise<E2eeCapabilityOutput>;
