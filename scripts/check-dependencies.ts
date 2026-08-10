@@ -97,16 +97,43 @@ function auditBunConfiguration(bunfigText: string, errors: string[]): void {
   if (releaseAgeCount > 1) errors.push("bunfig.toml must declare minimumReleaseAge exactly once");
 }
 
-function countOccurrences(contents: string, expected: string): number {
-  let count: number = 0;
-  let cursor: number = 0;
-  let match: number = contents.indexOf(expected, cursor);
-  while (match !== -1) {
-    count += 1;
-    cursor = match + expected.length;
-    match = contents.indexOf(expected, cursor);
-  }
-  return count;
+function textLines(contents: string): readonly string[] {
+  return contents.split(/\r\n|\r|\n/gu).map((line: string): string => line.trim());
+}
+
+function shellAssignmentValues(contents: string, name: string): readonly string[] {
+  const prefix: string = `${name}=`;
+  return contents
+    .split(/\s+/gu)
+    .filter((token: string): boolean => token.startsWith(prefix))
+    .map((token: string): string => token.slice(prefix.length));
+}
+
+function dockerBunImages(contents: string): readonly string[] {
+  const prefix: string = "FROM oven/bun:";
+  return textLines(contents)
+    .filter((line: string): boolean => line.startsWith(prefix))
+    .map((line: string): string => {
+      const image: string | undefined = line.split(/\s+/gu)[1];
+      if (image === undefined) throw new Error("Dockerfile Bun stage lost its image token");
+      return image;
+    });
+}
+
+function workflowBunVersions(contents: string): readonly string[] {
+  const prefix: string = "bun-version:";
+  return textLines(contents)
+    .filter((line: string): boolean => line.startsWith(prefix))
+    .map((line: string): string => {
+      const valueWithComment: string = line.slice(prefix.length).trim();
+      const value: string | undefined = valueWithComment.split("#")[0];
+      if (value === undefined) throw new Error("Workflow Bun pin lost its scalar value");
+      const unquoted: string = value.trim();
+      const quoted: boolean =
+        (unquoted.startsWith('"') && unquoted.endsWith('"')) ||
+        (unquoted.startsWith("'") && unquoted.endsWith("'"));
+      return quoted ? unquoted.slice(1, -1) : unquoted;
+    });
 }
 
 function auditBunPins(
@@ -125,27 +152,30 @@ function auditBunPins(
   }
 
   const expectedImage: string = `oven/bun:${packageManagerVersion}`;
-  if (testLinux === undefined || countOccurrences(testLinux, expectedImage) !== 1) {
+  const testLinuxImages: readonly string[] =
+    testLinux === undefined ? [] : shellAssignmentValues(testLinux, "MURMUR_TEST_DOCKER_IMAGE");
+  if (testLinuxImages.length !== 1 || testLinuxImages[0] !== expectedImage) {
     errors.push(`scripts.test:linux must use the pinned Bun image '${expectedImage}' exactly once`);
   }
 
-  const expectedDockerFrom: string = `FROM ${expectedImage}`;
+  const dockerImages: readonly string[] = dockerBunImages(surfaces.dockerfile);
   if (
-    countOccurrences(surfaces.dockerfile, "FROM oven/bun:") !== 2 ||
-    countOccurrences(surfaces.dockerfile, expectedDockerFrom) !== 2
+    dockerImages.length !== 2 ||
+    !dockerImages.every((image: string): boolean => image === expectedImage)
   ) {
     errors.push(`Dockerfile must use the pinned Bun image '${expectedImage}' in both stages`);
   }
 
-  const expectedWorkflowPin: string = `bun-version: ${packageManagerVersion}`;
   const workflows: readonly [string, string][] = [
     [".github/workflows/ci.yml", surfaces.ciWorkflow],
     [".github/workflows/deploy.yml", surfaces.deployWorkflow],
   ];
   workflows.forEach((entry: readonly [string, string]): void => {
-    const declaredPins: number = countOccurrences(entry[1], "bun-version:");
-    const matchingPins: number = countOccurrences(entry[1], expectedWorkflowPin);
-    if (declaredPins === 0 || matchingPins !== declaredPins) {
+    const workflowVersions: readonly string[] = workflowBunVersions(entry[1]);
+    if (
+      workflowVersions.length === 0 ||
+      !workflowVersions.every((version: string): boolean => version === packageManagerVersion)
+    ) {
       errors.push(`${entry[0]} must install the pinned Bun release '${packageManagerVersion}'`);
     }
   });

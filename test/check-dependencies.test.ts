@@ -113,4 +113,33 @@ describe("dependency policy", (): void => {
       }),
     ).not.toEqual([]);
   });
+
+  test("rejects Bun pins that only share the expected version prefix", (): void => {
+    expect(
+      audit(
+        manifest({
+          scripts: { "test:linux": "MURMUR_TEST_DOCKER_IMAGE=oven/bun:1.3.110 bun test" },
+        }),
+        VALID_BUNFIG,
+      ),
+    ).not.toEqual([]);
+    expect(
+      audit(manifest(), VALID_BUNFIG, {
+        ...VALID_BUN_PIN_SURFACES,
+        dockerfile: "FROM oven/bun:1.3.11-alpine\nFROM oven/bun:1.3.11-alpine\n",
+      }),
+    ).not.toEqual([]);
+    expect(
+      audit(manifest(), VALID_BUNFIG, {
+        ...VALID_BUN_PIN_SURFACES,
+        ciWorkflow: "bun-version: 1.3.11\nbun-version: 1.3.11-canary\n",
+      }),
+    ).not.toEqual([]);
+    expect(
+      audit(manifest(), VALID_BUNFIG, {
+        ...VALID_BUN_PIN_SURFACES,
+        deployWorkflow: "bun-version: 1.3.111\n",
+      }),
+    ).not.toEqual([]);
+  });
 });

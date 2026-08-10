@@ -139,7 +139,12 @@ sourceFiles.forEach((sourceFile: SourceFile): void => {
   const text: string = sourceFile.getFullText();
   const ignoreDirective: string = "@ts-" + "ignore";
   const expectErrorDirective: string = "@ts-" + "expect-error";
-  if (text.includes(ignoreDirective) || text.includes(expectErrorDirective)) {
+  const noCheckDirective: string = "@ts-" + "nocheck";
+  if (
+    text.includes(ignoreDirective) ||
+    text.includes(expectErrorDirective) ||
+    text.includes(noCheckDirective)
+  ) {
     report(sourceFile, sourceFile, "TypeScript suppression comments are forbidden.");
   }
   visit(sourceFile, sourceFile);

@@ -3,7 +3,11 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 import { RETENTION_DAYS } from "../domain/contracts.js";
-import { IdempotencyConflictError, UnknownAgentError } from "../domain/errors.js";
+import {
+  IdempotencyConflictError,
+  IdempotencyWinnerMissingError,
+  UnknownAgentError,
+} from "../domain/errors.js";
 import type {
   Agent,
   BroadcastMessageCommand,
@@ -272,9 +276,7 @@ export class SqliteMessageStore implements MessageStore {
     );
     if (inserted.changes === 0) {
       const winner: SendMessageResult | null = existingMessageResult(this.database, command);
-      if (winner === null) {
-        throw new Error("Idempotent message conflict had no stored winner");
-      }
+      if (winner === null) throw new IdempotencyWinnerMissingError();
       return winner;
     }
     const updateAgentStatement: Statement<unknown, [string, string]> = this.database.query(

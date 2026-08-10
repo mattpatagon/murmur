@@ -60,7 +60,7 @@ function messageCommand(content: string): SendMessageCommand {
 }
 
 async function waitForFile(path: string): Promise<void> {
-  const deadline: number = Date.now() + 5_000;
+  const deadline: number = Date.now() + 15_000;
   while (!existsSync(path)) {
     if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${path}`);
     await Bun.sleep(10);
@@ -192,49 +192,65 @@ async function runConcurrentSends(
     );
   } finally {
     workers.forEach((worker: Bun.Subprocess<"ignore", "ignore", "pipe">): void => {
-      worker.kill();
+      if (worker.exitCode === null) worker.kill();
     });
+    await Promise.all(
+      workers.map(
+        (worker: Bun.Subprocess<"ignore", "ignore", "pipe">): Promise<number> => worker.exited,
+      ),
+    );
     rmSync(directory, { force: true, recursive: true });
   }
+}
+
+function expectIdenticalRetryResults(retries: readonly WorkerResult[]): void {
+  expect(retries.every((result: WorkerResult): boolean => result.status === "sent")).toBe(true);
+  const firstRetry: WorkerResult | undefined = retries[0];
+  const secondRetry: WorkerResult | undefined = retries[1];
+  if (
+    firstRetry === undefined ||
+    firstRetry.status !== "sent" ||
+    secondRetry === undefined ||
+    secondRetry.status !== "sent"
+  ) {
+    throw new Error("Expected both identical concurrent sends to resolve successfully");
+  }
+  expect([firstRetry.duplicate, secondRetry.duplicate].sort()).toEqual([false, true]);
+  expect(firstRetry.messageId).toBe(secondRetry.messageId);
+}
+
+function expectConflictingRetryResults(conflicts: readonly WorkerResult[]): void {
+  expect(
+    conflicts.filter((result: WorkerResult): boolean => result.status === "sent"),
+  ).toHaveLength(1);
+  const failures: readonly WorkerResult[] = conflicts.filter(
+    (result: WorkerResult): boolean => result.status === "error",
+  );
+  expect(failures).toHaveLength(1);
+  const failure: WorkerResult | undefined = failures[0];
+  if (failure === undefined || failure.status !== "error") {
+    throw new Error("Expected one idempotency conflict");
+  }
+  expect(failure.errorClass).toBe("IdempotencyConflictError");
 }
 
 if (process.env["MURMUR_SQLITE_RACE_WORKER"] === "1") {
   await runWorker();
 } else {
   test("resolves concurrent cross-process idempotent sends through the stored winner", async (): Promise<void> => {
-    const retries: readonly WorkerResult[] = await runConcurrentSends([
-      "Concurrent request",
-      "Concurrent request",
-    ]);
-    expect(retries.every((result: WorkerResult): boolean => result.status === "sent")).toBe(true);
-    const firstRetry: WorkerResult | undefined = retries[0];
-    const secondRetry: WorkerResult | undefined = retries[1];
-    if (
-      firstRetry === undefined ||
-      firstRetry.status !== "sent" ||
-      secondRetry === undefined ||
-      secondRetry.status !== "sent"
-    ) {
-      throw new Error("Expected both identical concurrent sends to resolve successfully");
+    let attempt: number = 0;
+    while (attempt < 5) {
+      const retries: readonly WorkerResult[] = await runConcurrentSends([
+        "Concurrent request",
+        "Concurrent request",
+      ]);
+      expectIdenticalRetryResults(retries);
+      const conflicts: readonly WorkerResult[] = await runConcurrentSends([
+        "First request",
+        "Conflicting request",
+      ]);
+      expectConflictingRetryResults(conflicts);
+      attempt += 1;
     }
-    expect([firstRetry.duplicate, secondRetry.duplicate].sort()).toEqual([false, true]);
-    expect(firstRetry.messageId).toBe(secondRetry.messageId);
-
-    const conflicts: readonly WorkerResult[] = await runConcurrentSends([
-      "First request",
-      "Conflicting request",
-    ]);
-    expect(
-      conflicts.filter((result: WorkerResult): boolean => result.status === "sent"),
-    ).toHaveLength(1);
-    const failures: readonly WorkerResult[] = conflicts.filter(
-      (result: WorkerResult): boolean => result.status === "error",
-    );
-    expect(failures).toHaveLength(1);
-    const failure: WorkerResult | undefined = failures[0];
-    if (failure === undefined || failure.status !== "error") {
-      throw new Error("Expected one idempotency conflict");
-    }
-    expect(failure.errorClass).toBe("IdempotencyConflictError");
-  }, 20_000);
+  }, 60_000);
 }

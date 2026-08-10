@@ -78,21 +78,25 @@ test("safety gate accepts fully explicit TypeScript", async (): Promise<void> =>
 });
 
 test("safety gate rejects every TypeScript escape hatch", async (): Promise<void> => {
-  const suppression: string = "// @ts-" + "expect-error";
+  const expectErrorSuppression: string = "// @ts-" + "expect-error";
+  const ignoreSuppression: string = "// @ts-" + "ignore";
+  const noCheckSuppression: string = "// @ts-" + "nocheck";
   const workspace: string = createWorkspace({
     "src/server.ts": "export const ready: boolean = true;\n",
+    "test/expect-error.ts": `${expectErrorSuppression}\nconst value: number = 'invalid';\n`,
+    "test/ignore.ts": `${ignoreSuppression}\nconst value: number = 'invalid';\n`,
+    "test/nocheck.ts": `${noCheckSuppression}\nconst value: number = 'invalid';\n`,
     "test/violations.ts": [
       "declare const candidate: { value?: string } | null;",
       "const implicit = candidate?.value as string;",
+      "const asserted: string = <string>implicit;",
       "const definite: string = candidate!.value;",
       "function untyped(input) { return input; }",
       "const arrow: (input: string) => string = (input: string) => input;",
       "class Example { value = 1; }",
       "const escaped: any = implicit;",
       "try { throw new Error('failure'); } catch (error) { console.log(error); }",
-      suppression,
-      "const ignored: number = 'invalid';",
-      "void definite; void arrow; void Example; void escaped; void ignored;",
+      "void asserted; void definite; void arrow; void Example; void escaped;",
       "",
     ].join("\n"),
   });
@@ -100,7 +104,11 @@ test("safety gate rejects every TypeScript escape hatch", async (): Promise<void
     const result: SafetyResult = await runSafety(workspace);
     expect(result.exitCode).not.toBe(0);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("Type assertions are forbidden");
+    const assertionViolations: RegExpMatchArray | null = result.stderr.match(
+      /Type assertions are forbidden/gu,
+    );
+    if (assertionViolations === null) throw new Error("Expected assertion violations");
+    expect(assertionViolations).toHaveLength(2);
     expect(result.stderr).toContain("Non-null assertions are forbidden");
     expect(result.stderr).toContain("Optional chaining is forbidden");
     expect(result.stderr).toContain("The any type is forbidden");
@@ -109,7 +117,14 @@ test("safety gate rejects every TypeScript escape hatch", async (): Promise<void
     expect(result.stderr).toContain("Class properties require an explicit type");
     expect(result.stderr).toContain("Functions and methods require an explicit return type");
     expect(result.stderr).toContain("Catch variables require an explicit unknown type");
-    expect(result.stderr).toContain("TypeScript suppression comments are forbidden");
+    const suppressionViolations: RegExpMatchArray | null = result.stderr.match(
+      /TypeScript suppression comments are forbidden/gu,
+    );
+    if (suppressionViolations === null) throw new Error("Expected suppression violations");
+    expect(suppressionViolations).toHaveLength(3);
+    expect(result.stderr).toContain("test/expect-error.ts");
+    expect(result.stderr).toContain("test/ignore.ts");
+    expect(result.stderr).toContain("test/nocheck.ts");
   } finally {
     rmSync(workspace, { force: true, recursive: true });
   }
