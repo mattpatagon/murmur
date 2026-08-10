@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { ACTIVE_AGENT_WINDOW_MINUTES, RETENTION_DAYS } from "../src/domain/contracts.js";
+import { RETENTION_DAYS } from "../src/domain/contracts.js";
 import type {
   BroadcastMessageCommand,
   BroadcastMessageResult,
@@ -274,7 +274,7 @@ test("broadcast retries preserve their recipient snapshot and reject changed req
   });
 });
 
-test(`broadcasts only to agents active in the last ${ACTIVE_AGENT_WINDOW_MINUTES} minutes`, (): void => {
+test("broadcasts only to agents with live session leases", (): void => {
   withFixture((fixture: StoreFixture): void => {
     fixture.store.registerAgent({
       agentId: AgentId.parse("carol"),
@@ -410,6 +410,11 @@ test("upgrades a SQLite v3 database for broadcast delivery", (): void => {
   const clock: MutableClock = new MutableClock(Instant.parse("2026-08-04T12:00:00.000Z"));
   const store: SqliteMessageStore = new SqliteMessageStore(databasePath, clock);
   try {
+    store.registerAgent({
+      agentId: AgentId.parse("bob"),
+      displayName: DisplayName.parse("Bob"),
+      metadata: { machine: "mac-1", repository: "mattpatagon/murmur" },
+    });
     const result: BroadcastMessageResult = store.broadcastMessage({
       ...baseBroadcastCommand(),
       audience: {

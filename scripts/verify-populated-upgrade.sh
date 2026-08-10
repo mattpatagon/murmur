@@ -71,14 +71,39 @@ delete from murmur.messages
 where message_id = '41000000-0000-4000-8000-000000000002';
 SQL
 
-for migration in supabase/migrations/20260809*.sql; do
-  cp "$migration" "$work_directory/supabase/migrations/${migration##*/}"
+for migration in supabase/migrations/*.sql; do
+  migration_name="${migration##*/}"
+  if [[ "$migration_name" > '20260809004137_tenant_key_contract.sql' ||
+    "$migration_name" == '20260809004137_tenant_key_contract.sql' ]] &&
+    [[ "$migration_name" < '20260810160000_agent_lifecycle_columns.sql' ]]; then
+    cp "$migration" "$work_directory/supabase/migrations/$migration_name"
+  fi
 done
 bunx supabase db push --workdir "$work_directory" --db-url "$upgrade_url" --include-all --yes
 
+# Apply every lifecycle phase as its own tracked migration. Each subsequent
+# push replays the already-recorded prefix, modeling a process restart at every
+# safe phase boundary. The explicit unchanged retry proves the quota cutover is
+# recorded before later phases begin.
+for migration in supabase/migrations/2026081016*.sql; do
+  migration_name="${migration##*/}"
+  cp "$migration" "$work_directory/supabase/migrations/$migration_name"
+  bunx supabase db push --workdir "$work_directory" --db-url "$upgrade_url" --include-all --yes
+  if [ "$migration_name" = '20260810160004_agent_quota_cutover.sql' ]; then
+    bunx supabase db push --workdir "$work_directory" --db-url "$upgrade_url" --include-all --yes
+  fi
+done
+
+lifecycle_backfill="$(psql "$upgrade_url" --tuples-only --no-align --set ON_ERROR_STOP=1 \
+  --command "select (select count(*) from murmur.agent_sessions) || '|' || (select count(*) from murmur.agent_sessions where session_key = 'backfill' and generation = 1) || '|' || usage.agent_count || '|' || usage.retained_agent_count from murmur.tenant_resource_usage as usage where tenant_id = '00000000-0000-4000-8000-000000000001'")"
+if [ "$lifecycle_backfill" != '3|3|3|3' ]; then
+  echo "Lifecycle backfill or agent recount was unexpected: $lifecycle_backfill" >&2
+  exit 1
+fi
+
 preserved_cursor="$(psql "$upgrade_url" --tuples-only --no-align --set ON_ERROR_STOP=1 \
-  --command "select sequence || '|' || tenant_sequence from murmur.messages where message_id = '41000000-0000-4000-8000-000000000001'")"
-if [ "$preserved_cursor" != '1|1' ]; then
+  --command "select sequence || '|' || tenant_sequence || '|' || sender_generation || '|' || recipient_generation from murmur.messages where message_id = '41000000-0000-4000-8000-000000000001'")"
+if [ "$preserved_cursor" != '1|1|1|1' ]; then
   echo "Existing cursor changed during backfill: $preserved_cursor" >&2
   exit 1
 fi
@@ -115,8 +140,8 @@ insert into murmur.messages(
 SQL
 
 compatible_cursor="$(psql "$upgrade_url" --tuples-only --no-align --set ON_ERROR_STOP=1 \
-  --command "select sequence || '|' || tenant_sequence from murmur.messages where message_id = '41000000-0000-4000-8000-000000000004'")"
-if [ "$compatible_cursor" != '4|4' ]; then
+  --command "select sequence || '|' || tenant_sequence || '|' || sender_generation || '|' || recipient_generation from murmur.messages where message_id = '41000000-0000-4000-8000-000000000004'")"
+if [ "$compatible_cursor" != '4|4|1|1' ]; then
   echo "Contract-v1 cursor diverged after a rollback gap: $compatible_cursor" >&2
   exit 1
 fi
@@ -162,8 +187,8 @@ if [ "$tenant_cursor" != '1' ]; then
 fi
 
 contract_state="$(psql "$upgrade_url" --tuples-only --no-align --set ON_ERROR_STOP=1 \
-  --command "select state.tenant_contract_version || '|' || (column_default is null)::text || '|' || usage.agent_count || '|' || usage.message_count from murmur.platform_state as state cross join information_schema.columns as column_info join murmur.tenant_resource_usage as usage on usage.tenant_id = '42000000-0000-4000-8000-000000000001' where state.singleton_id = 1 and column_info.table_schema = 'murmur' and column_info.table_name = 'agents' and column_info.column_name = 'tenant_id'")"
-if [ "$contract_state" != '2|true|2|1' ]; then
+  --command "select state.tenant_contract_version || '|' || (column_default is null)::text || '|' || usage.agent_count || '|' || usage.retained_agent_count || '|' || usage.message_count from murmur.platform_state as state cross join information_schema.columns as column_info join murmur.tenant_resource_usage as usage on usage.tenant_id = '42000000-0000-4000-8000-000000000001' where state.singleton_id = 1 and column_info.table_schema = 'murmur' and column_info.table_name = 'agents' and column_info.column_name = 'tenant_id'")"
+if [ "$contract_state" != '2|true|2|2|1' ]; then
   echo "Final tenant contract state was unexpected: $contract_state" >&2
   exit 1
 fi

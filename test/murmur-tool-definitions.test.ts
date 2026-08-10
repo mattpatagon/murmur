@@ -1,18 +1,36 @@
 import { describe, expect, test } from "bun:test";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
-import { TenantId } from "../src/domain/value-objects.js";
+import {
+  CloseAgentInputSchema,
+  EndSessionInputSchema,
+  encodeAgentCursor,
+  ListAgentsInputSchema,
+  ListAgentsOutputSchema,
+  listAgentsQuery,
+  SendMessageInputSchema,
+} from "../src/domain/contracts.js";
+import { PostNoticeInputSchema } from "../src/domain/notice-contracts.js";
+import { AgentId, TenantId } from "../src/domain/value-objects.js";
 import type { HostedPrincipal } from "../src/hosted/control-plane.js";
 import { type ToolExposure, toolsForPrincipal } from "../src/mcp/murmur-tool-definitions.js";
 
 const DATA_TOOLS: readonly string[] = [
   "broadcast_message",
+  "close_agent",
+  "end_session",
+  "get_agent",
+  "get_message_history",
   "get_messages",
   "list_agents",
+  "list_notices",
   "mark_messages_read",
+  "post_notice",
   "register_agent",
+  "resolve_notice",
   "send_message",
   "wait_for_messages",
+  "withdraw_notice",
 ];
 const TENANT_ADMIN_TOOLS: readonly string[] = [
   "create_access_token",
@@ -116,5 +134,62 @@ describe("MCP role-to-tool exposure", (): void => {
       if (tool.outputSchema === undefined) throw new Error(`${tool.name} has no output schema`);
       expect(tool.outputSchema.type).toBe("object");
     });
+  });
+
+  test("lifecycle guards and shared value schemas match the runtime contract", (): void => {
+    expect(EndSessionInputSchema.safeParse({ agent_id: "agent-a", reason: "stop" }).success).toBe(
+      false,
+    );
+    expect(CloseAgentInputSchema.safeParse({ agent_id: "agent-a", reason: "manual" }).success).toBe(
+      false,
+    );
+    expect(
+      SendMessageInputSchema.safeParse({
+        content: "hello",
+        recipient_id: "agent-b",
+        sender_id: "agent-a",
+        session_key: "invalid session key",
+      }).success,
+    ).toBe(false);
+    expect(
+      PostNoticeInputSchema.safeParse({
+        actor_id: "agent-a",
+        content: "handoff",
+        kind: "handoff",
+        repository: "not-a-repository",
+      }).success,
+    ).toBe(false);
+  });
+
+  test("agent discovery exposes validated opaque pagination cursors", (): void => {
+    const cursor: string = encodeAgentCursor(AgentId.parse("agent-a"));
+    const query: ReturnType<typeof listAgentsQuery> = listAgentsQuery(
+      ListAgentsInputSchema.parse({ cursor, limit: 25, state: "closed" }),
+    );
+    if (query.cursor === null) throw new Error("Expected decoded agent cursor");
+    expect(query.cursor.value).toBe("agent-a");
+    expect(query.limit).toBe(25);
+    expect(query.state).toBe("closed");
+    expect(
+      (): ReturnType<typeof listAgentsQuery> =>
+        listAgentsQuery(ListAgentsInputSchema.parse({ cursor: "not-a-cursor" })),
+    ).toThrow("Invalid agent cursor");
+    expect(ListAgentsInputSchema.parse({})).toEqual({ limit: 1_000, state: "active" });
+    expect(ListAgentsOutputSchema.safeParse({ agents: [], next_cursor: null }).success).toBe(true);
+    expect(ListAgentsOutputSchema.safeParse({ agents: [] }).success).toBe(false);
+  });
+
+  test("lease-renewing reads are not advertised as read-only or idempotent", (): void => {
+    const tools: Tool[] = toolsForPrincipal(exposure(null));
+    for (const name of ["get_messages", "wait_for_messages", "list_notices"]) {
+      const tool: Tool | undefined = tools.find(
+        (candidate: Tool): boolean => candidate.name === name,
+      );
+      if (tool === undefined) throw new Error(`Missing tool ${name}`);
+      const annotations: Tool["annotations"] = tool.annotations;
+      if (annotations === undefined) throw new Error(`Missing annotations for ${name}`);
+      expect(annotations.readOnlyHint).toBe(false);
+      expect(annotations.idempotentHint).toBe(false);
+    }
   });
 });

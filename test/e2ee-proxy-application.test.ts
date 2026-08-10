@@ -15,6 +15,7 @@ import {
 import type {
   BroadcastMessageInput,
   GetMessagesInput,
+  ListAgentsInput,
   ListAgentsOutput,
   MarkMessagesReadInput,
   MarkMessagesReadOutput,
@@ -81,12 +82,21 @@ function registration(): RegisterAgentOutput {
   return {
     agent: {
       agent_id: SENDER_ID,
+      closed_at: null,
+      close_reason: null,
       created_at: NOW,
       display_name: "Sender",
+      generation: 1,
       last_seen_at: NOW,
+      lease_expires_at: "2026-08-10T20:15:00.000Z",
+      live_session_count: 1,
       metadata: {},
+      state: "active",
     },
     inbox_uri: `murmur://inbox/${encodeURIComponent(SENDER_ID)}`,
+    lease_minutes: 15,
+    reopened: false,
+    repository_diverged: false,
     retention_days: 30,
   };
 }
@@ -101,11 +111,12 @@ class FakeProxyOperations implements E2eeProxyOperations {
     return registration();
   }
 
-  public async listAgents(): Promise<ListAgentsOutput> {
+  public async listAgents(_input: ListAgentsInput): Promise<ListAgentsOutput> {
     this.calls.push("list_agents");
     const sender: RegisterAgentOutput["agent"] = registration().agent;
     return {
       agents: [sender, { ...sender, agent_id: RECIPIENT_ID, display_name: "Receiver" }],
+      next_cursor: null,
     };
   }
 
@@ -216,7 +227,7 @@ test("local E2E MCP proxy preserves familiar data tools and verified plaintext o
       agent_id: SENDER_ID,
       display_name: "Sender",
     });
-    await callTool(client, "list_agents", {});
+    await callTool(client, "list_agents", { limit: 1_000, state: "active" });
     const sent: CallToolResult = await callTool(client, "send_message", {
       content: "endpoint plaintext",
       recipient_id: RECIPIENT_ID,

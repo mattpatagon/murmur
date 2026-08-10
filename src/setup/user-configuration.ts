@@ -306,7 +306,13 @@ export function configureClaudeMcp(
   return result;
 }
 
-const HOOK_EVENTS: readonly string[] = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"];
+const HOOK_EVENTS: readonly string[] = [
+  "SessionStart",
+  "UserPromptSubmit",
+  "PostToolUse",
+  "Stop",
+  "SessionEnd",
+];
 
 function isMurmurHookGroup(value: unknown): boolean {
   if (!isRecord(value) || !Array.isArray(value["hooks"])) return false;

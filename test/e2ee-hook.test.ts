@@ -67,14 +67,35 @@ test("E2E hooks request only a content-free inbox summary", async (): Promise<vo
         const name: string | null = requestedTool(input);
         if (name !== null) tools.push(name);
         const structuredContent: Record<string, unknown> =
-          name === "get_inbox_summary"
+          name === "register_agent"
             ? {
-                agent_id: identity.agentId,
-                inbox_version: 42,
-                newest_sequence: 42,
-                unread_count: 3,
+                agent: {
+                  agent_id: identity.agentId,
+                  closed_at: null,
+                  close_reason: null,
+                  created_at: "2026-08-10T20:00:00.000Z",
+                  display_name: identity.displayName,
+                  generation: 1,
+                  last_seen_at: "2026-08-10T20:00:00.000Z",
+                  lease_expires_at: "2026-08-10T20:15:00.000Z",
+                  live_session_count: 1,
+                  metadata: {},
+                  state: "active",
+                },
+                inbox_uri: `murmur://inbox/${encodeURIComponent(identity.agentId)}`,
+                lease_minutes: 15,
+                reopened: false,
+                repository_diverged: false,
+                retention_days: 30,
               }
-            : {};
+            : name === "get_inbox_summary"
+              ? {
+                  agent_id: identity.agentId,
+                  inbox_version: 42,
+                  newest_sequence: 42,
+                  unread_count: 3,
+                }
+              : {};
         return Response.json({
           id,
           jsonrpc: "2.0",
@@ -97,7 +118,12 @@ test("E2E hooks request only a content-free inbox summary", async (): Promise<vo
       token: "hook-test-token",
       url: `http://127.0.0.1:${server.port}/mcp`,
     });
-    expect(summary).toEqual({ inboxVersion: 42, messageCount: 3, senderIds: [] });
+    expect(summary).toEqual({
+      agentGeneration: 1,
+      inboxVersion: 42,
+      messageCount: 3,
+      senderIds: [],
+    });
     expect(tools).toEqual(["register_agent", "get_inbox_summary"]);
     expect(requests.join("\n")).not.toContain("get_messages");
     expect(requests.join("\n")).not.toContain("content");
@@ -123,7 +149,7 @@ test("hook mode is passed from local E2E setup without changing notification con
     options: { readonly e2ee: boolean },
   ): Promise<InboxSummary> => {
     e2eeModes.push(options.e2ee);
-    return { inboxVersion: 0, messageCount: 0, senderIds: [] };
+    return { agentGeneration: 1, inboxVersion: 0, messageCount: 0, senderIds: [] };
   };
   try {
     await handleHook({ cwd, hook_event_name: "SessionStart" }, "codex", {

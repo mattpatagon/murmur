@@ -84,7 +84,7 @@ export class E2eeProxyResources {
 
   private async listResources(): Promise<ListResourcesResult> {
     const agents: Awaited<ReturnType<E2eeProxyOperations["listAgents"]>> =
-      await this.#operations.listAgents();
+      await this.#operations.listAgents({ limit: 1_000, state: "active" });
     return {
       resources: agents.agents.map(
         (agent: (typeof agents.agents)[number]): ListedResource => ({
@@ -159,7 +159,7 @@ export class E2eeProxyResources {
         );
       }
       const agents: Awaited<ReturnType<E2eeProxyOperations["listAgents"]>> =
-        await this.#operations.listAgents();
+        await this.#operations.listAgents({ limit: 1_000, state: "active" });
       if (
         !agents.agents.some(
           (agent: (typeof agents.agents)[number]): boolean => agent.agent_id === agentId,

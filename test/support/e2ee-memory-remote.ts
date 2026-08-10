@@ -62,10 +62,16 @@ function signingChain(bundle: PublicAgentKeyBundleDto): PublicAgentSigningChainD
 function agent(input: RegisterAgentInput): AgentDto {
   return {
     agent_id: input.agent_id,
+    closed_at: null,
+    close_reason: null,
     created_at: NOW,
     display_name: input.display_name === undefined ? input.agent_id : input.display_name,
+    generation: 1,
     last_seen_at: NOW,
+    lease_expires_at: "2026-08-10T20:15:00.000Z",
+    live_session_count: 1,
     metadata: input.metadata === undefined ? {} : input.metadata,
+    state: "active",
   };
 }
 
@@ -105,6 +111,9 @@ export class MemoryE2eeBackend {
     return {
       agent: stored,
       inbox_uri: `murmur://inbox/${encodeURIComponent(input.agent_id)}`,
+      lease_minutes: 15,
+      reopened: false,
+      repository_diverged: false,
       retention_days: 30,
     };
   }
@@ -114,6 +123,7 @@ export class MemoryE2eeBackend {
       agents: Array.from(this.#agents.values()).sort((left: AgentDto, right: AgentDto): number =>
         left.agent_id.localeCompare(right.agent_id),
       ),
+      next_cursor: null,
     };
   }
 

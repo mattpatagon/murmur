@@ -162,8 +162,7 @@ export async function callE2eeProxyTool(
     }
     case "list_agents": {
       const input: ListAgentsInput = ListAgentsInputSchema.parse(argumentsValue);
-      if (Object.keys(input).length !== 0) throw new Error("list_agents takes no arguments");
-      return toolResult(await operations.listAgents());
+      return toolResult(await operations.listAgents(input));
     }
     case "send_message": {
       const input: SendMessageInput = SendMessageInputSchema.parse(argumentsValue);

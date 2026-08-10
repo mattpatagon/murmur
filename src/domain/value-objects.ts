@@ -352,6 +352,18 @@ export class Instant {
     return Instant.fromDate(new Date(this.date.getTime() + days * millisecondsPerDay));
   }
 
+  public addHours(hours: number): Instant {
+    return Instant.fromDate(new Date(this.date.getTime() + hours * 60 * 60 * 1000));
+  }
+
+  public addMinutes(minutes: number): Instant {
+    return Instant.fromDate(new Date(this.date.getTime() + minutes * 60 * 1000));
+  }
+
+  public isAfter(other: Instant): boolean {
+    return this.date.getTime() > other.date.getTime();
+  }
+
   public toISOString(): string {
     return this.date.toISOString();
   }

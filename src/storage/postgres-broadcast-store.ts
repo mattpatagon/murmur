@@ -2,11 +2,11 @@ import type { Sql, TransactionSql } from "postgres";
 import { z } from "zod";
 
 import { broadcastRequestMatches } from "../domain/broadcasts.js";
-import { ACTIVE_AGENT_WINDOW_MINUTES, RETENTION_DAYS } from "../domain/contracts.js";
-import { IdempotencyConflictError, UnknownAgentError } from "../domain/errors.js";
-import type { BroadcastMessageCommand, BroadcastMessageResult } from "../domain/models.js";
+import { RETENTION_DAYS } from "../domain/contracts.js";
+import { IdempotencyConflictError } from "../domain/errors.js";
+import { SessionKey } from "../domain/lifecycle-values.js";
+import type { Agent, BroadcastMessageCommand, BroadcastMessageResult } from "../domain/models.js";
 import {
-  type AgentId,
   BroadcastId,
   Instant,
   MachineName,
@@ -15,14 +15,13 @@ import {
   type TenantId,
   ThreadId,
 } from "../domain/value-objects.js";
+import { renewPostgresSessionInTransaction } from "./postgres-agent-lifecycle-store.js";
 import {
-  AgentIdRowSchema,
   type BroadcastRow,
   BroadcastRowSchema,
   type CountRow,
   CountRowSchema,
   firstRow,
-  minutesBefore,
 } from "./postgres-message-rows.js";
 import {
   lockPostgresRecipientCommitOrder,
@@ -30,83 +29,11 @@ import {
 } from "./postgres-message-transactions.js";
 
 const MAX_BROADCAST_RECIPIENTS: number = 100;
-type AgentIdRow = { readonly agent_id: string };
-
-async function requireBroadcastSender(
-  transaction: TransactionSql,
-  tenantId: TenantId,
-  senderId: AgentId,
-): Promise<void> {
-  const rawRows: unknown = await transaction`
-    SELECT agent_id
-    FROM murmur.agents
-    WHERE tenant_id = ${tenantId.value}::uuid
-      AND agent_id = ${senderId.value}
-  `;
-  const rows: AgentIdRow[] = z.array(AgentIdRowSchema).parse(rawRows);
-  if (rows.length === 0) throw new UnknownAgentError(senderId.value);
-}
-
-async function activeBroadcastRecipients(
-  transaction: TransactionSql,
-  tenantId: TenantId,
-  senderId: AgentId,
-  activeSince: string,
-  repositoryName: string | null,
-  machineName: string | null,
-): Promise<readonly AgentIdRow[]> {
-  let rawRows: unknown;
-  if (repositoryName !== null && machineName !== null) {
-    rawRows = await transaction`
-      SELECT agent_id
-      FROM murmur.agents
-      WHERE tenant_id = ${tenantId.value}::uuid
-        AND agent_id <> ${senderId.value}
-        AND last_seen_at >= ${activeSince}::timestamptz
-        AND metadata ->> 'repository' = ${repositoryName}
-        AND metadata ->> 'machine' = ${machineName}
-      ORDER BY agent_id ASC
-      LIMIT ${MAX_BROADCAST_RECIPIENTS + 1}
-    `;
-  } else if (repositoryName !== null) {
-    rawRows = await transaction`
-      SELECT agent_id
-      FROM murmur.agents
-      WHERE tenant_id = ${tenantId.value}::uuid
-        AND agent_id <> ${senderId.value}
-        AND last_seen_at >= ${activeSince}::timestamptz
-        AND metadata ->> 'repository' = ${repositoryName}
-      ORDER BY agent_id ASC
-      LIMIT ${MAX_BROADCAST_RECIPIENTS + 1}
-    `;
-  } else if (machineName !== null) {
-    rawRows = await transaction`
-      SELECT agent_id
-      FROM murmur.agents
-      WHERE tenant_id = ${tenantId.value}::uuid
-        AND agent_id <> ${senderId.value}
-        AND last_seen_at >= ${activeSince}::timestamptz
-        AND metadata ->> 'machine' = ${machineName}
-      ORDER BY agent_id ASC
-      LIMIT ${MAX_BROADCAST_RECIPIENTS + 1}
-    `;
-  } else {
-    rawRows = await transaction`
-      SELECT agent_id
-      FROM murmur.agents
-      WHERE tenant_id = ${tenantId.value}::uuid
-        AND agent_id <> ${senderId.value}
-        AND last_seen_at >= ${activeSince}::timestamptz
-      ORDER BY agent_id ASC
-      LIMIT ${MAX_BROADCAST_RECIPIENTS + 1}
-    `;
-  }
-  const rows: AgentIdRow[] = z.array(AgentIdRowSchema).parse(rawRows);
-  if (rows.length > MAX_BROADCAST_RECIPIENTS) {
-    throw new Error(`Broadcasts are limited to ${MAX_BROADCAST_RECIPIENTS} recipients`);
-  }
-  return rows;
-}
+type RecipientRow = { readonly agent_id: string; readonly generation: number };
+const RecipientRowSchema: z.ZodType<RecipientRow> = z.strictObject({
+  agent_id: z.string(),
+  generation: z.number().int().positive(),
+});
 
 async function broadcastResult(
   transaction: TransactionSql,
@@ -115,13 +42,12 @@ async function broadcastResult(
   duplicate: boolean,
 ): Promise<BroadcastMessageResult> {
   const broadcastId: BroadcastId = BroadcastId.parse(row.broadcast_id);
-  const rawCountRows: unknown = await transaction`
-    SELECT COUNT(*) AS count
-    FROM murmur.messages
+  const rawCount: unknown = await transaction`
+    SELECT COUNT(*)::int AS count FROM murmur.messages
     WHERE tenant_id = ${tenantId.value}::uuid
       AND broadcast_id = ${broadcastId.value}::uuid
   `;
-  const countRows: CountRow[] = z.array(CountRowSchema).parse(rawCountRows);
+  const counts: CountRow[] = z.array(CountRowSchema).parse(rawCount);
   return {
     audience: {
       machineName:
@@ -135,31 +61,22 @@ async function broadcastResult(
     createdAt: Instant.parse(row.created_at),
     duplicate,
     expiresAt: Instant.parse(row.expires_at),
-    recipientCount: firstRow(countRows, "broadcast recipient count").count,
+    recipientCount: firstRow(counts, "broadcast recipient count").count,
     threadId: ThreadId.parse(row.thread_id),
   };
 }
 
-async function existingBroadcastResult(
+async function existingBroadcast(
   transaction: TransactionSql,
   tenantId: TenantId,
   command: BroadcastMessageCommand,
-): Promise<BroadcastMessageResult> {
-  if (command.idempotencyKey === null) {
-    throw new Error("Broadcast insert returned no row without an idempotency key");
-  }
-  const rawRows: unknown = await transaction`
+): Promise<BroadcastRow | null> {
+  if (command.idempotencyKey === null) return null;
+  const raw: unknown = await transaction`
     SELECT
-      broadcast_id::text AS broadcast_id,
-      thread_id,
-      sender_id,
-      content,
-      repository_name,
-      branch_name,
-      client_name,
-      audience_repository_name,
-      audience_machine_name,
-      idempotency_key,
+      broadcast_id::text AS broadcast_id, thread_id, sender_id, sender_generation,
+      content, repository_name, branch_name, client_name,
+      audience_repository_name, audience_machine_name, idempotency_key,
       to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
       to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS expires_at
     FROM murmur.broadcasts
@@ -167,22 +84,85 @@ async function existingBroadcastResult(
       AND sender_id = ${command.senderId.value}
       AND idempotency_key = ${command.idempotencyKey.value}
   `;
-  const rows: BroadcastRow[] = z.array(BroadcastRowSchema).parse(rawRows);
-  const existing: BroadcastRow = firstRow(rows, "idempotent broadcast");
+  const rows: BroadcastRow[] = z.array(BroadcastRowSchema).parse(raw);
+  const row: BroadcastRow | undefined = rows[0];
+  if (row === undefined) return null;
   const matches: boolean = broadcastRequestMatches(
     {
-      audienceMachineName: existing.audience_machine_name,
-      audienceRepositoryName: existing.audience_repository_name,
-      branchName: existing.branch_name,
-      clientName: existing.client_name,
-      content: existing.content,
-      repositoryName: existing.repository_name,
-      threadId: existing.thread_id,
+      audienceMachineName: row.audience_machine_name,
+      audienceRepositoryName: row.audience_repository_name,
+      branchName: row.branch_name,
+      clientName: row.client_name,
+      content: row.content,
+      repositoryName: row.repository_name,
+      threadId: row.thread_id,
     },
     command,
   );
   if (!matches) throw new IdempotencyConflictError(command.idempotencyKey.value);
-  return await broadcastResult(transaction, tenantId, existing, true);
+  return row;
+}
+
+async function candidateRecipients(
+  transaction: TransactionSql,
+  tenantId: TenantId,
+  command: BroadcastMessageCommand,
+  now: Instant,
+): Promise<readonly RecipientRow[]> {
+  const repository: string | null =
+    command.audience.repositoryName === null ? null : command.audience.repositoryName.value;
+  const machine: string | null =
+    command.audience.machineName === null ? null : command.audience.machineName.value;
+  const raw: unknown = await transaction`
+    SELECT agent.agent_id, agent.generation
+    FROM murmur.agents AS agent
+    WHERE agent.tenant_id = ${tenantId.value}::uuid
+      AND agent.agent_id <> ${command.senderId.value}
+      AND agent.closed_at IS NULL
+      AND (${repository}::text IS NULL OR agent.metadata ->> 'repository' = ${repository})
+      AND (${machine}::text IS NULL OR agent.metadata ->> 'machine' = ${machine})
+      AND EXISTS (
+        SELECT 1 FROM murmur.agent_sessions AS session
+        WHERE session.tenant_id = agent.tenant_id
+          AND session.agent_id = agent.agent_id
+          AND session.generation = agent.generation
+          AND session.ended_at IS NULL
+          AND session.lease_expires_at > ${now.toISOString()}::timestamptz
+      )
+    ORDER BY agent.agent_id ASC
+    LIMIT ${MAX_BROADCAST_RECIPIENTS + 1}
+  `;
+  const rows: RecipientRow[] = z.array(RecipientRowSchema).parse(raw);
+  if (rows.length > MAX_BROADCAST_RECIPIENTS) {
+    throw new Error(`Broadcasts are limited to ${MAX_BROADCAST_RECIPIENTS} recipients`);
+  }
+  return rows;
+}
+
+async function currentRecipients(
+  transaction: TransactionSql,
+  tenantId: TenantId,
+  ids: readonly string[],
+  now: Instant,
+): Promise<readonly RecipientRow[]> {
+  if (ids.length === 0) return [];
+  const currentRaw: unknown = await transaction`
+    SELECT agent.agent_id, agent.generation
+    FROM murmur.agents AS agent
+    WHERE agent.tenant_id = ${tenantId.value}::uuid
+      AND agent.agent_id = ANY(${transaction.array(Array.from(ids))}::text[])
+      AND agent.closed_at IS NULL
+      AND EXISTS (
+        SELECT 1 FROM murmur.agent_sessions AS session
+        WHERE session.tenant_id = agent.tenant_id
+          AND session.agent_id = agent.agent_id
+          AND session.generation = agent.generation
+          AND session.ended_at IS NULL
+          AND session.lease_expires_at > ${now.toISOString()}::timestamptz
+      )
+    ORDER BY agent.agent_id ASC
+  `;
+  return z.array(RecipientRowSchema).parse(currentRaw);
 }
 
 export async function broadcastPostgresMessage(
@@ -200,81 +180,98 @@ export async function broadcastPostgresMessage(
   return await database.begin(
     async (transaction: TransactionSql): Promise<BroadcastMessageResult> => {
       await setPostgresTenantContext(transaction, tenantId);
-      await requireBroadcastSender(transaction, tenantId, command.senderId);
-      const broadcastId: BroadcastId = BroadcastId.generate();
-      const threadId: ThreadId = command.threadId === null ? ThreadId.generate() : command.threadId;
-      const createdAt: string = now.toISOString();
-      const expiresAt: string = now.addDays(RETENTION_DAYS).toISOString();
-      const audienceRepository: string | null =
-        command.audience.repositoryName === null ? null : command.audience.repositoryName.value;
-      const audienceMachine: string | null =
-        command.audience.machineName === null ? null : command.audience.machineName.value;
-      const idempotencyKey: string | null =
-        command.idempotencyKey === null ? null : command.idempotencyKey.value;
-      const rawInsertedRows: unknown = await transaction`
-        INSERT INTO murmur.broadcasts(
-          tenant_id, broadcast_id, thread_id, sender_id, content,
-          repository_name, branch_name, client_name, audience_repository_name,
-          audience_machine_name, idempotency_key, created_at, expires_at
-        )
-        VALUES (
-          ${tenantId.value}::uuid, ${broadcastId.value}::uuid, ${threadId.value},
-          ${command.senderId.value}, ${command.content.value}, ${repositoryName},
-          ${branchName}, ${clientName}, ${audienceRepository}, ${audienceMachine},
-          ${idempotencyKey}, ${createdAt}::timestamptz, ${expiresAt}::timestamptz
-        )
-        ON CONFLICT(tenant_id, sender_id, idempotency_key) DO NOTHING
-        RETURNING
-          broadcast_id::text AS broadcast_id, thread_id, sender_id, content,
-          repository_name, branch_name, client_name, audience_repository_name,
-          audience_machine_name, idempotency_key,
-          to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
-          to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS expires_at
-      `;
-      const insertedRows: BroadcastRow[] = z.array(BroadcastRowSchema).parse(rawInsertedRows);
-      const inserted: BroadcastRow | undefined = insertedRows[0];
-      if (inserted === undefined) {
-        return await existingBroadcastResult(transaction, tenantId, command);
+      const prior: BroadcastRow | null = await existingBroadcast(transaction, tenantId, command);
+      if (prior !== null) return await broadcastResult(transaction, tenantId, prior, true);
+      const candidates: readonly RecipientRow[] = await candidateRecipients(
+        transaction,
+        tenantId,
+        command,
+        now,
+      );
+      const candidateIds: string[] = candidates.map(
+        (candidate: RecipientRow): string => candidate.agent_id,
+      );
+      await lockPostgresRecipientCommitOrder(database, transaction, tenantId, [
+        command.senderId.value,
+        ...candidateIds,
+      ]);
+      const concurrentPrior: BroadcastRow | null = await existingBroadcast(
+        transaction,
+        tenantId,
+        command,
+      );
+      if (concurrentPrior !== null) {
+        return await broadcastResult(transaction, tenantId, concurrentPrior, true);
       }
 
-      const activeSince: string = minutesBefore(now, ACTIVE_AGENT_WINDOW_MINUTES).toISOString();
-      const recipients: readonly AgentIdRow[] = await activeBroadcastRecipients(
+      const sender: Agent = await renewPostgresSessionInTransaction(
         transaction,
         tenantId,
         command.senderId,
-        activeSince,
-        audienceRepository,
-        audienceMachine,
+        command.sessionKey ?? SessionKey.default(),
+        now,
+        true,
       );
+      const recipients: readonly RecipientRow[] = await currentRecipients(
+        transaction,
+        tenantId,
+        candidateIds,
+        now,
+      );
+      const broadcastId: BroadcastId = BroadcastId.generate();
+      const threadId: ThreadId = command.threadId === null ? ThreadId.generate() : command.threadId;
+      const rawInserted: unknown = await transaction`
+        INSERT INTO murmur.broadcasts(
+          tenant_id, broadcast_id, thread_id, sender_id, sender_generation, content,
+          repository_name, branch_name, client_name, audience_repository_name,
+          audience_machine_name, idempotency_key, created_at, expires_at
+        ) VALUES (
+          ${tenantId.value}::uuid, ${broadcastId.value}::uuid, ${threadId.value},
+          ${command.senderId.value}, ${sender.generation.value}, ${command.content.value},
+          ${repositoryName}, ${branchName}, ${clientName},
+          ${command.audience.repositoryName === null ? null : command.audience.repositoryName.value},
+          ${command.audience.machineName === null ? null : command.audience.machineName.value},
+          ${command.idempotencyKey === null ? null : command.idempotencyKey.value},
+          ${now.toISOString()}::timestamptz,
+          ${now.addDays(RETENTION_DAYS).toISOString()}::timestamptz
+        )
+        RETURNING
+          broadcast_id::text AS broadcast_id, thread_id, sender_id, sender_generation,
+          content, repository_name, branch_name, client_name,
+          audience_repository_name, audience_machine_name, idempotency_key,
+          to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
+          to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS expires_at
+      `;
+      const insertedRows: BroadcastRow[] = z.array(BroadcastRowSchema).parse(rawInserted);
       if (recipients.length > 0) {
         const messageIds: string[] = recipients.map((): string => MessageId.generate().value);
-        const recipientIds: string[] = recipients.map(
-          (recipient: AgentIdRow): string => recipient.agent_id,
-        );
-        await lockPostgresRecipientCommitOrder(database, transaction, tenantId, recipientIds);
         await transaction`
           INSERT INTO murmur.messages(
-            tenant_id, message_id, thread_id, sender_id, recipient_id, broadcast_id,
-            content, repository_name, branch_name, client_name, created_at, expires_at
+            tenant_id, message_id, thread_id, sender_id, recipient_id,
+            sender_generation, recipient_generation, broadcast_id, content,
+            repository_name, branch_name, client_name, created_at, expires_at
           )
           SELECT
             ${tenantId.value}::uuid, delivery.message_id, ${threadId.value},
-            ${command.senderId.value}, delivery.recipient_id, ${broadcastId.value}::uuid,
-            ${command.content.value}, ${repositoryName}, ${branchName}, ${clientName},
-            ${createdAt}::timestamptz, ${expiresAt}::timestamptz
+            ${command.senderId.value}, delivery.recipient_id,
+            ${sender.generation.value}, delivery.recipient_generation,
+            ${broadcastId.value}::uuid, ${command.content.value},
+            ${repositoryName}, ${branchName}, ${clientName},
+            ${now.toISOString()}::timestamptz,
+            ${now.addDays(RETENTION_DAYS).toISOString()}::timestamptz
           FROM unnest(
             ${database.array(messageIds)}::uuid[],
-            ${database.array(recipientIds)}::text[]
-          ) AS delivery(message_id, recipient_id)
+            ${database.array(recipients.map((row: RecipientRow): string => row.agent_id))}::text[],
+            ${database.array(recipients.map((row: RecipientRow): number => row.generation))}::integer[]
+          ) AS delivery(message_id, recipient_id, recipient_generation)
         `;
       }
-      await transaction`
-        UPDATE murmur.agents
-        SET last_seen_at = ${createdAt}::timestamptz
-        WHERE tenant_id = ${tenantId.value}::uuid
-          AND agent_id = ${command.senderId.value}
-      `;
-      return await broadcastResult(transaction, tenantId, inserted, false);
+      return await broadcastResult(
+        transaction,
+        tenantId,
+        firstRow(insertedRows, "inserted broadcast"),
+        false,
+      );
     },
   );
 }

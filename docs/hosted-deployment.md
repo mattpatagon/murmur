@@ -175,6 +175,26 @@ Finalization rolls back as one database transaction if it cannot complete. It
 must never run while an older writer can receive traffic. After version 2, only
 the tenant-qualified revision or a later compatible revision may be deployed.
 
+## Agent lifecycle rollout
+
+The lifecycle expansion assigns existing agents and messages to generation 1, creates a 60-minute
+compatibility lease for every agent seen within the preceding hour, and installs generation snapshot
+triggers before the new application handles traffic. Constraints are added before being validated in
+separate transactions. Message-history and lifecycle cleanup indexes are built concurrently, and
+schema lock waits fail after five seconds instead of blocking production work.
+
+Concurrent index creation can leave a same-named `INVALID` index after an interrupted rollout. The
+forward migrations inspect `pg_index`, drop only an invalid same-named artifact, and retry the
+concurrent build; a valid index is preserved. Rerun the unchanged migration. Do not manually drop a
+valid production index or edit an applied migration.
+
+Do not leave a pre-lifecycle revision serving traffic after the compatibility leases can expire.
+Older writers do not renew named leases and use the former broadcast audience rule. The automated
+workflow's full traffic cutover and old-revision drain therefore form part of this migration's
+correctness contract. If rollout cannot complete inside that window, stop and deploy the current
+forward revision; do not expose lifecycle tools alongside mixed broadcast semantics. Rollback to a
+pre-lifecycle application is unsupported after any identity advances beyond generation 1.
+
 ## Manual strict deployment
 
 Use this fallback only after operator bootstrap, legacy adoption, and tenant
@@ -233,9 +253,9 @@ gh workflow run production-smoke.yml --ref main
 The canary obtains and masks the operator credential through the deploy
 identity. It creates a short-lived tenant credential, verifies operator/admin/
 agent tool separation, intra-tenant direct and broadcast delivery,
-cross-tenant denial, session binding, suspension and restoration, and audit
-history. It revokes the temporary credential and leaves its uniquely named
-tenant suspended for inspection.
+cross-tenant denial, session binding, lifecycle state, historical inbox isolation,
+repository notices, suspension and restoration, and audit history. It revokes the temporary
+credential and leaves its uniquely named tenant suspended for inspection.
 
 ## Rollback and recovery
 

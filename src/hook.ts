@@ -1,13 +1,15 @@
 #!/usr/bin/env bun
 
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import process from "node:process";
 
 import { detectBranchName, detectRepositoryName } from "./context/repository-context.js";
-import { checkRemoteInbox } from "./hook-remote-inbox.js";
+import { checkRemoteInbox, endRemoteAgentSession } from "./hook-remote-client.js";
+import { isRecord } from "./hook-protocol.js";
+import type { AgentIdentity, InboxSummary } from "./hook-types.js";
 import { defaultHookCacheDirectory, environmentPath, positiveInteger } from "./platform-paths.js";
 import {
   DEFAULT_MURMUR_URL,
@@ -15,7 +17,14 @@ import {
   type MurmurClient,
 } from "./setup/user-configuration.js";
 
-export { checkRemoteInbox } from "./hook-remote-inbox.js";
+export { checkRemoteInbox, endRemoteAgentSession } from "./hook-remote-client.js";
+export {
+  postJsonRpc,
+  remainingTimeoutMs,
+  requestHeaders,
+  rpcResult,
+} from "./hook-protocol.js";
+export type { AgentIdentity, InboxSummary } from "./hook-types.js";
 
 const DEFAULT_DEBOUNCE_MS: number = 10_000;
 const DEFAULT_TIMEOUT_MS: number = 4_000;
@@ -31,29 +40,9 @@ type HookCache = {
   readonly lastNotifiedInboxVersion: number;
 };
 
-export type AgentIdentity = {
-  readonly agentId: string;
-  readonly branch: string | null;
-  readonly client: MurmurClient;
-  readonly displayName: string;
-  readonly machine: string;
-  readonly repository: string | null;
-  readonly workspace: string;
-  readonly workspaceHash: string;
-};
-
-export type InboxSummary = {
-  readonly inboxVersion: number;
-  readonly messageCount: number;
-  readonly senderIds: readonly string[];
-};
-
 export type HookOutput = {
   readonly hookSpecificOutput?:
-    | {
-        readonly additionalContext: string;
-        readonly hookEventName: string;
-      }
+    | { readonly additionalContext: string; readonly hookEventName: string }
     | undefined;
   readonly systemMessage?: string | undefined;
   readonly terminalSequence?: string | undefined;
@@ -64,24 +53,40 @@ type CheckInbox = (
   options: {
     readonly afterSequence: number;
     readonly e2ee: boolean;
+    readonly includeNotices: boolean;
+    readonly sessionKey: string;
     readonly token: string;
     readonly timeoutMs: number;
     readonly url: string;
   },
 ) => Promise<InboxSummary>;
 
+type EndRemoteSession = (
+  identity: AgentIdentity,
+  options: {
+    readonly eventName: "SessionEnd" | "Stop";
+    readonly expectedGeneration: number;
+    readonly sessionKey: string;
+    readonly token: string;
+    readonly timeoutMs: number;
+    readonly url: string;
+  },
+) => Promise<void>;
+
 type HandleHookOptions = {
   readonly cacheDirectory?: string | undefined;
   readonly checkInbox?: CheckInbox | undefined;
   readonly debounceMs?: number | undefined;
+  readonly endSession?: EndRemoteSession | undefined;
   readonly environment?: NodeJS.ProcessEnv | undefined;
   readonly now?: number | undefined;
   readonly timeoutMs?: number | undefined;
   readonly url?: string | undefined;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+export function hookSessionKey(sessionId: string | undefined): string {
+  if (sessionId === undefined || sessionId.trim() === "") return "default";
+  return `hook-${createHash("sha256").update(sessionId).digest("hex").slice(0, 40)}`;
 }
 
 function sanitizedPart(value: string, fallback: string): string {
@@ -108,19 +113,18 @@ export function deriveAgentIdentity(
     environment["MURMUR_WORKSPACE_ID"] ?? basename(resolvedWorkspace),
     "workspace",
   );
-  const agentId: string = `${machine}:${client}:${workspace}:${workspaceHash}`;
   const detectedRepository: ReturnType<typeof detectRepositoryName> = detectRepositoryName(
     environment,
     resolvedWorkspace,
   );
-  const repository: string | null = detectedRepository === null ? null : detectedRepository.value;
   const detectedBranch: ReturnType<typeof detectBranchName> = detectBranchName(
     environment,
     resolvedWorkspace,
   );
+  const repository: string | null = detectedRepository === null ? null : detectedRepository.value;
   const branch: string | null = detectedBranch === null ? null : detectedBranch.value;
   return {
-    agentId,
+    agentId: `${machine}:${client}:${workspace}:${workspaceHash}`,
     branch,
     client,
     displayName: `${client} on ${machine} (${workspace})`,
@@ -137,6 +141,18 @@ function cachePath(cacheDirectory: string, identity: AgentIdentity): string {
     .digest("hex")
     .slice(0, 12);
   return join(cacheDirectory, `${identity.client}-${identityHash}.json`);
+}
+
+function sessionCachePath(
+  cacheDirectory: string,
+  identity: AgentIdentity,
+  sessionKey: string,
+): string {
+  const keyHash: string = createHash("sha256")
+    .update(`${identity.agentId}\u0000${sessionKey}`)
+    .digest("hex")
+    .slice(0, 24);
+  return join(cacheDirectory, `${identity.client}-${keyHash}.session.json`);
 }
 
 function readCache(path: string): HookCache {
@@ -162,6 +178,30 @@ function writeCache(path: string, cache: HookCache): void {
   renameSync(temporaryPath, path);
 }
 
+function readSessionGeneration(path: string): number | null {
+  if (!existsSync(path)) return null;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (!isRecord(parsed)) return null;
+    const generation: unknown = parsed["generation"];
+    return typeof generation === "number" && Number.isSafeInteger(generation) && generation > 0
+      ? generation
+      : null;
+  } catch (_error: unknown) {
+    return null;
+  }
+}
+
+function writeSessionGeneration(path: string, generation: number): void {
+  mkdirSync(dirname(path), { recursive: true });
+  const temporaryPath: string = join(dirname(path), `.murmur-hook-${randomUUID()}.tmp`);
+  writeFileSync(temporaryPath, `${JSON.stringify({ generation })}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  renameSync(temporaryPath, path);
+}
+
 function additionalContext(identity: AgentIdentity, notification: string | null): string {
   const identityContext: string =
     `Murmur agent ID for this session is ${identity.agentId}. ` +
@@ -178,7 +218,11 @@ function notificationText(summary: InboxSummary): string {
   const noun: string = summary.messageCount === 1 ? "message" : "messages";
   const senders: string =
     summary.senderIds.length === 0 ? "" : ` from ${summary.senderIds.join(", ")}`;
-  return `Murmur: ${summary.messageCount} unread ${noun}${senders}.`;
+  const messages: string = `Murmur: ${summary.messageCount} unread ${noun}${senders}.`;
+  const noticeCount: number = summary.noticeCount ?? 0;
+  if (noticeCount === 0) return messages;
+  const noticeNoun: string = noticeCount === 1 ? "notice" : "notices";
+  return `${messages} ${noticeCount} open coordination ${noticeNoun}.`;
 }
 
 export function buildHookOutput(options: {
@@ -188,7 +232,6 @@ export function buildHookOutput(options: {
   readonly notification?: string | null | undefined;
 }): HookOutput {
   const notification: string | null = options.notification ?? null;
-  const includeContext: boolean = options.eventName !== "Stop";
   const context: string | null =
     options.eventName === "SessionStart" || notification !== null
       ? additionalContext(options.identity, notification)
@@ -198,17 +241,12 @@ export function buildHookOutput(options: {
     systemMessage?: string;
     terminalSequence?: string;
   } = {};
-  if (context !== null && includeContext) {
-    output.hookSpecificOutput = {
-      additionalContext: context,
-      hookEventName: options.eventName,
-    };
+  if (context !== null && options.eventName !== "Stop" && options.eventName !== "SessionEnd") {
+    output.hookSpecificOutput = { additionalContext: context, hookEventName: options.eventName };
   }
   if (notification !== null) {
     output.systemMessage = notification;
-    if (options.client === "claude") {
-      output.terminalSequence = `\u001B]9;${notification}\u0007`;
-    }
+    if (options.client === "claude") output.terminalSequence = `\u001B]9;${notification}\u0007`;
   }
   return output;
 }
@@ -219,14 +257,12 @@ function missingTokenOutput(
   identity: AgentIdentity,
 ): HookOutput | null {
   if (eventName !== "SessionStart") return null;
-  const notification: string = `${MURMUR_TOKEN_ENV} is not set; Murmur notifications are disabled for this session.`;
-  const output: HookOutput = buildHookOutput({
+  return buildHookOutput({
     client,
     eventName,
     identity,
-    notification,
+    notification: `${MURMUR_TOKEN_ENV} is not set; Murmur notifications are disabled for this session.`,
   });
-  return output;
 }
 
 export async function handleHook(
@@ -236,16 +272,42 @@ export async function handleHook(
 ): Promise<HookOutput | null> {
   const environment: NodeJS.ProcessEnv = options.environment ?? process.env;
   const eventName: string = input.hook_event_name ?? "SessionStart";
-  const cwd: string = input.cwd ?? process.cwd();
-  const identity: AgentIdentity = deriveAgentIdentity(client, cwd, environment);
+  const identity: AgentIdentity = deriveAgentIdentity(
+    client,
+    input.cwd ?? process.cwd(),
+    environment,
+  );
   const token: string | undefined = environment[MURMUR_TOKEN_ENV];
   if (token === undefined || token.trim() === "") {
     return missingTokenOutput(client, eventName, identity);
   }
-
-  const configuredCacheDirectory: string | null = environmentPath(environment, "MURMUR_CACHE_DIR");
+  const timeoutMs: number =
+    options.timeoutMs ?? positiveInteger(environment["MURMUR_HOOK_TIMEOUT_MS"], DEFAULT_TIMEOUT_MS);
+  const sessionKey: string = hookSessionKey(input.session_id);
+  const url: string = options.url ?? environment["MURMUR_MCP_URL"] ?? DEFAULT_MURMUR_URL;
   const cacheDirectory: string =
-    options.cacheDirectory ?? configuredCacheDirectory ?? defaultHookCacheDirectory(environment);
+    options.cacheDirectory ??
+    environmentPath(environment, "MURMUR_CACHE_DIR") ??
+    defaultHookCacheDirectory(environment);
+  const hasNamedSession: boolean = input.session_id !== undefined && input.session_id.trim() !== "";
+  const generationPath: string = sessionCachePath(cacheDirectory, identity, sessionKey);
+  if (eventName === "Stop" || eventName === "SessionEnd") {
+    const expectedGeneration: number | null = hasNamedSession
+      ? readSessionGeneration(generationPath)
+      : null;
+    if (expectedGeneration !== null) {
+      await (options.endSession ?? endRemoteAgentSession)(identity, {
+        eventName,
+        expectedGeneration,
+        sessionKey,
+        timeoutMs,
+        token,
+        url,
+      });
+      rmSync(generationPath, { force: true });
+    }
+    return null;
+  }
   const path: string = cachePath(cacheDirectory, identity);
   const cache: HookCache = readCache(path);
   const now: number = options.now ?? Date.now();
@@ -253,23 +315,25 @@ export async function handleHook(
     options.debounceMs ??
     positiveInteger(environment["MURMUR_HOOK_DEBOUNCE_MS"], DEFAULT_DEBOUNCE_MS);
   if (eventName !== "SessionStart" && now - cache.lastCheckedAt < debounceMs) return null;
-
   writeCache(path, {
     lastCheckedAt: now,
     lastNotifiedInboxVersion: cache.lastNotifiedInboxVersion,
   });
-
-  const timeoutMs: number =
-    options.timeoutMs ?? positiveInteger(environment["MURMUR_HOOK_TIMEOUT_MS"], DEFAULT_TIMEOUT_MS);
+  const e2ee: boolean = environment["MURMUR_E2EE"] === "1";
   const summary: InboxSummary = await (options.checkInbox ?? checkRemoteInbox)(identity, {
     afterSequence: eventName === "SessionStart" ? 0 : cache.lastNotifiedInboxVersion,
-    e2ee: environment["MURMUR_E2EE"] === "1",
-    token,
+    e2ee,
+    includeNotices: eventName === "SessionStart" && !e2ee,
+    sessionKey,
     timeoutMs,
-    url: options.url ?? environment["MURMUR_MCP_URL"] ?? DEFAULT_MURMUR_URL,
+    token,
+    url,
   });
+  if (hasNamedSession) writeSessionGeneration(generationPath, summary.agentGeneration);
+  const hasSessionStartNotices: boolean =
+    eventName === "SessionStart" && (summary.noticeCount ?? 0) > 0;
   const shouldNotify: boolean =
-    summary.messageCount > 0 &&
+    (summary.messageCount > 0 || hasSessionStartNotices) &&
     (eventName === "SessionStart" || summary.inboxVersion > cache.lastNotifiedInboxVersion);
   writeCache(path, {
     lastCheckedAt: now,

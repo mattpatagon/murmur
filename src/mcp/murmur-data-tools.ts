@@ -10,6 +10,10 @@ import {
   broadcastAudienceFromInput,
   type GetMessagesInput,
   GetMessagesInputSchema,
+  type GetAgentInput,
+  GetAgentInputSchema,
+  type GetAgentOutput,
+  GetAgentOutputSchema,
   type InboxOutput,
   InboxOutputSchema,
   type ListAgentsInput,
@@ -22,6 +26,7 @@ import {
   MarkMessagesReadOutputSchema,
   type MessageContextDto,
   nullableIdempotencyKey,
+  nullableSessionKey,
   nullableThreadId,
   parseContent,
   parseMessageIds,
@@ -32,18 +37,22 @@ import {
   type RegisterAgentOutput,
   RegisterAgentOutputSchema,
   registerAgentCommand,
+  listAgentsQuery,
   repositoryNameFromInput,
   type SendMessageInput,
   SendMessageInputSchema,
   type SendMessageOutput,
   SendMessageOutputSchema,
   toAgentDto,
+  toListAgentsOutput,
   toMessageDto,
   type WaitForMessagesInput,
   WaitForMessagesInputSchema,
   type WaitForMessagesOutput,
   WaitForMessagesOutputSchema,
 } from "../domain/contracts.js";
+import { AGENT_LEASE_MINUTES, SessionKey } from "../domain/lifecycle-values.js";
+import { UnknownAgentError } from "../domain/errors.js";
 import type {
   Agent,
   BroadcastMessageCommand,
@@ -52,6 +61,7 @@ import type {
   MarkMessagesReadResult,
   Message,
   RegisterAgentCommand,
+  RegisterAgentResult,
   SendMessageCommand,
   SendMessageResult,
 } from "../domain/models.js";
@@ -71,6 +81,9 @@ import type {
   MessageStore,
 } from "../storage/message-store.js";
 import { toolResult } from "./murmur-tool-results.js";
+import { callHistoryTool } from "./murmur-history-tools.js";
+import { callLifecycleTool } from "./murmur-lifecycle-tools.js";
+import { callNoticeTool } from "./murmur-notice-tools.js";
 
 const INBOX_PREFIX: string = "murmur://inbox/";
 
@@ -78,18 +91,27 @@ export type DataToolContext = {
   readonly branchName: BranchName | null;
   readonly client: AgentClient | null;
   readonly notifyResourceListChanged: () => Promise<void>;
+  readonly recordRepositoryDivergence: () => void;
   readonly repositoryName: RepositoryName | null;
   readonly store: MessageStore | null;
 };
 
 const DATA_TOOL_NAMES: ReadonlySet<string> = new Set<string>([
   "broadcast_message",
+  "close_agent",
+  "end_session",
+  "get_agent",
+  "get_message_history",
   "get_messages",
   "list_agents",
   "mark_messages_read",
+  "list_notices",
+  "post_notice",
   "register_agent",
   "send_message",
+  "resolve_notice",
   "wait_for_messages",
+  "withdraw_notice",
 ]);
 
 type RequiredMessageContext = {
@@ -106,7 +128,9 @@ function messagesQuery(input: GetMessagesInput): GetMessagesQuery {
   return {
     afterSequence: parseSequence(input.after_sequence),
     agentId: AgentId.parse(input.agent_id),
+    generation: null,
     limit: input.limit,
+    sessionKey: nullableSessionKey(input.session_key),
     threadId: nullableThreadId(input.thread_id),
     unreadOnly: input.unread_only,
   };
@@ -159,7 +183,9 @@ async function waitForMessages(
   const query: GetMessagesQuery = {
     afterSequence,
     agentId,
+    generation: null,
     limit: 100,
+    sessionKey: nullableSessionKey(input.session_key),
     threadId: null,
     unreadOnly: false,
   };
@@ -203,6 +229,22 @@ export async function callDataTool(
   if (!DATA_TOOL_NAMES.has(name)) return null;
   const store: MessageStore | null = context.store;
   if (store === null) throw new Error("This credential cannot access tenant data");
+  const lifecycleResult: CallToolResult | null = await callLifecycleTool(
+    name,
+    argumentsValue,
+    store,
+    context.notifyResourceListChanged,
+  );
+  if (lifecycleResult !== null) return lifecycleResult;
+  const historyResult: CallToolResult | null = await callHistoryTool(name, argumentsValue, store);
+  if (historyResult !== null) return historyResult;
+  const noticeResult: CallToolResult | null = await callNoticeTool(
+    name,
+    argumentsValue,
+    store,
+    context.repositoryName,
+  );
+  if (noticeResult !== null) return noticeResult;
   switch (name) {
     case "register_agent": {
       const input: RegisterAgentInput = RegisterAgentInputSchema.parse(argumentsValue);
@@ -215,22 +257,34 @@ export async function callDataTool(
         ...(context.repositoryName === null ? {} : { repository: context.repositoryName.value }),
       });
       const command: RegisterAgentCommand = { ...parsed, metadata };
-      const wasKnown: boolean = (await store.getAgent(command.agentId)) !== null;
-      const agent: Agent = await store.registerAgent(command);
-      if (!wasKnown) await context.notifyResourceListChanged();
+      const previous: Agent | null = await store.getAgent(command.agentId);
+      const result: RegisterAgentResult = await store.registerAgent(command);
+      if (result.repositoryDiverged) context.recordRepositoryDivergence();
+      if ((previous === null || previous.state !== "active") && result.agent.state === "active") {
+        await context.notifyResourceListChanged();
+      }
       const output: RegisterAgentOutput = RegisterAgentOutputSchema.parse({
-        agent: toAgentDto(agent),
+        agent: toAgentDto(result.agent),
         inbox_uri: inboxUri(command.agentId),
+        lease_minutes: AGENT_LEASE_MINUTES,
+        reopened: result.reopened,
+        repository_diverged: result.repositoryDiverged,
         retention_days: RETENTION_DAYS,
       });
       return toolResult(output);
     }
     case "list_agents": {
       const input: ListAgentsInput = ListAgentsInputSchema.parse(argumentsValue);
-      if (Object.keys(input).length !== 0) throw new Error("list_agents takes no arguments");
-      const output: ListAgentsOutput = ListAgentsOutputSchema.parse({
-        agents: (await store.listAgents()).map(toAgentDto),
-      });
+      const output: ListAgentsOutput = ListAgentsOutputSchema.parse(
+        toListAgentsOutput(await store.listAgents(listAgentsQuery(input))),
+      );
+      return toolResult(output);
+    }
+    case "get_agent": {
+      const input: GetAgentInput = GetAgentInputSchema.parse(argumentsValue);
+      const agent: Agent | null = await store.getAgent(AgentId.parse(input.agent_id));
+      if (agent === null) throw new UnknownAgentError(input.agent_id);
+      const output: GetAgentOutput = GetAgentOutputSchema.parse({ agent: toAgentDto(agent) });
       return toolResult(output);
     }
     case "send_message": {
@@ -242,6 +296,10 @@ export async function callDataTool(
         idempotencyKey: nullableIdempotencyKey(input.idempotency_key),
         recipientId: AgentId.parse(input.recipient_id),
         senderId: AgentId.parse(input.sender_id),
+        sessionKey:
+          input.session_key === undefined
+            ? SessionKey.default()
+            : SessionKey.parse(input.session_key),
         threadId: nullableThreadId(input.thread_id),
       };
       const result: SendMessageResult = await store.sendMessage(command);
@@ -249,6 +307,8 @@ export async function callDataTool(
         duplicate: result.duplicate,
         message: toMessageDto(result.message),
         retention_days: RETENTION_DAYS,
+        recipient_last_seen_at: result.recipientLastSeenAt.toISOString(),
+        recipient_state: result.recipientState,
         status: "stored",
       });
       return toolResult(output);
@@ -262,6 +322,10 @@ export async function callDataTool(
         content: parseContent(input.content),
         idempotencyKey: nullableIdempotencyKey(input.idempotency_key),
         senderId: AgentId.parse(input.sender_id),
+        sessionKey:
+          input.session_key === undefined
+            ? SessionKey.default()
+            : SessionKey.parse(input.session_key),
         threadId: nullableThreadId(input.thread_id),
       };
       const result: BroadcastMessageResult = await store.broadcastMessage(command);
@@ -305,7 +369,9 @@ export async function callDataTool(
       const input: MarkMessagesReadInput = MarkMessagesReadInputSchema.parse(argumentsValue);
       const result: MarkMessagesReadResult = await store.markMessagesRead({
         agentId: AgentId.parse(input.agent_id),
+        generation: null,
         messageIds: parseMessageIds(input.message_ids),
+        sessionKey: nullableSessionKey(input.session_key),
       });
       const output: MarkMessagesReadOutput = MarkMessagesReadOutputSchema.parse({
         read_at: result.readAt.toISOString(),

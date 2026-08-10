@@ -3,6 +3,7 @@ import {
   type BroadcastMessageInput,
   branchNameFromInput,
   type GetMessagesInput,
+  type ListAgentsInput,
   type ListAgentsOutput,
   type MarkMessagesReadInput,
   type MarkMessagesReadOutput,
@@ -62,7 +63,7 @@ export type E2eeProxyServiceDependencies = {
 
 export interface E2eeProxyOperations {
   registerAgent(input: RegisterAgentInput): Promise<RegisterAgentOutput>;
-  listAgents(): Promise<ListAgentsOutput>;
+  listAgents(input: ListAgentsInput): Promise<ListAgentsOutput>;
   sendMessage(input: SendMessageInput): Promise<ProxySendMessageOutput>;
   broadcastMessage(input: BroadcastMessageInput): Promise<ProxyBroadcastOutput>;
   getMessages(input: GetMessagesInput): Promise<ProxyInboxOutput>;
@@ -127,9 +128,9 @@ export class E2eeProxyService implements E2eeProxyOperations {
     return output;
   }
 
-  public async listAgents(): Promise<ListAgentsOutput> {
+  public async listAgents(input: ListAgentsInput): Promise<ListAgentsOutput> {
     this.#ensureOpen();
-    return await this.#dependencies.remote.listAgents({});
+    return await this.#dependencies.remote.listAgents(input);
   }
 
   public async sendMessage(input: SendMessageInput): Promise<ProxySendMessageOutput> {
