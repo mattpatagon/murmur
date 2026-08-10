@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
 import {
   type CapturedEnvelopeInput,
   digestCanonicalEnvelopeHeader,
@@ -35,39 +36,25 @@ import {
 } from "../src/e2ee/wire-contracts.js";
 
 const NOW: Date = new Date("2026-08-10T18:00:00.000Z");
-const CIPHER_SUITE: "x25519-xsalsa20-poly1305+ed25519" =
-  // biome-ignore lint/security/noSecrets: This is a public cipher-suite identifier, not credential material.
-  "x25519-xsalsa20-poly1305+ed25519";
 
-function fixedVectorHeader(): Record<string, unknown> {
-  return {
-    branch_name: "feature/e2ee",
-    broadcast_id: null,
-    cipher_suite: CIPHER_SUITE,
-    client: "codex",
-    created_at: "2026-08-10T17:00:00.000Z",
-    expires_at: "2026-09-09T17:00:00.000Z",
-    idempotency_key: "send-0001",
-    message_id: "11111111-1111-4111-8111-111111111111",
-    message_kind: "message",
-    orchestrator_policy_id: null,
-    padded_length: 1024,
-    padding_scheme: "power-of-two-v1",
-    pair_counter: 1,
-    protocol: "murmur-e2ee-v1",
-    recipient_agent_key_id: `mak_${"A".repeat(43)}`,
-    recipient_id: "machine-b:codex:repo-b:recipient",
-    recipient_prekey_class: "one_time",
-    recipient_prekey_id: `mpk_${"B".repeat(43)}`,
-    recipient_root_key_id: `mrk_${"C".repeat(43)}`,
-    repository_name: "mattpatagon/murmur",
-    sender_agent_key_id: `mak_${"D".repeat(43)}`,
-    sender_authority: "peer",
-    sender_id: "machine-a:codex:repo-a:sender",
-    sender_root_key_id: `mrk_${"E".repeat(43)}`,
-    tenant_id: "22222222-2222-4222-8222-222222222222",
-    thread_id: "33333333-3333-4333-8333-333333333333",
-  };
+type HeaderVectorFixture = {
+  readonly expected: IndependentHeaderDigest;
+  readonly header: Record<string, unknown>;
+  readonly name: string;
+};
+
+const HeaderVectorFixtureSchema: z.ZodType<HeaderVectorFixture> = z.strictObject({
+  expected: z.strictObject({
+    byte_length: z.number().int().positive(),
+    outer_header_blake2b_256: z.string().regex(/^[a-f0-9]{64}$/u),
+  }),
+  header: z.record(z.string(), z.unknown()),
+  name: z.literal("murmur-e2ee-v1-outer-header"),
+});
+
+function fixedVector(): HeaderVectorFixture {
+  const path: URL = new URL("../test-vectors/e2ee-v1-header.json", import.meta.url);
+  return HeaderVectorFixtureSchema.parse(JSON.parse(readFileSync(path, "utf8")));
 }
 
 function bytes(length: number, start: number): Uint8Array {
@@ -249,13 +236,9 @@ test("independently verifies a captured envelope using public material only", as
 });
 
 test("reproduces the documented header vector without runtime encoding imports", async (): Promise<void> => {
-  const result: IndependentHeaderDigest = await digestCanonicalEnvelopeHeader(fixedVectorHeader());
-  expect(result).toEqual({
-    byte_length: 708,
-    outer_header_blake2b_256:
-      // biome-ignore lint/security/noSecrets: This is the documented public vector digest, not secret material.
-      "feac7159f60e1f6760d2c2e589b19fd221279b71e12d226feda484d4ec2cd95a",
-  });
+  const vector: HeaderVectorFixture = fixedVector();
+  const result: IndependentHeaderDigest = await digestCanonicalEnvelopeHeader(vector.header);
+  expect(result).toEqual(vector.expected);
 });
 
 test("independent verification rejects public-chain, context, and ciphertext tampering", async (): Promise<void> => {

@@ -88,9 +88,9 @@ ephemeral X25519 key and `crypto_box_easy`; signing uses the sender agent's Ed25
 
 ## Fixed vector
 
-`test/e2ee-protocol.test.ts` defines the complete input for the first public vector. Its key IDs use
-the production prefix plus full 32-byte-digest shape. With a padded length of 1,024, the canonical
-outer header is 708 bytes and has BLAKE2b-256 digest:
+`test-vectors/e2ee-v1-header.json` is the machine-readable first public vector. Its key IDs use the
+production prefix plus full 32-byte-digest shape. With a padded length of 1,024, the canonical outer
+header is 708 bytes and has BLAKE2b-256 digest:
 
 ```text
 feac7159f60e1f6760d2c2e589b19fd221279b71e12d226feda484d4ec2cd95a
