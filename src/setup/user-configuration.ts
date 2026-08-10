@@ -333,10 +333,11 @@ export function configureHooks(
   current: JsonRecord,
   client: MurmurClient,
   hookExecutable: string,
+  e2ee: boolean = false,
 ): JsonRecord {
   const result: JsonRecord = cloneRecord(current);
   const hooks: JsonRecord = isRecord(result["hooks"]) ? cloneRecord(result["hooks"]) : {};
-  const command: string = `${shellQuote(hookExecutable)} --client ${client}`;
+  const command: string = `${shellQuote(hookExecutable)} --client ${client}${e2ee ? " --e2ee" : ""}`;
   for (const event of HOOK_EVENTS) {
     const existing: unknown = hooks[event];
     const groups: unknown[] = Array.isArray(existing) ? existing : [];
@@ -380,6 +381,7 @@ export function defaultUserConfigurationPaths(
 
 export function installUserConfiguration(options: {
   readonly clients: readonly MurmurClient[];
+  readonly e2ee?: boolean | undefined;
   readonly hookExecutable: string;
   readonly paths?: UserConfigurationPaths | undefined;
   readonly replace?: boolean | undefined;
@@ -399,7 +401,12 @@ export function installUserConfiguration(options: {
       pendingWrites.push({ content: nextConfig, path: paths.codexConfig });
     }
     const currentHooks: JsonRecord = readJsonRecord(paths.codexHooks);
-    const nextHooks: JsonRecord = configureHooks(currentHooks, "codex", options.hookExecutable);
+    const nextHooks: JsonRecord = configureHooks(
+      currentHooks,
+      "codex",
+      options.hookExecutable,
+      options.e2ee === true,
+    );
     if (JSON.stringify(nextHooks) !== JSON.stringify(currentHooks)) {
       pendingWrites.push({
         content: `${JSON.stringify(nextHooks, null, 2)}\n`,
@@ -422,6 +429,7 @@ export function installUserConfiguration(options: {
       currentSettings,
       "claude",
       options.hookExecutable,
+      options.e2ee === true,
     );
     if (JSON.stringify(nextSettings) !== JSON.stringify(currentSettings)) {
       pendingWrites.push({
