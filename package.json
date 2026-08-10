@@ -60,6 +60,7 @@
     "@opentelemetry/resources": "2.10.0",
     "@opentelemetry/sdk-trace-node": "2.10.0",
     "@opentelemetry/semantic-conventions": "1.43.0",
+    "libsodium-wrappers": "0.8.4",
     "postgres": "3.4.9",
     "zod": "4.4.3"
   },
