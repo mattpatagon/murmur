@@ -211,6 +211,7 @@ test("request completion event correlates safely without retaining secrets", asy
   observation.recordSession(rawSession);
   observation.recordSessionCapacity("allowed", "global_and_tenant");
   observation.recordSessionLookup("found");
+  observation.recordStreamCapacity("allowed");
   observation.recordError(
     new Error(`database failed at ${passwordBearingDatabaseUrl("RAW_DATABASE_SECRET")}`),
   );
@@ -235,6 +236,7 @@ test("request completion event correlates safely without retaining secrets", asy
   expect(line).toContain(`"request_id":"${serverRequestId}"`);
   expect(line).toContain('"session_capacity":"allowed"');
   expect(line).toContain('"session_lookup":"found"');
+  expect(line).toContain('"stream_capacity":"allowed"');
   expect(line).toContain('"trace_id":"trace-123"');
   expect(line).not.toContain(rawSession);
   expect(line).not.toContain(tokenSecret);

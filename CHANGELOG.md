@@ -2,6 +2,13 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.5.1.0] - 2026-08-10
+
+### Fixed
+
+- Keep agent initialization and tool requests available while long-lived MCP streams use separate bounded global, tenant, and credential capacity.
+- Return an explicit one-second retry hint when stream capacity is exhausted, and document the independent stream limits.
+
 ## [0.5.0.0] - 2026-08-10
 
 ### Added

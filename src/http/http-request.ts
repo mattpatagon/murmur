@@ -35,6 +35,13 @@ export function authenticationCapacityResponse(): Response {
   );
 }
 
+export function streamCapacityResponse(): Response {
+  return Response.json(
+    { error: "MCP stream capacity reached" },
+    { headers: { "cache-control": "no-store", "retry-after": "1" }, status: 503 },
+  );
+}
+
 export function unauthorizedResponse(): Response {
   return new Response(null, {
     headers: { "cache-control": "no-store", "www-authenticate": 'Bearer realm="murmur"' },

@@ -11,6 +11,9 @@ export type HttpServerConfig = {
   readonly maxActiveRequests: number;
   readonly maxActiveRequestsPerPrincipal: number;
   readonly maxActiveRequestsPerTenant: number;
+  readonly maxActiveStreams: number;
+  readonly maxActiveStreamsPerPrincipal: number;
+  readonly maxActiveStreamsPerTenant: number;
   readonly maxAuthentications: number;
   readonly maxPendingAuthentications: number;
   readonly maxPendingAuthenticationsPerTenant: number;
@@ -32,6 +35,9 @@ const DEFAULTS: HttpDefaults = {
   maxActiveRequests: 64,
   maxActiveRequestsPerPrincipal: 8,
   maxActiveRequestsPerTenant: 20,
+  maxActiveStreams: 64,
+  maxActiveStreamsPerPrincipal: 32,
+  maxActiveStreamsPerTenant: 32,
   maxAuthentications: 4,
   maxPendingAuthentications: 32,
   maxPendingAuthenticationsPerTenant: 8,
@@ -94,6 +100,21 @@ export function parseHttpServerConfig(environment: NodeJS.ProcessEnv): HttpServe
       environment,
       "MURMUR_MAX_ACTIVE_REQUESTS_PER_TENANT",
       DEFAULTS.maxActiveRequestsPerTenant,
+    ),
+    maxActiveStreams: positiveIntegerEnvironment(
+      environment,
+      "MURMUR_MAX_ACTIVE_STREAMS",
+      DEFAULTS.maxActiveStreams,
+    ),
+    maxActiveStreamsPerPrincipal: positiveIntegerEnvironment(
+      environment,
+      "MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL",
+      DEFAULTS.maxActiveStreamsPerPrincipal,
+    ),
+    maxActiveStreamsPerTenant: positiveIntegerEnvironment(
+      environment,
+      "MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT",
+      DEFAULTS.maxActiveStreamsPerTenant,
     ),
     maxAuthentications: positiveIntegerEnvironment(
       environment,

@@ -365,44 +365,6 @@ test("remote MCP keeps sessions with active SSE responses alive", async (): Prom
   }
 });
 
-test("remote MCP reserves request capacity across long-lived streams", async (): Promise<void> => {
-  const directory: string = mkdtempSync(join(tmpdir(), "murmur-http-capacity-"));
-  const server: MurmurHttpServer = await startHttpServer({
-    ...testEnvironment(join(directory, "messages.db")),
-    MURMUR_MAX_ACTIVE_REQUESTS_PER_PRINCIPAL: "1",
-  });
-  const streamAbortController: AbortController = new AbortController();
-  try {
-    const sessionId: string = await initializeSession(server.mcpUrl);
-    const streamResponse: Response = await fetch(server.mcpUrl, {
-      headers: requestHeaders(sessionId),
-      signal: streamAbortController.signal,
-    });
-    expect(streamResponse.status).toBe(200);
-
-    const limited: Response = await postJson(
-      server.mcpUrl,
-      { id: 2, jsonrpc: "2.0", method: "tools/list", params: {} },
-      sessionId,
-    );
-    expect(limited.status).toBe(503);
-    expect(await limited.json()).toEqual({ error: "MCP request capacity reached" });
-
-    streamAbortController.abort();
-    await Bun.sleep(25);
-    const recovered: Response = await postJson(
-      server.mcpUrl,
-      { id: 3, jsonrpc: "2.0", method: "tools/list", params: {} },
-      sessionId,
-    );
-    expect(recovered.status).toBe(200);
-  } finally {
-    streamAbortController.abort();
-    await server.stop();
-    rmSync(directory, { force: true, recursive: true });
-  }
-});
-
 test("remote MCP error responses never expose sentinel content", async (): Promise<void> => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-http-errors-"));
   const server: MurmurHttpServer = await startHttpServer(

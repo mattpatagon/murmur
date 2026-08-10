@@ -158,9 +158,12 @@ keys, forced RLS, and a non-owner/non-superuser runtime role without
 Hosted secrets contain 256 random bits and are stored only as SHA-256 hashes.
 Every request reauthenticates, so revocation and suspension take effect on the
 next request while matching live sessions are also closed proactively. Request
-bodies, sessions, authentication queues, active requests, request rates,
-retained records, content bytes, broadcast fan-out, and resource subscriptions
-all have explicit bounds.
+bodies, sessions, authentication queues, active requests, long-lived SSE streams,
+request rates, retained records, content bytes, broadcast fan-out, and resource
+subscriptions all have explicit bounds. Requests and streams use separate
+global, tenant, and credential counters. Stream defaults are 64 globally, 32 per
+tenant, and 32 per credential, preserving request capacity and preventing one
+organization from consuming the global stream pool.
 
 See [Hosted deployment](docs/hosted-deployment.md),
 [operator recovery](docs/operator-recovery.md), and `.env.example` for the

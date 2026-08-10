@@ -47,7 +47,7 @@ Hosted requests pass through ordered, independently observable gates:
 2. Validate origin and request size before parsing untrusted content.
 3. Extract a credential without logging it.
 4. Bound authentication work, validate the token, and derive the principal and tenant.
-5. Apply principal and tenant rate/capacity limits.
+5. Reserve request or stream capacity, then apply principal and tenant rate limits.
 6. Resolve or create a tenant-bound MCP session within session quotas.
 7. Parse the MCP envelope and dispatch through the role-specific application.
 8. Stream the response, release all capacity, and emit one completion event when the body closes.
@@ -80,9 +80,10 @@ can administer tenants and tokens but has no tenant message tools.
 ## Resource bounds
 
 Hosted configuration sets independent limits for request bytes, authentication concurrency and
-queues, active requests, per-principal and per-tenant work, sessions, subscriptions, request rates,
-agents, tokens, retained messages, stored bytes, message size, and broadcast fan-out. Admission
-returns a safe retryable status before allocating downstream resources when a bound is full.
+queues, active requests, long-lived SSE streams, per-principal and per-tenant work, sessions,
+subscriptions, request rates, agents, tokens, retained messages, stored bytes, message size, and
+broadcast fan-out. Admission returns a safe retryable status before allocating downstream resources
+when a bound is full.
 
 Queues are finite and waits have deadlines. Shutdown stops new admission, closes the HTTP server,
 closes applications and stores, then flushes telemetry within a bounded timeout. Cleanup remains

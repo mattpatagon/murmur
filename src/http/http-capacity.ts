@@ -18,6 +18,8 @@ export class HttpCapacityController {
   private readonly activeAuthenticationsByTenant: Map<string, number>;
   private readonly activeRequestsByPrincipal: Map<string, number>;
   private readonly activeRequestsByTenant: Map<string, number>;
+  private readonly activeStreamsByPrincipal: Map<string, number>;
+  private readonly activeStreamsByTenant: Map<string, number>;
   private readonly authenticationWaiters: Set<() => void>;
   private readonly config: HttpServerConfig;
   private readonly pendingAuthenticationsByTenant: Map<string, number>;
@@ -25,6 +27,7 @@ export class HttpCapacityController {
   private readonly time: TimeSource;
   private activeAuthentications: number;
   private activeRequests: number;
+  private activeStreams: number;
   private pendingAuthentications: number;
   private stopped: boolean;
 
@@ -35,6 +38,9 @@ export class HttpCapacityController {
     this.activeRequests = 0;
     this.activeRequestsByPrincipal = new Map<string, number>();
     this.activeRequestsByTenant = new Map<string, number>();
+    this.activeStreams = 0;
+    this.activeStreamsByPrincipal = new Map<string, number>();
+    this.activeStreamsByTenant = new Map<string, number>();
     this.authenticationWaiters = new Set<() => void>();
     this.config = config;
     this.pendingAuthentications = 0;
@@ -99,6 +105,37 @@ export class HttpCapacityController {
         const remainingForTenant: number = (this.activeRequestsByTenant.get(tenantId) ?? 1) - 1;
         if (remainingForTenant === 0) this.activeRequestsByTenant.delete(tenantId);
         else this.activeRequestsByTenant.set(tenantId, remainingForTenant);
+      }
+    };
+  }
+
+  public reserveStream(principalIdentity: string, tenantId: string | null): (() => void) | null {
+    const principalStreams: number = this.activeStreamsByPrincipal.get(principalIdentity) ?? 0;
+    const tenantStreams: number =
+      tenantId === null ? 0 : (this.activeStreamsByTenant.get(tenantId) ?? 0);
+    if (
+      this.activeStreams >= this.config.maxActiveStreams ||
+      principalStreams >= this.config.maxActiveStreamsPerPrincipal ||
+      (tenantId !== null && tenantStreams >= this.config.maxActiveStreamsPerTenant)
+    ) {
+      return null;
+    }
+    this.activeStreams += 1;
+    this.activeStreamsByPrincipal.set(principalIdentity, principalStreams + 1);
+    if (tenantId !== null) this.activeStreamsByTenant.set(tenantId, tenantStreams + 1);
+    let released: boolean = false;
+    return (): void => {
+      if (released) return;
+      released = true;
+      this.activeStreams -= 1;
+      const remainingForPrincipal: number =
+        (this.activeStreamsByPrincipal.get(principalIdentity) ?? 1) - 1;
+      if (remainingForPrincipal === 0) this.activeStreamsByPrincipal.delete(principalIdentity);
+      else this.activeStreamsByPrincipal.set(principalIdentity, remainingForPrincipal);
+      if (tenantId !== null) {
+        const remainingForTenant: number = (this.activeStreamsByTenant.get(tenantId) ?? 1) - 1;
+        if (remainingForTenant === 0) this.activeStreamsByTenant.delete(tenantId);
+        else this.activeStreamsByTenant.set(tenantId, remainingForTenant);
       }
     };
   }

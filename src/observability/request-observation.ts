@@ -66,6 +66,7 @@ export class RequestObservation {
   private sessionHash: string | null;
   private sessionLookup: SessionLookupOutcome;
   private readonly startedAt: number;
+  private streamCapacity: GateOutcome;
   private tenantId: string | null;
   private tenantRateLimit: GateOutcome;
   private tenantRole: string | null;
@@ -99,6 +100,7 @@ export class RequestObservation {
     this.sessionHash = null;
     this.sessionLookup = "not_checked";
     this.startedAt = time.now();
+    this.streamCapacity = "not_checked";
     this.tenantId = null;
     this.tenantRateLimit = "not_checked";
     this.tenantRole = null;
@@ -162,6 +164,10 @@ export class RequestObservation {
     this.sessionLookup = outcome;
   }
 
+  public recordStreamCapacity(outcome: GateOutcome): void {
+    this.streamCapacity = outcome;
+  }
+
   public recordTenantRateLimit(outcome: GateOutcome): void {
     this.tenantRateLimit = outcome;
   }
@@ -193,6 +199,7 @@ export class RequestObservation {
       session_hash: this.sessionHash,
       session_lookup: this.sessionLookup,
       span_id: this.trace.spanId,
+      stream_capacity: this.streamCapacity,
       tenant_id: this.tenantId,
       tenant_rate_limit: this.tenantRateLimit,
       tenant_role: this.tenantRole,

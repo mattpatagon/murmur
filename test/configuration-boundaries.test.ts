@@ -81,16 +81,19 @@ test("HTTP configuration parses every bound and normalizes origins", (): void =>
     MURMUR_MAX_ACTIVE_REQUESTS: "12",
     MURMUR_MAX_ACTIVE_REQUESTS_PER_PRINCIPAL: "13",
     MURMUR_MAX_ACTIVE_REQUESTS_PER_TENANT: "14",
-    MURMUR_MAX_CONCURRENT_AUTHENTICATIONS: "15",
-    MURMUR_MAX_PENDING_AUTHENTICATIONS: "16",
-    MURMUR_MAX_PENDING_AUTHENTICATIONS_PER_TENANT: "17",
-    MURMUR_MAX_REQUEST_BYTES: "18",
-    MURMUR_MAX_SESSIONS: "19",
-    MURMUR_MAX_SESSIONS_PER_TENANT: "20",
-    MURMUR_RATE_LIMIT_PER_MINUTE: "21",
-    MURMUR_SESSION_IDLE_MS: "22",
-    MURMUR_TENANT_RATE_LIMIT_PER_MINUTE: "23",
-    PORT: "24",
+    MURMUR_MAX_ACTIVE_STREAMS: "15",
+    MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL: "16",
+    MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT: "17",
+    MURMUR_MAX_CONCURRENT_AUTHENTICATIONS: "18",
+    MURMUR_MAX_PENDING_AUTHENTICATIONS: "19",
+    MURMUR_MAX_PENDING_AUTHENTICATIONS_PER_TENANT: "20",
+    MURMUR_MAX_REQUEST_BYTES: "21",
+    MURMUR_MAX_SESSIONS: "22",
+    MURMUR_MAX_SESSIONS_PER_TENANT: "23",
+    MURMUR_RATE_LIMIT_PER_MINUTE: "24",
+    MURMUR_SESSION_IDLE_MS: "25",
+    MURMUR_TENANT_RATE_LIMIT_PER_MINUTE: "26",
+    PORT: "27",
   });
   expect([...config.allowedOrigins]).toEqual(["https://one.example", "https://two.example"]);
   expect(config).toMatchObject({
@@ -99,20 +102,34 @@ test("HTTP configuration parses every bound and normalizes origins", (): void =>
     maxActiveRequests: 12,
     maxActiveRequestsPerPrincipal: 13,
     maxActiveRequestsPerTenant: 14,
-    maxAuthentications: 15,
-    maxPendingAuthentications: 16,
-    maxPendingAuthenticationsPerTenant: 17,
-    maxRequestBytes: 18,
-    maxSessions: 19,
-    maxSessionsPerTenant: 20,
-    rateLimitPerMinute: 21,
-    requestedPort: 24,
-    sessionIdleMs: 22,
-    tenantRateLimitPerMinute: 23,
+    maxActiveStreams: 15,
+    maxActiveStreamsPerPrincipal: 16,
+    maxActiveStreamsPerTenant: 17,
+    maxAuthentications: 18,
+    maxPendingAuthentications: 19,
+    maxPendingAuthenticationsPerTenant: 20,
+    maxRequestBytes: 21,
+    maxSessions: 22,
+    maxSessionsPerTenant: 23,
+    rateLimitPerMinute: 24,
+    requestedPort: 27,
+    sessionIdleMs: 25,
+    tenantRateLimitPerMinute: 26,
   });
   expect((): HttpServerConfig => parseHttpServerConfig({ PORT: "65536" })).toThrow();
   expect(
     (): HttpServerConfig => parseHttpServerConfig({ MURMUR_MAX_REQUEST_BYTES: "0" }),
+  ).toThrow();
+  expect(
+    (): HttpServerConfig => parseHttpServerConfig({ MURMUR_MAX_ACTIVE_STREAMS: "0" }),
+  ).toThrow();
+  expect(
+    (): HttpServerConfig =>
+      parseHttpServerConfig({ MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL: "1.5" }),
+  ).toThrow();
+  expect(
+    (): HttpServerConfig =>
+      parseHttpServerConfig({ MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT: "not-a-number" }),
   ).toThrow();
 });
 

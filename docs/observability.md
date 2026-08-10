@@ -19,8 +19,9 @@ Every record contains:
 
 The `http.request.completed` event records duration, method, normalized route, status, outcome, MCP
 method/tool, principal kind, tenant/role after authentication, and independent origin, credential,
-authentication, capacity, rate-limit, session lookup, and session capacity outcomes. A validated
-client `x-request-id` is retained separately as `client_request_id`; it never replaces the server ID.
+authentication, request/stream capacity, rate-limit, session lookup, and session capacity outcomes.
+A validated client `x-request-id` is retained separately as `client_request_id`; it never replaces
+the server ID.
 Server errors use severity `ERROR`; successful and client-rejected requests use `INFO`.
 
 Completion occurs when the response body closes, errors, or is cancelled, so duration and capacity
@@ -88,7 +89,7 @@ from `package.json`; runtime version comes from Bun.
 
 Start with `request_id`, then correlate `trace_id` where enabled. Diagnose in admission order:
 origin, credential presence/recognition, authentication capacity/result, principal/tenant identity,
-request and rate gates, session lookup/capacity, MCP method/tool, status, and duration. Compare error
+request, stream, and rate gates, session lookup/capacity, MCP method/tool, status, and duration. Compare error
 rate and latency by normalized route and gate; avoid dashboards that group by request, trace, session,
 or tenant identifiers.
 

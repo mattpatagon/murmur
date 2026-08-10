@@ -95,6 +95,28 @@ describe("HTTP capacity controller", (): void => {
     releaseC();
   });
 
+  test("stream reservations enforce global, principal, and tenant limits independently", (): void => {
+    const controller: HttpCapacityController = capacity(new FakeTimeSource(), {
+      MURMUR_MAX_ACTIVE_STREAMS: "3",
+      MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL: "1",
+      MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT: "2",
+    });
+    const releaseA: () => void = requiredRelease(controller.reserveStream("principal-a", "a"));
+
+    expect(controller.reserveStream("principal-a", "b")).toBeNull();
+    const releaseB: () => void = requiredRelease(controller.reserveStream("principal-b", "a"));
+    expect(controller.reserveStream("principal-c", "a")).toBeNull();
+    const releaseC: () => void = requiredRelease(controller.reserveStream("principal-c", null));
+    expect(controller.reserveStream("principal-d", "b")).toBeNull();
+
+    releaseA();
+    releaseA();
+    const releaseD: () => void = requiredRelease(controller.reserveStream("principal-d", "b"));
+    releaseB();
+    releaseC();
+    releaseD();
+  });
+
   test("known credentials wait and wake when authentication capacity is released", async (): Promise<void> => {
     const time: FakeTimeSource = new FakeTimeSource();
     const controller: HttpCapacityController = capacity(time, {

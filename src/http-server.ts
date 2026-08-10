@@ -33,6 +33,7 @@ import {
   RequestBodyTooLargeError,
   repositoryFromRequest,
   requestSessionId,
+  streamCapacityResponse,
   unauthorizedResponse,
 } from "./http/http-request.js";
 import { createHttpRequestHandler } from "./http/http-router.js";
@@ -226,15 +227,20 @@ export async function startHttpServer(
 
       const principalIdentity: string = authenticator.identity(principal);
       const tenantId: string | null = principal.kind === "tenant" ? principal.tenantId.value : null;
-      const releaseRequestCapacity: (() => void) | null = capacity.reserveRequest(
-        principalIdentity,
-        tenantId,
-      );
-      if (releaseRequestCapacity === null) {
+      const isStandaloneStream: boolean = request.method === "GET";
+      const releaseResponseCapacity: (() => void) | null = isStandaloneStream
+        ? capacity.reserveStream(principalIdentity, tenantId)
+        : capacity.reserveRequest(principalIdentity, tenantId);
+      if (releaseResponseCapacity === null) {
+        if (isStandaloneStream) {
+          observation.recordStreamCapacity("rejected");
+          return streamCapacityResponse();
+        }
         observation.recordRequestCapacity("rejected");
         return jsonResponse(503, { error: "MCP request capacity reached" });
       }
-      observation.recordRequestCapacity("allowed");
+      if (isStandaloneStream) observation.recordStreamCapacity("allowed");
+      else observation.recordRequestCapacity("allowed");
       let responseHandedOff: boolean = false;
       try {
         const response: Response = await (async (): Promise<Response> => {
@@ -409,12 +415,12 @@ export async function startHttpServer(
         })();
         const capacityTrackedResponse: Response = responseWithFinish(
           response,
-          releaseRequestCapacity,
+          releaseResponseCapacity,
         );
         responseHandedOff = true;
         return capacityTrackedResponse;
       } finally {
-        if (!responseHandedOff) releaseRequestCapacity();
+        if (!responseHandedOff) releaseResponseCapacity();
       }
     };
 
