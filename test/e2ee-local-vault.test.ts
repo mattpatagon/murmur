@@ -363,6 +363,7 @@ test("upgrades version-four prekeys with their original signing generation", asy
     if (prekey === undefined) throw new Error("Expected upgrade prekey");
     const legacy: Database = new Database(path, { create: false, readwrite: true });
     legacy.exec(`
+      DROP TABLE active_tenant_binding;
       DROP TABLE peer_root_expectations;
       DROP INDEX prekeys_signing_generation;
       ALTER TABLE prekeys DROP COLUMN agent_signing_key_id;
@@ -381,12 +382,42 @@ test("upgrades version-four prekeys with their original signing generation", asy
   });
 });
 
+test("upgrades a populated version-six vault with an empty active tenant binding", async (): Promise<void> => {
+  await withTempDirectory((directory: string): void => {
+    const path: string = join(directory, "tenant-binding-upgrade.sqlite");
+    const original: LocalE2eeVault = new LocalE2eeVault(path, "linux");
+    original.settings.bindActiveTenant(
+      "00000000-0000-4000-8000-000000000010",
+      "2026-08-10T20:00:00.000Z",
+    );
+    original.close();
+    const legacy: Database = new Database(path, { create: false, readwrite: true });
+    legacy.exec("DROP TABLE active_tenant_binding; PRAGMA user_version = 6");
+    legacy.close(false);
+    const upgraded: LocalE2eeVault = new LocalE2eeVault(path, "linux");
+    try {
+      expect(upgraded.settings.getActiveTenant()).toBeNull();
+      expect(
+        upgraded.settings.bindActiveTenant(
+          "00000000-0000-4000-8000-000000000011",
+          "2026-08-10T20:01:00.000Z",
+        ),
+      ).toEqual({
+        boundAt: "2026-08-10T20:01:00.000Z",
+        tenantId: "00000000-0000-4000-8000-000000000011",
+      });
+    } finally {
+      upgraded.close();
+    }
+  });
+});
+
 test("rejects a vault schema newer than the running binary", async (): Promise<void> => {
   await withTempDirectory((directory: string): void => {
     const path: string = join(directory, "future.sqlite");
     mkdirSync(directory, { recursive: true });
     const database: Database = new Database(path, { create: true, readwrite: true });
-    database.exec("PRAGMA user_version = 7");
+    database.exec("PRAGMA user_version = 8");
     database.close(false);
     expect((): LocalE2eeVault => new LocalE2eeVault(path, "linux")).toThrow("newer");
   });

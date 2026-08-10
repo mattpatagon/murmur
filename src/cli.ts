@@ -3,6 +3,8 @@
 import { existsSync } from "node:fs";
 import process from "node:process";
 
+import { runE2eeCli } from "./e2ee/cli.js";
+
 import {
   DEFAULT_MURMUR_URL,
   installUserConfiguration,
@@ -25,6 +27,7 @@ const HELP: string = `Murmur user-level setup
 
 Usage:
   murmur setup --user [--codex] [--claude] [--e2ee] [--replace] [--url URL]
+  murmur e2ee <command> [options]
 
 The default is to configure both Codex and Claude. The command adds the remote
 Murmur MCP server and passive SessionStart, UserPromptSubmit, PostToolUse, and
@@ -197,12 +200,24 @@ export function runCli(
   return formatSetupResult(changedPaths, token !== undefined && token.trim() !== "");
 }
 
+export async function runCliAsync(
+  arguments_: readonly string[],
+  setupAction: SetupAction = setup,
+  token: string | undefined = process.env[MURMUR_TOKEN_ENV],
+): Promise<string> {
+  if (arguments_[0] === "e2ee") return await runE2eeCli(arguments_.slice(1));
+  return runCli(arguments_, setupAction, token);
+}
+
 if (import.meta.main) {
-  try {
-    process.stdout.write(runCli(process.argv.slice(2)));
-  } catch (error: unknown) {
-    const message: string = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`murmur: ${message}\n`);
-    process.exitCode = 1;
-  }
+  runCliAsync(process.argv.slice(2)).then(
+    (output: string): void => {
+      process.stdout.write(output);
+    },
+    (error: unknown): void => {
+      const message: string = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`murmur: ${message}\n`);
+      process.exitCode = 1;
+    },
+  );
 }

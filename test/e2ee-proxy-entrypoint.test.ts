@@ -165,7 +165,7 @@ test("E2E proxy entrypoint validates entitlement, creates no key, and shuts down
   const vaultPath: string = join(directory, "vault.sqlite");
   const remote: StartupRemote = new StartupRemote();
   const listeners: Map<NodeJS.Signals, () => void> = new Map<NodeJS.Signals, () => void>();
-  let vault: LocalE2eeVault | null = null;
+  const vaultHolder: { value: LocalE2eeVault | null } = { value: null };
   const captured: { value: E2eeHttpRemoteClientConfig | null } = { value: null };
   const runtime: E2eeProxyRuntime = {
     clock: new FixedClock(),
@@ -175,8 +175,9 @@ test("E2E proxy entrypoint validates entitlement, creates no key, and shuts down
     },
     createTransport: (): Transport => new NoopTransport(),
     createVault: (path: string): LocalE2eeVault => {
-      vault = new LocalE2eeVault(path, "linux");
-      return vault;
+      const created: LocalE2eeVault = new LocalE2eeVault(path, "linux");
+      vaultHolder.value = created;
+      return created;
     },
     detectBranchName: (): BranchName | null => BranchName.parse("feature/e2ee"),
     detectRepositoryName: (): RepositoryName | null => RepositoryName.parse("mattpatagon/murmur"),
@@ -198,11 +199,15 @@ test("E2E proxy entrypoint validates entitlement, creates no key, and shuts down
       repository: "mattpatagon/murmur",
       token: "test-token",
     });
-    if (vault === null) throw new Error("Expected the runtime to create a local vault");
-    expect(localE2eeStatus(vault)).toEqual({
+    if (vaultHolder.value === null) throw new Error("Expected the runtime to create a local vault");
+    expect(localE2eeStatus(vaultHolder.value)).toEqual({
       initialized: false,
       peer_count: 0,
       root_key_id: null,
+    });
+    expect(vaultHolder.value.settings.getActiveTenant()).toEqual({
+      boundAt: "2026-08-10T20:00:00.000Z",
+      tenantId: "00000000-0000-4000-8000-000000000010",
     });
     expect([...listeners.keys()].sort()).toEqual(["SIGINT", "SIGTERM"]);
     const interrupt: (() => void) | undefined = listeners.get("SIGINT");

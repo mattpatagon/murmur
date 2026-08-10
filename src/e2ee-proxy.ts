@@ -23,6 +23,7 @@ import { getE2eeCapability } from "./e2ee/proxy-identity.js";
 import { E2eeProxyService } from "./e2ee/proxy-service.js";
 import type { E2eeProxyRemoteClient } from "./e2ee/remote-client.js";
 import { defaultE2eeVaultPath } from "./e2ee/vault-paths.js";
+import type { E2eeCapabilityOutput } from "./e2ee/wire-tools.js";
 import { logSafeError } from "./safe-errors.js";
 import { MURMUR_TOKEN_ENV } from "./setup/user-configuration.js";
 
@@ -133,14 +134,17 @@ export async function main(
     repository: parsed.repositoryName === null ? null : parsed.repositoryName.value,
     token: accessToken(runtime.environment),
   });
-  let vault: LocalE2eeVault;
+  let vault: LocalE2eeVault | null = null;
   try {
-    await getE2eeCapability(remote, false);
+    const capability: E2eeCapabilityOutput = await getE2eeCapability(remote, false);
     vault = runtime.createVault(parsed.vaultPath);
+    vault.settings.bindActiveTenant(capability.tenant_id, runtime.clock.now().toISOString());
   } catch (error: unknown) {
+    if (vault !== null) vault.close();
     await remote.close().catch((_closeError: unknown): void => undefined);
     throw error;
   }
+  if (vault === null) throw new Error("The local E2E vault could not be opened");
   const service: E2eeProxyService = new E2eeProxyService({
     branchName: parsed.branchName,
     client: parsed.client,

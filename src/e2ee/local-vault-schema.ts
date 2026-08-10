@@ -1,7 +1,7 @@
 import type { Database, Statement } from "bun:sqlite";
 import { z } from "zod";
 
-const VAULT_SCHEMA_VERSION: number = 6;
+const VAULT_SCHEMA_VERSION: number = 7;
 const UserVersionRowSchema: z.ZodType<{ readonly user_version: number }> = z.object({
   user_version: z
     .union([z.number().int(), z.bigint()])
@@ -177,6 +177,16 @@ export function migrateLocalVault(database: Database): void {
           PRIMARY KEY(tenant_id, agent_id)
         );
         PRAGMA user_version = 6;
+      `);
+    }
+    if (version <= 6) {
+      database.exec(`
+        CREATE TABLE active_tenant_binding (
+          singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+          tenant_id TEXT NOT NULL,
+          bound_at TEXT NOT NULL
+        );
+        PRAGMA user_version = 7;
       `);
     }
     database.exec("COMMIT");
