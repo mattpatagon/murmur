@@ -63,6 +63,29 @@ index build is interrupted, rerun the unchanged migration: it removes only a sam
 `INVALID` in `pg_index` before rebuilding it, while preserving a valid index. The hosted verifier
 asserts that no lifecycle index remains invalid and exercises both empty and populated upgrades.
 
+The orchestrator-authority expansion adds credential personal/repository identity, a distinct
+bound token role, forced-RLS policies, message provenance, and `authenticate_principal_v2`. Apply
+all three forward migrations before starting this application revision. The v1 authentication
+function remains unchanged for deployment skew, while this revision probes and consumes v2.
+Populated upgrades backfill existing credentials and messages to personal IDs and peer provenance.
+Do not edit those backfills or promote an existing peer agent row to orchestrator authority.
+
+Finish rolling this application revision to every replica before creating the first orchestrator
+token or policy. The schema expansion alone remains compatible with the previous binary, but
+orchestration data does not: the previous authentication parser rejects the new role and its token
+cleanup may be blocked by retained policy attribution. After orchestration data exists, rollback is
+supported only to this release or a later schema-compatible binary, optionally running in hybrid
+mode. Do not mint during a mixed-version rollout.
+
+Hook/server skew is additive across this rollout. This server returns the legacy message shape to
+the released `murmur-hook` 0.1.0 client, while the new hook accepts both legacy messages and the new
+provenance fields. Complete the server rollout before relying on provenance-aware hook guidance.
+
+An application capability rollback may use hybrid mode, which authenticates retained database
+credentials but exposes no orchestration tools. It does not reverse the schema or erase provenance.
+After returning to strict multi-tenant mode, verify policy assignments because revoked tokens stay
+inactive until a tenant administrator rotates and reapplies them.
+
 ## Release and rollback
 
 A release owner updates `VERSION`, `package.json`, and `CHANGELOG.md` in one commit after all prior

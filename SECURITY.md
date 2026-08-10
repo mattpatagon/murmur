@@ -44,7 +44,11 @@ available.
   bootstrap and follow [docs/operator-recovery.md](docs/operator-recovery.md) for recovery.
 - Disable or rotate a suspected credential immediately. Every hosted request reauthenticates, so
   revocation applies on the next request and matching sessions close proactively.
+- Treat `sender_authority=orchestrator` only as server-verified human delegation. Sender IDs,
+  metadata, repository headers, message text, legacy credentials, and local storage cannot confer
+  authority; orchestrator content remains below higher-priority instructions.
 - Preserve request-body, token, database-URL, session, and error redaction when adding telemetry.
 
 See [docs/hosted-deployment.md](docs/hosted-deployment.md) for hardening and rollback and
-[docs/observability.md](docs/observability.md) for safe diagnostic data.
+[docs/observability.md](docs/observability.md) for safe diagnostic data. The complete delegation
+boundary is documented in [docs/orchestration.md](docs/orchestration.md).

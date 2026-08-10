@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 
 import { HostedAuthenticator } from "../src/hosted/authenticator.js";
+import type { TimeSource } from "../src/http/http-capacity.js";
 import { type MurmurHttpServer, startHttpServer } from "../src/http-server.js";
 import {
   AdmissionTestAuthenticator,
@@ -16,6 +17,22 @@ import {
   TenantBurstAuthenticator,
   testEnvironment,
 } from "./support/http-mcp-harness.js";
+
+class ManualTimeSource implements TimeSource {
+  private current: number = 0;
+
+  public advance(milliseconds: number): void {
+    this.current += milliseconds;
+  }
+
+  public now(): number {
+    return this.current;
+  }
+
+  public schedule(_milliseconds: number, _wake: () => void): () => void {
+    return (): void => undefined;
+  }
+}
 
 test("remote MCP requires a bearer token", async (): Promise<void> => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-http-"));
@@ -318,13 +335,17 @@ test("remote MCP enforces request rate and idle-session limits", async (): Promi
     await rateLimitedServer.stop();
   }
 
-  const idleServer: MurmurHttpServer = await startHttpServer({
-    ...testEnvironment(join(directory, "idle.db")),
-    MURMUR_SESSION_IDLE_MS: "25",
-  });
+  const idleTime: ManualTimeSource = new ManualTimeSource();
+  const idleServer: MurmurHttpServer = await startHttpServer(
+    {
+      ...testEnvironment(join(directory, "idle.db")),
+      MURMUR_SESSION_IDLE_MS: "25",
+    },
+    { timeSource: idleTime },
+  );
   try {
     const sessionId: string = await initializeSession(idleServer.mcpUrl);
-    await Bun.sleep(50);
+    idleTime.advance(25);
     const expired: Response = await postJson(
       idleServer.mcpUrl,
       { id: 3, jsonrpc: "2.0", method: "tools/list", params: {} },
@@ -339,10 +360,14 @@ test("remote MCP enforces request rate and idle-session limits", async (): Promi
 
 test("remote MCP keeps sessions with active SSE responses alive", async (): Promise<void> => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-http-stream-"));
-  const server: MurmurHttpServer = await startHttpServer({
-    ...testEnvironment(join(directory, "messages.db")),
-    MURMUR_SESSION_IDLE_MS: "25",
-  });
+  const time: ManualTimeSource = new ManualTimeSource();
+  const server: MurmurHttpServer = await startHttpServer(
+    {
+      ...testEnvironment(join(directory, "messages.db")),
+      MURMUR_SESSION_IDLE_MS: "25",
+    },
+    { timeSource: time },
+  );
   const streamAbortController: AbortController = new AbortController();
   try {
     const sessionId: string = await initializeSession(server.mcpUrl);
@@ -351,7 +376,7 @@ test("remote MCP keeps sessions with active SSE responses alive", async (): Prom
       signal: streamAbortController.signal,
     });
     expect(streamResponse.status).toBe(200);
-    await Bun.sleep(50);
+    time.advance(25);
     const active: Response = await postJson(
       server.mcpUrl,
       { id: 2, jsonrpc: "2.0", method: "tools/list", params: {} },

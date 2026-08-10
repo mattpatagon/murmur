@@ -8,6 +8,7 @@ import {
   IdempotencyWinnerMissingError,
 } from "../domain/errors.js";
 import type { Agent, Message, SendMessageCommand, SendMessageResult } from "../domain/models.js";
+import { type MessageProvenance, ordinaryMessageProvenance } from "../domain/orchestration.js";
 import { type Instant, MessageId, ThreadId } from "../domain/value-objects.js";
 import { renewSqliteSession, sqliteAgent } from "./sqlite-agent-lifecycle-store.js";
 import { mapMessageRow } from "./sqlite-message-rows.js";
@@ -16,6 +17,7 @@ function existingMessageResult(
   database: Database,
   command: SendMessageCommand,
   recipient: Agent,
+  provenance: MessageProvenance,
 ): SendMessageResult | null {
   if (command.idempotencyKey === null) return null;
   const rawRow: unknown = database
@@ -30,6 +32,12 @@ function existingMessageResult(
   const sameRequest: boolean =
     existing.recipientId.equals(command.recipientId) &&
     existing.content.value === command.content.value &&
+    existing.senderAuthority === provenance.senderAuthority &&
+    existing.messageKind === provenance.messageKind &&
+    ((existing.orchestratorPolicyId === null && provenance.orchestratorPolicyId === null) ||
+      (existing.orchestratorPolicyId !== null &&
+        provenance.orchestratorPolicyId !== null &&
+        existing.orchestratorPolicyId.equals(provenance.orchestratorPolicyId))) &&
     ((existing.branchName === null && command.branchName === null) ||
       (existing.branchName !== null &&
         command.branchName !== null &&
@@ -57,10 +65,17 @@ export function sendSqliteMessage(
   command: SendMessageCommand,
   now: Instant,
 ): SendMessageResult {
+  const provenance: MessageProvenance =
+    command.provenance === undefined ? ordinaryMessageProvenance() : command.provenance;
   database.exec("BEGIN IMMEDIATE");
   try {
     const recipient: Agent = sqliteAgent(database, command.recipientId, now);
-    const existing: SendMessageResult | null = existingMessageResult(database, command, recipient);
+    const existing: SendMessageResult | null = existingMessageResult(
+      database,
+      command,
+      recipient,
+      provenance,
+    );
     if (existing !== null) {
       database.exec("COMMIT");
       return existing;
@@ -85,6 +100,9 @@ export function sendSqliteMessage(
         number,
         number,
         string,
+        string,
+        string,
+        string | null,
         string | null,
         string | null,
         string | null,
@@ -96,8 +114,9 @@ export function sendSqliteMessage(
       INSERT INTO messages(
         message_id, thread_id, sender_id, recipient_id,
         sender_generation, recipient_generation, content,
+        sender_authority, message_kind, orchestrator_policy_id,
         repository_name, branch_name, client_name, idempotency_key, created_at, expires_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(sender_id, idempotency_key) DO NOTHING
     `);
     const inserted: Changes = insert.run(
@@ -108,6 +127,9 @@ export function sendSqliteMessage(
       sender.generation.value,
       recipient.generation.value,
       command.content.value,
+      provenance.senderAuthority,
+      provenance.messageKind,
+      provenance.orchestratorPolicyId === null ? null : provenance.orchestratorPolicyId.value,
       command.repositoryName === null ? null : command.repositoryName.value,
       command.branchName === null ? null : command.branchName.value,
       command.client === null ? null : command.client.value,
@@ -116,7 +138,12 @@ export function sendSqliteMessage(
       now.addDays(RETENTION_DAYS).toISOString(),
     );
     if (inserted.changes === 0) {
-      const winner: SendMessageResult | null = existingMessageResult(database, command, recipient);
+      const winner: SendMessageResult | null = existingMessageResult(
+        database,
+        command,
+        recipient,
+        provenance,
+      );
       if (winner === null) throw new IdempotencyWinnerMissingError();
       database.exec("COMMIT");
       return winner;

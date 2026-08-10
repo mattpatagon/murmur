@@ -6,10 +6,10 @@ import { parseDatabaseUrl } from "../database-url.js";
 import { TenantId } from "../domain/value-objects.js";
 import { postgresTlsConfiguration } from "../postgres-tls.js";
 import {
-  PostgresHostedControlPlane,
   type CredentialAdmission,
   type HostedControlPlane,
   type HostedPrincipal,
+  PostgresHostedControlPlane,
 } from "./control-plane.js";
 import {
   credentialAdmissionKey,
@@ -86,6 +86,7 @@ export class MissingActiveOperatorError extends Error {
 export class HostedAuthenticator {
   public readonly allowBootstrap: boolean;
   public readonly controlPlane: HostedControlPlane | null;
+  public readonly orchestrationEnabled: boolean;
   public readonly tenantOnboardingEnabled: boolean;
   private readonly legacyToken: string | null;
   private readonly mode: AuthMode;
@@ -95,12 +96,14 @@ export class HostedAuthenticator {
     readonly controlPlane: HostedControlPlane | null;
     readonly legacyToken: string | null;
     readonly mode: AuthMode;
+    readonly orchestrationEnabled?: boolean;
     readonly tenantOnboardingEnabled: boolean;
   }) {
     this.allowBootstrap = options.allowBootstrap;
     this.controlPlane = options.controlPlane;
     this.legacyToken = options.legacyToken;
     this.mode = options.mode;
+    this.orchestrationEnabled = options.orchestrationEnabled === true;
     this.tenantOnboardingEnabled = options.tenantOnboardingEnabled;
   }
 
@@ -110,7 +113,10 @@ export class HostedAuthenticator {
       const expectedHash: Buffer = hashTokenSecret(this.legacyToken);
       if (timingSafeEqual(presentedHash, expectedHash)) {
         return {
+          agentId: null,
           kind: "tenant",
+          personalId: null,
+          repositoryName: null,
           role: "tenant_admin",
           tenantId: TenantId.founding(),
           tokenId: "legacy",
@@ -238,6 +244,7 @@ export async function createHostedAuthenticator(
       controlPlane,
       legacyToken,
       mode,
+      orchestrationEnabled: mode === "multi-tenant",
       tenantOnboardingEnabled,
     });
   } catch (error: unknown) {

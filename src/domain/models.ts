@@ -1,4 +1,10 @@
 import type {
+  MessageKind,
+  MessageProvenance,
+  OrchestratorPolicyId,
+  SenderAuthority,
+} from "./orchestration.js";
+import type {
   AgentClient,
   AgentId,
   BranchName,
@@ -7,9 +13,9 @@ import type {
   IdempotencyKey,
   Instant,
   JsonObject,
+  MachineName,
   MessageContent,
   MessageId,
-  MachineName,
   RepositoryName,
   Sequence,
   ThreadId,
@@ -25,6 +31,7 @@ import type {
 } from "./lifecycle-values.js";
 
 export type Agent = {
+  readonly authority: SenderAuthority;
   readonly agentId: AgentId;
   readonly closedAt: Instant | null;
   readonly closeReason: AgentCloseReason | null;
@@ -46,12 +53,15 @@ export type Message = {
   readonly createdAt: Instant;
   readonly expiresAt: Instant;
   readonly messageId: MessageId;
+  readonly messageKind: MessageKind;
+  readonly orchestratorPolicyId: OrchestratorPolicyId | null;
   readonly readAt: Instant | null;
   readonly recipientId: AgentId;
   readonly recipientGeneration: AgentGeneration;
   readonly repositoryName: RepositoryName | null;
   readonly senderId: AgentId;
   readonly senderGeneration: AgentGeneration;
+  readonly senderAuthority: SenderAuthority;
   readonly sequence: Sequence;
   readonly threadId: ThreadId;
 };
@@ -63,6 +73,7 @@ export type BroadcastAudience = {
 
 export type RegisterAgentCommand = {
   readonly agentId: AgentId;
+  readonly authority?: SenderAuthority | undefined;
   readonly displayName: DisplayName;
   readonly metadata: JsonObject;
   readonly sessionKey?: SessionKey | undefined;
@@ -118,6 +129,7 @@ export type SendMessageCommand = {
   readonly idempotencyKey: IdempotencyKey | null;
   readonly recipientId: AgentId;
   readonly repositoryName: RepositoryName | null;
+  readonly provenance?: MessageProvenance | undefined;
   readonly senderId: AgentId;
   readonly sessionKey?: SessionKey | undefined;
   readonly threadId: ThreadId | null;
@@ -137,6 +149,7 @@ export type BroadcastMessageCommand = {
   readonly content: MessageContent;
   readonly idempotencyKey: IdempotencyKey | null;
   readonly repositoryName: RepositoryName | null;
+  readonly senderAuthority?: SenderAuthority | undefined;
   readonly senderId: AgentId;
   readonly sessionKey?: SessionKey | undefined;
   readonly threadId: ThreadId | null;

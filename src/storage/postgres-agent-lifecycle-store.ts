@@ -2,6 +2,7 @@ import type { Sql, TransactionSql } from "postgres";
 import { z } from "zod";
 
 import {
+  AgentAuthorityConflictError,
   AgentClosedError,
   StaleAgentGenerationError,
   UnknownAgentError,
@@ -24,6 +25,7 @@ import type {
   RegisterAgentCommand,
   RegisterAgentResult,
 } from "../domain/models.js";
+import type { SenderAuthority } from "../domain/orchestration.js";
 import {
   type AgentId,
   type Instant,
@@ -60,6 +62,7 @@ export async function postgresAgentInTransaction(
   const raw: unknown = await transaction`
     SELECT
       agent.agent_id,
+      agent.authority,
       agent.display_name,
       agent.metadata::text AS metadata_json,
       agent.generation,
@@ -219,19 +222,22 @@ export async function registerPostgresAgent(
       existing === null ? 1 : existing.generation,
     );
     let metadata: JsonObject = command.metadata;
+    const authority: SenderAuthority = command.authority ?? "peer";
     let reopened: boolean = false;
     let repositoryDiverged: boolean = false;
     if (existing === null) {
       await transaction`
         INSERT INTO murmur.agents(
-          tenant_id, agent_id, display_name, metadata, created_at, last_seen_at
+          tenant_id, agent_id, authority, display_name, metadata, created_at, last_seen_at
         ) VALUES (
-          ${tenantId.value}::uuid, ${command.agentId.value}, ${command.displayName.value},
+          ${tenantId.value}::uuid, ${command.agentId.value}, ${authority},
+          ${command.displayName.value},
           ${database.json(metadata)}, ${now.toISOString()}::timestamptz,
           ${now.toISOString()}::timestamptz
         )
       `;
     } else {
+      if (existing.authority !== authority) throw new AgentAuthorityConflictError();
       const currentMetadata: JsonObject = JsonObjectSchema.parse(
         JSON.parse(existing.metadata_json),
       );
@@ -323,6 +329,7 @@ export async function listPostgresAgents(
     const raw: unknown = await transaction`
       SELECT
         agent.agent_id,
+        agent.authority,
         agent.display_name,
         agent.metadata::text AS metadata_json,
         agent.generation,

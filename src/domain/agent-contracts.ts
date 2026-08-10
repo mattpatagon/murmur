@@ -18,6 +18,7 @@ import type {
   ListAgentsResult,
   RegisterAgentCommand,
 } from "./models.js";
+import { type SenderAuthority, SenderAuthoritySchema } from "./orchestration.js";
 import {
   AgentId,
   BoundedJsonObjectSchema,
@@ -33,6 +34,7 @@ const GenerationNumberSchema: z.ZodNumber = z.number().int().positive().safe();
 
 export type AgentDto = {
   readonly agent_id: string;
+  readonly authority: SenderAuthority;
   readonly closed_at: string | null;
   readonly close_reason: string | null;
   readonly created_at: string;
@@ -47,6 +49,7 @@ export type AgentDto = {
 
 export const AgentDtoSchema: z.ZodType<AgentDto> = z.strictObject({
   agent_id: AgentIdTextSchema,
+  authority: SenderAuthoritySchema,
   closed_at: InstantTextSchema.nullable(),
   close_reason: AgentCloseReasonSchema.nullable(),
   created_at: InstantTextSchema,
@@ -62,6 +65,7 @@ export const AgentDtoSchema: z.ZodType<AgentDto> = z.strictObject({
 export function toAgentDto(agent: Agent): AgentDto {
   return {
     agent_id: agent.agentId.value,
+    authority: agent.authority,
     closed_at: agent.closedAt === null ? null : agent.closedAt.toISOString(),
     close_reason: agent.closeReason,
     created_at: agent.createdAt.toISOString(),

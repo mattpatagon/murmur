@@ -77,7 +77,9 @@ export async function getPostgresMessages(
         tenant_sequence AS sequence, message_id::text AS message_id,
         broadcast_id::text AS broadcast_id, thread_id, sender_id, recipient_id,
         sender_generation, recipient_generation,
-        content, repository_name, branch_name, client_name,
+        content, sender_authority, message_kind,
+        orchestrator_policy_id::text AS orchestrator_policy_id,
+        repository_name, branch_name, client_name,
         to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
         to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS expires_at,
         CASE WHEN read_at IS NULL THEN NULL

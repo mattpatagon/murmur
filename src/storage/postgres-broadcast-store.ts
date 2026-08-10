@@ -3,9 +3,10 @@ import { z } from "zod";
 
 import { broadcastRequestMatches } from "../domain/broadcasts.js";
 import { RETENTION_DAYS } from "../domain/contracts.js";
-import { IdempotencyConflictError } from "../domain/errors.js";
+import { AgentAuthorityError, IdempotencyConflictError } from "../domain/errors.js";
 import { SessionKey } from "../domain/lifecycle-values.js";
 import type { Agent, BroadcastMessageCommand, BroadcastMessageResult } from "../domain/models.js";
+import type { SenderAuthority } from "../domain/orchestration.js";
 import {
   BroadcastId,
   Instant,
@@ -74,9 +75,18 @@ async function existingBroadcast(
   if (command.idempotencyKey === null) return null;
   const raw: unknown = await transaction`
     SELECT
-      broadcast_id::text AS broadcast_id, thread_id, sender_id, sender_generation,
-      content, repository_name, branch_name, client_name,
-      audience_repository_name, audience_machine_name, idempotency_key,
+      broadcast_id::text AS broadcast_id,
+      thread_id,
+      sender_id,
+      sender_generation,
+      sender_authority,
+      content,
+      repository_name,
+      branch_name,
+      client_name,
+      audience_repository_name,
+      audience_machine_name,
+      idempotency_key,
       to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
       to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS expires_at
     FROM murmur.broadcasts
@@ -95,6 +105,7 @@ async function existingBroadcast(
       clientName: row.client_name,
       content: row.content,
       repositoryName: row.repository_name,
+      senderAuthority: row.sender_authority,
       threadId: row.thread_id,
     },
     command,
@@ -177,6 +188,7 @@ export async function broadcastPostgresMessage(
   const repositoryName: string = command.repositoryName.value;
   const branchName: string = command.branchName.value;
   const clientName: string = command.client.value;
+  const senderAuthority: SenderAuthority = command.senderAuthority ?? "peer";
   return await database.begin(
     async (transaction: TransactionSql): Promise<BroadcastMessageResult> => {
       await setPostgresTenantContext(transaction, tenantId);
@@ -212,6 +224,7 @@ export async function broadcastPostgresMessage(
         now,
         true,
       );
+      if (sender.authority !== senderAuthority) throw new AgentAuthorityError();
       const recipients: readonly RecipientRow[] = await currentRecipients(
         transaction,
         tenantId,
@@ -222,12 +235,14 @@ export async function broadcastPostgresMessage(
       const threadId: ThreadId = command.threadId === null ? ThreadId.generate() : command.threadId;
       const rawInserted: unknown = await transaction`
         INSERT INTO murmur.broadcasts(
-          tenant_id, broadcast_id, thread_id, sender_id, sender_generation, content,
+          tenant_id, broadcast_id, thread_id, sender_id, sender_generation,
+          sender_authority, content,
           repository_name, branch_name, client_name, audience_repository_name,
           audience_machine_name, idempotency_key, created_at, expires_at
         ) VALUES (
           ${tenantId.value}::uuid, ${broadcastId.value}::uuid, ${threadId.value},
-          ${command.senderId.value}, ${sender.generation.value}, ${command.content.value},
+          ${command.senderId.value}, ${sender.generation.value}, ${senderAuthority},
+          ${command.content.value},
           ${repositoryName}, ${branchName}, ${clientName},
           ${command.audience.repositoryName === null ? null : command.audience.repositoryName.value},
           ${command.audience.machineName === null ? null : command.audience.machineName.value},
@@ -237,6 +252,7 @@ export async function broadcastPostgresMessage(
         )
         RETURNING
           broadcast_id::text AS broadcast_id, thread_id, sender_id, sender_generation,
+          sender_authority,
           content, repository_name, branch_name, client_name,
           audience_repository_name, audience_machine_name, idempotency_key,
           to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
@@ -249,6 +265,7 @@ export async function broadcastPostgresMessage(
           INSERT INTO murmur.messages(
             tenant_id, message_id, thread_id, sender_id, recipient_id,
             sender_generation, recipient_generation, broadcast_id, content,
+            sender_authority,
             repository_name, branch_name, client_name, created_at, expires_at
           )
           SELECT
@@ -256,6 +273,7 @@ export async function broadcastPostgresMessage(
             ${command.senderId.value}, delivery.recipient_id,
             ${sender.generation.value}, delivery.recipient_generation,
             ${broadcastId.value}::uuid, ${command.content.value},
+            ${senderAuthority},
             ${repositoryName}, ${branchName}, ${clientName},
             ${now.toISOString()}::timestamptz,
             ${now.addDays(RETENTION_DAYS).toISOString()}::timestamptz

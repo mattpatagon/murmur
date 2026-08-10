@@ -1,6 +1,14 @@
 import { z } from "zod";
 
-import { Instant, type JsonObject, JsonObjectSchema, TenantId } from "../domain/value-objects.js";
+import { PersonalId } from "../domain/orchestration.js";
+import {
+  AgentId,
+  Instant,
+  type JsonObject,
+  JsonObjectSchema,
+  RepositoryName,
+  TenantId,
+} from "../domain/value-objects.js";
 import type {
   OperatorTokenSummary,
   Page,
@@ -10,7 +18,7 @@ import type {
   TokenSummary,
 } from "./control-plane-contracts.js";
 
-export type AuthRow = {
+type AuthRow = {
   readonly key_id: string;
   readonly principal_kind: "bootstrap" | "operator" | "tenant";
   readonly tenant_id: string | null;
@@ -18,7 +26,27 @@ export type AuthRow = {
   readonly token_role: TenantTokenRole | null;
 };
 
+export type AuthRowV2 = AuthRow & {
+  readonly orchestrator_agent_id: string | null;
+  readonly personal_id: string | null;
+  readonly repository_name: string | null;
+};
+
 export type TokenRow = {
+  readonly agent_id: string | null;
+  readonly created_at: string;
+  readonly expires_at: string | null;
+  readonly key_id: string;
+  readonly last_used_at: string | null;
+  readonly name: string;
+  readonly personal_id: string;
+  readonly repository_name: string | null;
+  readonly revoked_at: string | null;
+  readonly token_id: string;
+  readonly token_role: TenantTokenRole;
+};
+
+export type OperatorTokenRow = {
   readonly created_at: string;
   readonly expires_at: string | null;
   readonly key_id: string;
@@ -26,10 +54,7 @@ export type TokenRow = {
   readonly name: string;
   readonly revoked_at: string | null;
   readonly token_id: string;
-  readonly token_role: TenantTokenRole;
 };
-
-export type OperatorTokenRow = Omit<TokenRow, "token_role">;
 export type TenantRow = {
   readonly created_at: string;
   readonly display_name: string;
@@ -59,12 +84,15 @@ export type HostedSchemaProbeRow = {
 
 export type TokenIdRow = { readonly token_id: string };
 
-export const AuthRowSchema: z.ZodType<AuthRow> = z.strictObject({
+export const AuthRowV2Schema: z.ZodType<AuthRowV2> = z.strictObject({
   key_id: z.string(),
+  orchestrator_agent_id: z.string().nullable(),
+  personal_id: z.string().uuid().nullable(),
   principal_kind: z.enum(["bootstrap", "operator", "tenant"]),
+  repository_name: z.string().nullable(),
   tenant_id: z.string().uuid().nullable(),
   token_id: z.string().uuid(),
-  token_role: z.enum(["agent", "tenant_admin"]).nullable(),
+  token_role: z.enum(["agent", "tenant_admin", "orchestrator"]).nullable(),
 });
 
 export const OperatorTokenRowSchema: z.ZodType<OperatorTokenRow> = z.strictObject({
@@ -78,14 +106,17 @@ export const OperatorTokenRowSchema: z.ZodType<OperatorTokenRow> = z.strictObjec
 });
 
 export const TokenRowSchema: z.ZodType<TokenRow> = z.strictObject({
+  agent_id: z.string().nullable(),
   created_at: z.string(),
   expires_at: z.string().nullable(),
   key_id: z.string(),
   last_used_at: z.string().nullable(),
   name: z.string(),
+  personal_id: z.string().uuid(),
+  repository_name: z.string().nullable(),
   revoked_at: z.string().nullable(),
   token_id: z.string().uuid(),
-  token_role: z.enum(["agent", "tenant_admin"]),
+  token_role: z.enum(["agent", "tenant_admin", "orchestrator"]),
 });
 
 export const TenantRowSchema: z.ZodType<TenantRow> = z.strictObject({
@@ -136,7 +167,13 @@ export function mapOperatorToken(row: OperatorTokenRow): OperatorTokenSummary {
 }
 
 export function mapToken(row: TokenRow): TokenSummary {
-  return { ...mapOperatorToken(row), role: row.token_role };
+  return {
+    ...mapOperatorToken(row),
+    agentId: row.agent_id === null ? null : AgentId.parse(row.agent_id),
+    personalId: PersonalId.parse(row.personal_id),
+    repositoryName: row.repository_name === null ? null : RepositoryName.parse(row.repository_name),
+    role: row.token_role,
+  };
 }
 
 export function mapTenant(row: TenantRow): TenantSummary {

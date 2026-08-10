@@ -195,6 +195,35 @@ correctness contract. If rollout cannot complete inside that window, stop and de
 forward revision; do not expose lifecycle tools alongside mixed broadcast semantics. Rollback to a
 pre-lifecycle application is unsupported after any identity advances beyond generation 1.
 
+## Orchestrator administration
+
+Human-delegated orchestration is enabled only with `MURMUR_AUTH_MODE=multi-tenant`. A tenant
+administrator creates an orchestrator token, records its one-time secret in the approved secret
+store, and then assigns organization, personal, organization+repository, or personal+repository
+policies. Create repository-bound agent tokens for repository-specific resolution; request headers
+do not choose a policy. Never place private decide-versus-escalate instructions in audit metadata,
+ordinary messages, deployment variables, or repository files.
+
+Complete the application rollout on every replica before creating the first orchestrator token or
+policy. The additive schema supports an old binary during rollout only while no orchestration data
+has been created. Once an orchestrator credential or policy exists, a binary older than this
+release is not a supported rollback target: its authentication row parser does not recognize the
+role, and its credential cleanup can conflict with retained policy attribution.
+
+Use `list_orchestrator_policies` to review scope, assignment, and updater attribution, following
+`next_cursor` until it is null so all bounded policy pages are reviewed. Rotation is:
+
+1. Revoke the old orchestrator access token.
+2. Create a new orchestrator token with the same reserved agent ID.
+3. Reapply each intended policy to the new token key.
+4. Verify worker `get_orchestrator`, orchestrator `get_delegation`, and a durable routed ask.
+
+Revocation stops new resolution immediately and closes local live sessions best-effort. Historical
+messages retain their authenticated authority and policy ID. Switching the application to hybrid,
+legacy, or local mode disables every orchestration tool, including for retained orchestrator
+credentials; this is a capability rollback, not a database rollback. See
+[orchestration.md](orchestration.md) for precedence and trust boundaries.
+
 ## Manual strict deployment
 
 Use this fallback only after operator bootstrap, legacy adoption, and tenant
@@ -263,6 +292,14 @@ Application rollback is safe only when the target revision supports the current
 `tenant_contract_version`. Contract version 2 is forward-only: do not redeploy a
 version-1 writer. Container images remain available for diagnosis after old
 Cloud Run revisions are drained.
+
+The orchestrator migrations are additive, but an older application does not understand their
+authority fields. Prefer a fixed-forward application rollout. Before any orchestrator credential or
+policy has been created, deployment skew is limited to the expand phase described above. After
+either exists, only this release or a later schema-compatible binary is supported. If an emergency
+capability rollback is required, run that compatible binary in hybrid mode; do not deploy an older
+binary, drop policy, token-binding, or message-provenance columns, or claim historical
+authoritative messages became peers.
 
 Runtime database credentials are versioned. Before rolling back to a compatible
 revision that references an older version, explicitly re-enable that exact

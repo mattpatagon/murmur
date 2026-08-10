@@ -2,7 +2,7 @@ import type { Database, Statement } from "bun:sqlite";
 
 import { type UserVersionRow, UserVersionRowSchema } from "./sqlite-message-rows.js";
 
-const SUPPORTED_SCHEMA_VERSION: number = 8;
+const SUPPORTED_SCHEMA_VERSION: number = 9;
 
 function schemaVersion(database: Database): number {
   const statement: Statement<unknown, []> = database.query("PRAGMA user_version");
@@ -238,6 +238,22 @@ export function migrateSqliteDatabase(database: Database): void {
         CREATE INDEX IF NOT EXISTS notices_withdrawer_agent ON notices(withdrawn_by_id)
           WHERE withdrawn_by_id IS NOT NULL;
         PRAGMA user_version = 8;
+      `);
+      version = 8;
+    }
+    if (version === 8) {
+      database.exec(`
+        ALTER TABLE agents ADD COLUMN authority TEXT NOT NULL DEFAULT 'peer'
+          CHECK(authority = 'peer');
+        ALTER TABLE broadcasts ADD COLUMN sender_authority TEXT NOT NULL DEFAULT 'peer'
+          CHECK(sender_authority = 'peer');
+        ALTER TABLE messages ADD COLUMN sender_authority TEXT NOT NULL DEFAULT 'peer'
+          CHECK(sender_authority = 'peer');
+        ALTER TABLE messages ADD COLUMN message_kind TEXT NOT NULL DEFAULT 'message'
+          CHECK(message_kind = 'message');
+        ALTER TABLE messages ADD COLUMN orchestrator_policy_id TEXT
+          CHECK(orchestrator_policy_id IS NULL);
+        PRAGMA user_version = 9;
       `);
     }
     database.exec("COMMIT");

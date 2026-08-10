@@ -1,7 +1,8 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
-import { Instant, TenantId } from "../domain/value-objects.js";
+import { PersonalId } from "../domain/orchestration.js";
+import { Instant, RepositoryName, TenantId } from "../domain/value-objects.js";
 import {
   type BootstrapOperatorInput,
   BootstrapOperatorInputSchema,
@@ -87,10 +88,12 @@ export async function callTenantAdminTool(
     case "create_access_token": {
       const input: CreateTokenInput = CreateTokenInputSchema.parse(argumentsValue);
       const token: IssuedToken = await controlPlane.createToken(
-        principal.tenantId,
+        principal,
         input.role,
         input.name,
         expiration(input.expires_at),
+        input.personal_id === undefined ? null : PersonalId.parse(input.personal_id),
+        input.repository === undefined ? null : RepositoryName.parse(input.repository),
       );
       const output: IssuedTokenOutput = IssuedTokenOutputSchema.parse({
         token: toIssuedTokenDto(token),
@@ -100,7 +103,7 @@ export async function callTenantAdminTool(
     case "list_access_tokens": {
       const input: ListTokensInput = ListTokensInputSchema.parse(argumentsValue);
       const tokenPage: Page<TokenSummary> = await controlPlane.listTokens(
-        principal.tenantId,
+        principal,
         input.cursor ?? null,
         input.limit ?? 100,
       );
@@ -112,10 +115,7 @@ export async function callTenantAdminTool(
     }
     case "revoke_access_token": {
       const input: RevokeTokenInput = RevokeTokenInputSchema.parse(argumentsValue);
-      const tokenId: string | null = await controlPlane.revokeToken(
-        principal.tenantId,
-        input.key_id,
-      );
+      const tokenId: string | null = await controlPlane.revokeToken(principal, input.key_id);
       if (tokenId !== null && context.onTokenRevoked !== null) {
         await context.onTokenRevoked(tokenId);
       }
