@@ -16,6 +16,12 @@
 
 ## Completed
 
+- Replace activity timestamps with lease-backed agent sessions, explicit closure, generation-aware
+  inbox history, and repository coordination notices so stale agents leave discovery and broadcast
+  audiences without deleting durable messages.
+
+  **Completed:** v0.6.0.0 (2026-08-10)
+
 - Make SQLite idempotent sends atomic across processes with a conflict-aware insert and stored-winner
   comparison.
 

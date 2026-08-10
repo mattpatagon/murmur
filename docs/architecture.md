@@ -62,10 +62,25 @@ server cannot determine must be supplied by the client before a send or broadcas
 
 ## Data model and consistency
 
-Agents register a stable ID plus machine/client/workspace metadata. Direct sends and broadcasts
-create independent recipient records with tenant-qualified sequence numbers. Thread IDs preserve a
-conversation; idempotency keys make safe retries return the original result, including a broadcast's
-original recipient snapshot.
+Agents register a stable ID plus machine/client/workspace metadata. The ID owns monotonically
+increasing generations, and each generation owns named 60-minute session leases. State is derived:
+an open generation with a live lease is `active`, an open generation without one is `inactive`, and
+an explicitly or automatically retired identity is `closed`. Registration renews one lease. A
+repository move advances the generation only when no other session is live; a conflicting live
+registration is surfaced as repository divergence without silently changing ownership metadata.
+
+Direct sends and broadcasts create independent recipient records with tenant-qualified sequence
+numbers and snapshot both endpoint generations. Direct delivery accepts active or inactive
+recipients but rejects a closed identity. Broadcast delivery snapshots active leases only, so an
+ended, expired, or closed session leaves the audience deterministically. Thread IDs preserve a
+conversation; idempotency keys make safe retries return the original result, including a
+broadcast's original recipient snapshot. Current inbox tools address the current generation;
+`get_message_history` requires an explicit historical generation and never renews a session.
+
+Repository coordination notices are separate from inbox messages. A notice records a kind,
+creator generation, repository, optional branch, bounded lifetime, and terminal resolution or
+withdrawal audit fields. Any registered tenant actor may resolve a notice, while only the same
+stable creator identity may withdraw it. Notice reads do not create a default session.
 
 SQLite serializes local transactions, uses WAL mode, and polls an inbox version on a bounded
 interval. PostgreSQL uses transactions, advisory locks where required for recipient ordering,
@@ -84,6 +99,13 @@ queues, active requests, long-lived SSE streams, per-principal and per-tenant wo
 subscriptions, request rates, agents, tokens, retained messages, stored bytes, message size, and
 broadcast fan-out. Admission returns a safe retryable status before allocating downstream resources
 when a bound is full.
+
+Agent lifecycle storage permits 1,000 open identities per tenant, eight live sessions and 64
+retained session rows per stable identity. Expired leases become ended sessions and are removed after
+30 days; inactive identities close after 30 dormant days, and unreferenced closed identities become
+eligible for deletion 30 days later. Notices allow one- through 90-day lifetimes, default to 14 days,
+retain terminal audit state for 30 days, and are capped per tenant at 10,000 rows and 64 MiB of
+content.
 
 Queues are finite and waits have deadlines. Shutdown stops new admission, closes the HTTP server,
 closes applications and stores, then flushes telemetry within a bounded timeout. Cleanup remains
@@ -107,4 +129,7 @@ best-effort across multiple failures and preserves the original startup or shutd
 Protocol additions start in domain schemas, then update both stores, MCP tools/resources, transport
 tests, documentation, and compatibility tests. PostgreSQL migrations are forward-only and verified
 from populated previous states. SQLite rejects a database schema newer than the running binary.
+Lifecycle migrations backfill generation 1 and one compatibility lease for recently active agents;
+generation snapshot triggers keep older message writers coherent during the bounded deployment
+window. Old application revisions must be drained before lifecycle mutations are exposed broadly.
 See [upgrading.md](upgrading.md) and [hosted-deployment.md](hosted-deployment.md).
