@@ -51,3 +51,12 @@ export interface E2eeMessageStore {
   ): Awaitable<InboxSubscription>;
   close(): Awaitable<void>;
 }
+
+export interface E2eeMessageStoreProvider {
+  scopeE2ee(tenantId: TenantId): E2eeMessageStore;
+}
+
+export function isE2eeMessageStoreProvider(value: unknown): value is E2eeMessageStoreProvider {
+  if (typeof value !== "object" || value === null) return false;
+  return typeof Reflect.get(value, "scopeE2ee") === "function";
+}
