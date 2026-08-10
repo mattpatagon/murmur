@@ -160,14 +160,31 @@ test("serializes each sender-recipient outbox and preserves exact retry bytes", 
             tenantId: first.tenantId,
           }),
       ).toThrow("Resolve the existing pair outbox");
-      const ready: OutboxItem = vault.setOutboxEnvelope(first.logicalId, '{"ciphertext":"abc"}');
-      expect(ready.envelopeJson).toBe('{"ciphertext":"abc"}');
-      expect(vault.setOutboxEnvelope(first.logicalId, '{"ciphertext":"abc"}').envelopeJson).toBe(
-        ready.envelopeJson,
+      const claimId: string = "11111111-1111-4111-8111-111111111111";
+      const ready: OutboxItem = vault.setOutboxEnvelope(
+        first.logicalId,
+        claimId,
+        '{"ciphertext":"abc"}',
       );
+      expect(ready.claimId).toBe(claimId);
+      expect(ready.envelopeJson).toBe('{"ciphertext":"abc"}');
       expect(
-        (): OutboxItem => vault.setOutboxEnvelope(first.logicalId, '{"ciphertext":"different"}'),
+        vault.setOutboxEnvelope(first.logicalId, claimId, '{"ciphertext":"abc"}').envelopeJson,
+      ).toBe(ready.envelopeJson);
+      expect(
+        (): OutboxItem =>
+          vault.setOutboxEnvelope(first.logicalId, claimId, '{"ciphertext":"different"}'),
       ).toThrow("conflict");
+      const replaced: OutboxItem = vault.replaceExpiredOutboxClaim(
+        first.logicalId,
+        "2026-08-10T17:00:30.000Z",
+      );
+      expect(replaced.pairCounter).toBe(2);
+      expect(replaced.claimId).toBeNull();
+      expect(replaced.envelopeJson).toBeNull();
+      expect(
+        vault.replaceExpiredOutboxClaim(first.logicalId, "2026-08-10T17:00:31.000Z").pairCounter,
+      ).toBe(2);
       expect(vault.resolveOutbox(first.logicalId)).toBe(true);
       const second: OutboxItem = vault.beginOutbox({
         createdAt: "2026-08-10T17:01:00.000Z",
@@ -178,7 +195,7 @@ test("serializes each sender-recipient outbox and preserves exact retry bytes", 
         senderId: first.senderId,
         tenantId: first.tenantId,
       });
-      expect(second.pairCounter).toBe(2);
+      expect(second.pairCounter).toBe(3);
     } finally {
       vault.close();
     }
@@ -243,7 +260,7 @@ test("rejects a vault schema newer than the running binary", async (): Promise<v
     const path: string = join(directory, "future.sqlite");
     mkdirSync(directory, { recursive: true });
     const database: Database = new Database(path, { create: true, readwrite: true });
-    database.exec("PRAGMA user_version = 3");
+    database.exec("PRAGMA user_version = 4");
     database.close(false);
     expect((): LocalE2eeVault => new LocalE2eeVault(path, "linux")).toThrow("newer");
   });

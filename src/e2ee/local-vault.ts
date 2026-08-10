@@ -1,6 +1,7 @@
 import { type Changes, Database, type Statement } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
 import process from "node:process";
+import { z } from "zod";
 
 import { LocalVaultKeys } from "./local-vault-keys.js";
 import {
@@ -16,6 +17,7 @@ import { LocalVaultTrust } from "./local-vault-trust.js";
 import { prepareVaultDirectory, protectVaultFile } from "./vault-paths.js";
 
 const MAX_ENVELOPE_JSON_BYTES: number = 1024 * 1024;
+const ClaimIdSchema: z.ZodString = z.string().uuid();
 
 export type BeginOutboxInput = {
   readonly createdAt: string;
@@ -95,7 +97,7 @@ export class LocalE2eeVault {
     this.#ensureOpen();
     const statement: Statement<unknown, [string]> = this.#database.query(`
       SELECT logical_id, tenant_id, sender_id, recipient_id, pair_counter,
-             plaintext, plaintext_digest, envelope_json, created_at
+             plaintext, plaintext_digest, claim_id, envelope_json, created_at
       FROM outbox WHERE logical_id = ?
     `);
     const row: unknown = statement.get(logicalId);
@@ -179,23 +181,71 @@ export class LocalE2eeVault {
     }
   }
 
-  public setOutboxEnvelope(logicalId: string, envelopeJson: string): OutboxItem {
+  public setOutboxEnvelope(logicalId: string, claimId: string, envelopeJson: string): OutboxItem {
     this.#ensureOpen();
+    ClaimIdSchema.parse(claimId);
     if (Buffer.byteLength(envelopeJson, "utf8") > MAX_ENVELOPE_JSON_BYTES) {
       throw new Error("Encrypted envelope exceeds the local outbox limit");
     }
     const existing: OutboxItem | null = this.getOutbox(logicalId);
     if (existing === null) throw new Error("Outbox item does not exist");
-    if (existing.envelopeJson !== null && existing.envelopeJson !== envelopeJson) {
+    if (
+      (existing.claimId !== null && existing.claimId !== claimId) ||
+      (existing.envelopeJson !== null && existing.envelopeJson !== envelopeJson)
+    ) {
       throw new Error("Outbox envelope conflict");
     }
-    const statement: Statement<unknown, [string, string]> = this.#database.query(`
-      UPDATE outbox SET envelope_json = ? WHERE logical_id = ?
+    const statement: Statement<unknown, [string, string, string]> = this.#database.query(`
+      UPDATE outbox SET claim_id = ?, envelope_json = ? WHERE logical_id = ?
     `);
-    statement.run(envelopeJson, logicalId);
+    statement.run(claimId, envelopeJson, logicalId);
     const updated: OutboxItem | null = this.getOutbox(logicalId);
     if (updated === null) throw new Error("Outbox item disappeared during update");
     return updated;
+  }
+
+  public replaceExpiredOutboxClaim(logicalId: string, createdAt: string): OutboxItem {
+    this.#ensureOpen();
+    this.#database.exec("BEGIN IMMEDIATE");
+    try {
+      const existing: OutboxItem | null = this.getOutbox(logicalId);
+      if (existing === null) throw new Error("Outbox item does not exist");
+      if (existing.claimId === null && existing.envelopeJson === null) {
+        this.#database.exec("COMMIT");
+        return existing;
+      }
+      if (existing.claimId === null || existing.envelopeJson === null) {
+        throw new Error("Outbox claim and envelope state is inconsistent");
+      }
+      const nextCounter: number = existing.pairCounter + 1;
+      if (!Number.isSafeInteger(nextCounter)) throw new Error("Pair counter is exhausted");
+      const updateCounter: Statement<unknown, [number, string, string, string]> =
+        this.#database.query(`
+          UPDATE pair_counters SET last_counter = ?
+          WHERE tenant_id = ? AND sender_id = ? AND recipient_id = ?
+        `);
+      if (
+        updateCounter.run(nextCounter, existing.tenantId, existing.senderId, existing.recipientId)
+          .changes !== 1
+      ) {
+        throw new Error("Outbox pair counter is unavailable");
+      }
+      const updateOutbox: Statement<unknown, [number, string, string]> = this.#database.query(`
+        UPDATE outbox
+        SET pair_counter = ?, claim_id = NULL, envelope_json = NULL, created_at = ?
+        WHERE logical_id = ?
+      `);
+      if (updateOutbox.run(nextCounter, createdAt, logicalId).changes !== 1) {
+        throw new Error("Outbox item disappeared during claim replacement");
+      }
+      this.#database.exec("COMMIT");
+    } catch (error: unknown) {
+      this.#database.exec("ROLLBACK");
+      throw error;
+    }
+    const replaced: OutboxItem | null = this.getOutbox(logicalId);
+    if (replaced === null) throw new Error("Outbox item disappeared after claim replacement");
+    return replaced;
   }
 
   public resolveOutbox(logicalId: string): boolean {

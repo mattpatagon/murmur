@@ -41,6 +41,7 @@ export type PeerPin = {
 };
 
 export type OutboxItem = {
+  readonly claimId: string | null;
   readonly createdAt: string;
   readonly envelopeJson: string | null;
   readonly logicalId: string;
@@ -103,6 +104,7 @@ type PeerPinRow = {
 };
 
 type OutboxRow = {
+  readonly claim_id: string | null;
   readonly created_at: string;
   readonly envelope_json: string | null;
   readonly logical_id: string;
@@ -162,6 +164,7 @@ const PeerPinRowSchema: z.ZodType<PeerPinRow> = z.strictObject({
   verified_at: z.string(),
 });
 const OutboxRowSchema: z.ZodType<OutboxRow> = z.strictObject({
+  claim_id: z.string().nullable(),
   created_at: z.string(),
   envelope_json: z.string().nullable(),
   logical_id: z.string(),
@@ -241,6 +244,7 @@ export function mapPeerPinRow(input: unknown): PeerPin {
 export function mapOutboxRow(input: unknown): OutboxItem {
   const row: OutboxRow = OutboxRowSchema.parse(input);
   return {
+    claimId: row.claim_id,
     createdAt: row.created_at,
     envelopeJson: row.envelope_json,
     logicalId: row.logical_id,

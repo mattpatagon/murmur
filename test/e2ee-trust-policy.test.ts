@@ -197,6 +197,7 @@ test("rejects issuer substitution and upgrades a populated version-one vault", a
     legacyDatabase.exec(`
       DROP TABLE trust_policy_revocations;
       DROP TABLE trust_policy_state;
+      ALTER TABLE outbox DROP COLUMN claim_id;
       PRAGMA user_version = 1;
     `);
     legacyDatabase.close(false);
