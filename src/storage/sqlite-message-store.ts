@@ -1,4 +1,4 @@
-import { type Changes, Database, type Statement } from "bun:sqlite";
+import { type Changes, Database, type SQLQueryBindings, type Statement } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -70,6 +70,33 @@ import {
 
 const SQLITE_WATCH_INTERVAL_MS: number = 200;
 type IntervalHandle = ReturnType<typeof setInterval>;
+type BunParameterList = Parameters<Statement["all"]>;
+type QueryParameters<ParamsType> = ParamsType extends BunParameterList ? ParamsType : [ParamsType];
+
+interface FinalizableStatement {
+  finalize(): void;
+}
+
+class ManagedSqliteDatabase extends Database {
+  private readonly cachedStatements: Set<FinalizableStatement> = new Set();
+
+  public override query<ReturnType, ParamsType extends SQLQueryBindings | SQLQueryBindings[]>(
+    sql: string,
+  ): Statement<ReturnType, QueryParameters<ParamsType>> {
+    const statement: Statement<ReturnType, QueryParameters<ParamsType>> = super.query<
+      ReturnType,
+      ParamsType
+    >(sql);
+    this.cachedStatements.add(statement);
+    return statement;
+  }
+
+  public closeSynchronously(): void {
+    for (const statement of this.cachedStatements) statement.finalize();
+    this.cachedStatements.clear();
+    super.close(true);
+  }
+}
 
 class SqliteInboxSubscription implements InboxSubscription {
   private readonly agentId: AgentId;
@@ -124,7 +151,7 @@ class SqliteInboxSubscription implements InboxSubscription {
 
 export class SqliteMessageStore implements MessageStore {
   private readonly clock: Clock;
-  private readonly database: Database;
+  private readonly database: ManagedSqliteDatabase;
   private closed: boolean;
 
   public constructor(databasePath: string, clock: Clock = new SystemClock()) {
@@ -133,7 +160,7 @@ export class SqliteMessageStore implements MessageStore {
     }
     this.clock = clock;
     this.closed = false;
-    this.database = new Database(databasePath, {
+    this.database = new ManagedSqliteDatabase(databasePath, {
       create: true,
       readwrite: true,
       safeIntegers: true,
@@ -358,7 +385,7 @@ export class SqliteMessageStore implements MessageStore {
 
   public close(): void {
     if (this.closed) return;
+    this.database.closeSynchronously();
     this.closed = true;
-    this.database.close();
   }
 }

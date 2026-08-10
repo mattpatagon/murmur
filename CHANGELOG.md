@@ -23,6 +23,7 @@ All notable changes to Murmur are documented in this file.
 - Preserve monotonic identity lineage while notice audit rows refer to an actor, and serialize dormant pruning with concurrent registration and delivery.
 - Preserve generation foreign keys, resource accounting, forced RLS, and safe quota errors across fresh and populated PostgreSQL upgrades.
 - Split lifecycle upgrades into independently replayable migration phases and drain superseded Cloud Run revisions before mixed lifecycle writers can persist stale generations.
+- Close SQLite handles synchronously so shutdown releases database files before callers remove or replace them.
 
 ### Security
 
