@@ -406,6 +406,12 @@ test("upgrades a populated version-six vault with an empty active tenant binding
         boundAt: "2026-08-10T20:01:00.000Z",
         tenantId: "00000000-0000-4000-8000-000000000011",
       });
+      expect((): unknown =>
+        upgraded.settings.bindActiveTenant(
+          "00000000-0000-4000-8000-000000000012",
+          "2026-08-10T20:02:00.000Z",
+        ),
+      ).toThrow("already bound to another tenant");
     } finally {
       upgraded.close();
     }

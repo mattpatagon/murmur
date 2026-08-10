@@ -28,6 +28,12 @@ export class LocalVaultSettings {
       bound_at: boundAtInput,
       tenant_id: tenantIdInput,
     });
+    const current: ActiveTenantBinding | null = this.getActiveTenant();
+    if (current !== null && current.tenantId !== input.tenant_id) {
+      throw new Error(
+        "The local E2E vault is already bound to another tenant; use a separate vault path",
+      );
+    }
     const statement: Statement<unknown, [string, string]> = this.#database.query(`
       INSERT INTO active_tenant_binding(singleton, tenant_id, bound_at)
       VALUES (1, ?, ?)
