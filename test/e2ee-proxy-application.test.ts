@@ -14,6 +14,12 @@ import {
 
 import type {
   BroadcastMessageInput,
+  CloseAgentInput,
+  CloseAgentOutput,
+  EndSessionInput,
+  EndSessionOutput,
+  GetAgentInput,
+  GetAgentOutput,
   GetMessagesInput,
   ListAgentsInput,
   ListAgentsOutput,
@@ -120,6 +126,33 @@ class FakeProxyOperations implements E2eeProxyOperations {
     };
   }
 
+  public async getAgent(_input: GetAgentInput): Promise<GetAgentOutput> {
+    this.calls.push("get_agent");
+    return { agent: registration().agent };
+  }
+
+  public async endSession(input: EndSessionInput): Promise<EndSessionOutput> {
+    this.calls.push("end_session");
+    return { ended: 1, generation: input.expected_generation };
+  }
+
+  public async closeAgent(_input: CloseAgentInput): Promise<CloseAgentOutput> {
+    this.calls.push("close_agent");
+    return {
+      agent: {
+        ...registration().agent,
+        close_reason: "completed",
+        closed_at: NOW,
+        lease_expires_at: null,
+        live_session_count: 0,
+        state: "closed",
+      },
+      already_closed: false,
+      ended_sessions: 1,
+      unread_count: 0,
+    };
+  }
+
   public async sendMessage(_input: SendMessageInput): Promise<ProxySendMessageOutput> {
     this.calls.push("send_message");
     return {
@@ -210,7 +243,10 @@ test("local E2E MCP proxy preserves familiar data tools and verified plaintext o
     const listed: Awaited<ReturnType<Client["listTools"]>> = await client.listTools();
     expect(listed.tools.map((tool: (typeof listed.tools)[number]): string => tool.name)).toEqual([
       "register_agent",
+      "get_agent",
       "list_agents",
+      "end_session",
+      "close_agent",
       "send_message",
       "broadcast_message",
       "get_messages",
@@ -227,7 +263,15 @@ test("local E2E MCP proxy preserves familiar data tools and verified plaintext o
       agent_id: SENDER_ID,
       display_name: "Sender",
     });
+    await callTool(client, "get_agent", { agent_id: SENDER_ID });
     await callTool(client, "list_agents", { limit: 1_000, state: "active" });
+    await callTool(client, "end_session", {
+      agent_id: SENDER_ID,
+      end_default_session: true,
+      expected_generation: 1,
+      reason: "stop",
+      session_key: "pane-1",
+    });
     const sent: CallToolResult = await callTool(client, "send_message", {
       content: "endpoint plaintext",
       recipient_id: RECIPIENT_ID,
@@ -269,15 +313,23 @@ test("local E2E MCP proxy preserves familiar data tools and verified plaintext o
       agent_id: RECIPIENT_ID,
       message_ids: [MESSAGE_ID],
     });
+    await callTool(client, "close_agent", {
+      agent_id: SENDER_ID,
+      expected_generation: 1,
+      reason: "completed",
+    });
 
     expect(operations.calls).toEqual([
       "register_agent",
+      "get_agent",
       "list_agents",
+      "end_session",
       "send_message",
       "broadcast_message",
       "get_messages",
       "wait_for_messages",
       "mark_messages_read",
+      "close_agent",
     ]);
 
     const resources: Awaited<ReturnType<Client["listResources"]>> = await client.listResources();

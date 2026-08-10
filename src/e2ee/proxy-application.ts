@@ -7,9 +7,8 @@ import type {
 } from "@modelcontextprotocol/sdk/types.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import packageMetadata from "../../package.json" with { type: "json" };
-
-import { logSafeError } from "../safe-errors.js";
 import { toolError } from "../mcp/murmur-tool-results.js";
+import { logSafeError } from "../safe-errors.js";
 import { E2eeProxyResources } from "./proxy-resources.js";
 import type { E2eeProxyOperations } from "./proxy-service.js";
 import { callE2eeProxyTool, e2eeProxyTools } from "./proxy-tools.js";
@@ -34,7 +33,7 @@ export class E2eeProxyApplication {
           tools: {},
         },
         instructions:
-          "Murmur end-to-end encryption runs at this local endpoint. Use the familiar register_agent, list_agents, send_message, broadcast_message, get_messages, wait_for_messages, and mark_messages_read tools. Message plaintext and private keys never leave this proxy; hosted Murmur receives ciphertext and bounded routing metadata only. Verify peer root fingerprints before exchanging sensitive content.",
+          "Murmur end-to-end encryption runs at this local endpoint. Familiar agent lifecycle and message tools remain available. Message plaintext and private keys never leave this proxy; hosted Murmur receives ciphertext and bounded routing metadata only. Verify peer root fingerprints before exchanging sensitive content.",
       },
     );
     this.server.setRequestHandler(
@@ -63,7 +62,11 @@ export class E2eeProxyApplication {
         request.params.arguments,
         this.#operations,
       );
-      if (result !== null && result.isError !== true && request.params.name === "register_agent") {
+      const changesAgentResources: boolean =
+        request.params.name === "register_agent" ||
+        request.params.name === "end_session" ||
+        request.params.name === "close_agent";
+      if (result !== null && result.isError !== true && changesAgentResources) {
         await this.server.sendResourceListChanged();
       }
       return result === null

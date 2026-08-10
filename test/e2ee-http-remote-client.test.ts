@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 
+import type { AgentDto, CloseAgentOutput, EndSessionOutput } from "../src/domain/contracts.js";
+
 import {
   E2eeHttpRemoteClient,
   type E2eeHttpRemoteClientConfig,
@@ -100,6 +102,62 @@ test("validates remote outputs and applies absolute request deadlines", async ()
     name: "wait_for_encrypted_messages",
     timeoutMs: 12_000,
   });
+});
+
+test("forwards metadata-only agent lifecycle operations through the encrypted endpoint", async (): Promise<void> => {
+  const agent: AgentDto = {
+    agent_id: "alice",
+    closed_at: null,
+    close_reason: null,
+    created_at: "2026-08-10T20:00:00.000Z",
+    display_name: "Alice",
+    generation: 2,
+    last_seen_at: "2026-08-10T20:00:00.000Z",
+    lease_expires_at: "2026-08-10T20:15:00.000Z",
+    live_session_count: 1,
+    metadata: {},
+    state: "active",
+  };
+  const caller: FakeCaller = new FakeCaller(toolOutput({ agent }));
+  const client: E2eeHttpRemoteClient = new E2eeHttpRemoteClient(caller);
+  expect(await client.getAgent({ agent_id: "alice" })).toEqual({ agent });
+  const ended: EndSessionOutput = { ended: 1, generation: 2 };
+  caller.response = toolOutput(ended);
+  expect(
+    await client.endSession({
+      agent_id: "alice",
+      end_default_session: true,
+      expected_generation: 2,
+      reason: "stop",
+      session_key: "pane-1",
+    }),
+  ).toEqual(ended);
+  const closed: CloseAgentOutput = {
+    agent: {
+      ...agent,
+      close_reason: "completed",
+      closed_at: "2026-08-10T20:01:00.000Z",
+      lease_expires_at: null,
+      live_session_count: 0,
+      state: "closed",
+    },
+    already_closed: false,
+    ended_sessions: 0,
+    unread_count: 0,
+  };
+  caller.response = toolOutput(closed);
+  expect(
+    await client.closeAgent({
+      agent_id: "alice",
+      expected_generation: 2,
+      reason: "completed",
+    }),
+  ).toEqual(closed);
+  expect(caller.calls.map((call: RecordedCall): string => call.name)).toEqual([
+    "get_agent",
+    "end_session",
+    "close_agent",
+  ]);
 });
 
 test("translates untrusted failures without exposing upstream details", async (): Promise<void> => {

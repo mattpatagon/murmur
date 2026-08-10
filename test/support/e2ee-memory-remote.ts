@@ -1,5 +1,11 @@
 import type {
   AgentDto,
+  CloseAgentInput,
+  CloseAgentOutput,
+  EndSessionInput,
+  EndSessionOutput,
+  GetAgentInput,
+  GetAgentOutput,
   ListAgentsInput,
   ListAgentsOutput,
   MarkMessagesReadInput,
@@ -124,6 +130,53 @@ export class MemoryE2eeBackend {
         left.agent_id.localeCompare(right.agent_id),
       ),
       next_cursor: null,
+    };
+  }
+
+  public get(input: GetAgentInput): GetAgentOutput {
+    const stored: AgentDto | undefined = this.#agents.get(input.agent_id);
+    if (stored === undefined) throw new Error("agent missing");
+    return { agent: stored };
+  }
+
+  public end(input: EndSessionInput): EndSessionOutput {
+    const stored: AgentDto | undefined = this.#agents.get(input.agent_id);
+    if (stored === undefined || stored.generation !== input.expected_generation) {
+      throw new Error("agent generation mismatch");
+    }
+    const ended: number = stored.live_session_count === 0 ? 0 : 1;
+    this.#agents.set(input.agent_id, {
+      ...stored,
+      lease_expires_at: null,
+      live_session_count: 0,
+      state: "inactive",
+    });
+    return { ended, generation: stored.generation };
+  }
+
+  public closeAgent(input: CloseAgentInput): CloseAgentOutput {
+    const stored: AgentDto | undefined = this.#agents.get(input.agent_id);
+    if (stored === undefined || stored.generation !== input.expected_generation) {
+      throw new Error("agent generation mismatch");
+    }
+    const alreadyClosed: boolean = stored.state === "closed";
+    const closed: AgentDto = {
+      ...stored,
+      close_reason: input.reason,
+      closed_at: NOW,
+      lease_expires_at: null,
+      live_session_count: 0,
+      state: "closed",
+    };
+    this.#agents.set(input.agent_id, closed);
+    return {
+      agent: closed,
+      already_closed: alreadyClosed,
+      ended_sessions: alreadyClosed ? 0 : stored.live_session_count,
+      unread_count: this.#messages.filter(
+        (message: EncryptedMessageDto): boolean =>
+          message.envelope.header.recipient_id === input.agent_id && message.read_at === null,
+      ).length,
     };
   }
 
@@ -277,6 +330,21 @@ export class MemoryE2eeRemote implements E2eeProxyRemoteClient {
   public async listAgents(input: ListAgentsInput): Promise<ListAgentsOutput> {
     this.#capture("list_agents", input);
     return this.#backend.list();
+  }
+
+  public async getAgent(input: GetAgentInput): Promise<GetAgentOutput> {
+    this.#capture("get_agent", input);
+    return this.#backend.get(input);
+  }
+
+  public async endSession(input: EndSessionInput): Promise<EndSessionOutput> {
+    this.#capture("end_session", input);
+    return this.#backend.end(input);
+  }
+
+  public async closeAgent(input: CloseAgentInput): Promise<CloseAgentOutput> {
+    this.#capture("close_agent", input);
+    return this.#backend.closeAgent(input);
   }
 
   public async publishAgentKeyBundle(

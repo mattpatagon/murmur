@@ -1,4 +1,10 @@
 import type {
+  CloseAgentInput,
+  CloseAgentOutput,
+  EndSessionInput,
+  EndSessionOutput,
+  GetAgentInput,
+  GetAgentOutput,
   ListAgentsInput,
   ListAgentsOutput,
   MarkMessagesReadInput,
@@ -67,6 +73,9 @@ export interface E2eeRemoteClient {
 }
 
 export interface E2eeProxyRemoteClient extends E2eeRemoteClient {
+  closeAgent(input: CloseAgentInput): Promise<CloseAgentOutput>;
+  endSession(input: EndSessionInput): Promise<EndSessionOutput>;
+  getAgent(input: GetAgentInput): Promise<GetAgentOutput>;
   registerAgent(input: RegisterAgentInput): Promise<RegisterAgentOutput>;
   listAgents(input: ListAgentsInput): Promise<ListAgentsOutput>;
 }

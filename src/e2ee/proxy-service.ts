@@ -2,6 +2,12 @@ import {
   agentClientFromInput,
   type BroadcastMessageInput,
   branchNameFromInput,
+  type CloseAgentInput,
+  type CloseAgentOutput,
+  type EndSessionInput,
+  type EndSessionOutput,
+  type GetAgentInput,
+  type GetAgentOutput,
   type GetMessagesInput,
   type ListAgentsInput,
   type ListAgentsOutput,
@@ -17,6 +23,11 @@ import {
 import type { AgentClient, BranchName, Clock, RepositoryName } from "../domain/value-objects.js";
 import type { LocalE2eeVault } from "./local-vault.js";
 import {
+  broadcastEncryptedMessage,
+  type ProxyBroadcastInput,
+  type ProxyBroadcastResult,
+} from "./proxy-broadcast.js";
+import {
   broadcastToProxyOutput,
   decryptedMessageToProxyDto,
   type ProxyBroadcastOutput,
@@ -28,25 +39,20 @@ import {
   ProxyWaitForMessagesOutputSchema,
   sentMessageToProxyDto,
 } from "./proxy-contracts.js";
-import {
-  broadcastEncryptedMessage,
-  type ProxyBroadcastInput,
-  type ProxyBroadcastResult,
-} from "./proxy-broadcast.js";
 import { publishLocalIdentity } from "./proxy-identity.js";
 import {
   markEncryptedMessagesRead,
-  receiveEncryptedMessages,
   type ReceiveEncryptedMessagesResult,
+  receiveEncryptedMessages,
   type WaitForDecryptedMessagesResult,
   waitForDecryptedMessages,
 } from "./proxy-receive.js";
 import {
   defaultProxySendOptions,
-  sendEncryptedMessage,
   type ProxySendInput,
   type ProxySendOptions,
   type ProxySendResult,
+  sendEncryptedMessage,
 } from "./proxy-send.js";
 import type { E2eeProxyRemoteClient } from "./remote-client.js";
 import type { E2eeMessageContextDto } from "./wire-tools.js";
@@ -63,7 +69,10 @@ export type E2eeProxyServiceDependencies = {
 
 export interface E2eeProxyOperations {
   registerAgent(input: RegisterAgentInput): Promise<RegisterAgentOutput>;
+  getAgent(input: GetAgentInput): Promise<GetAgentOutput>;
   listAgents(input: ListAgentsInput): Promise<ListAgentsOutput>;
+  endSession(input: EndSessionInput): Promise<EndSessionOutput>;
+  closeAgent(input: CloseAgentInput): Promise<CloseAgentOutput>;
   sendMessage(input: SendMessageInput): Promise<ProxySendMessageOutput>;
   broadcastMessage(input: BroadcastMessageInput): Promise<ProxyBroadcastOutput>;
   getMessages(input: GetMessagesInput): Promise<ProxyInboxOutput>;
@@ -131,6 +140,21 @@ export class E2eeProxyService implements E2eeProxyOperations {
   public async listAgents(input: ListAgentsInput): Promise<ListAgentsOutput> {
     this.#ensureOpen();
     return await this.#dependencies.remote.listAgents(input);
+  }
+
+  public async getAgent(input: GetAgentInput): Promise<GetAgentOutput> {
+    this.#ensureOpen();
+    return await this.#dependencies.remote.getAgent(input);
+  }
+
+  public async endSession(input: EndSessionInput): Promise<EndSessionOutput> {
+    this.#ensureOpen();
+    return await this.#dependencies.remote.endSession(input);
+  }
+
+  public async closeAgent(input: CloseAgentInput): Promise<CloseAgentOutput> {
+    this.#ensureOpen();
+    return await this.#dependencies.remote.closeAgent(input);
   }
 
   public async sendMessage(input: SendMessageInput): Promise<ProxySendMessageOutput> {

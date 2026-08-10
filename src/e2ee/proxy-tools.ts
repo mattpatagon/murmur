@@ -5,6 +5,15 @@ import { z } from "zod";
 import {
   type BroadcastMessageInput,
   BroadcastMessageInputSchema,
+  type CloseAgentInput,
+  CloseAgentInputSchema,
+  CloseAgentOutputSchema,
+  type EndSessionInput,
+  EndSessionInputSchema,
+  EndSessionOutputSchema,
+  type GetAgentInput,
+  GetAgentInputSchema,
+  GetAgentOutputSchema,
   type GetMessagesInput,
   GetMessagesInputSchema,
   type ListAgentsInput,
@@ -70,6 +79,19 @@ export function e2eeProxyTools(): readonly Tool[] {
       },
     ),
     toolDefinition(
+      "get_agent",
+      "Read encrypted agent metadata",
+      "Read one registered agent generation. This metadata-only operation never exposes message content.",
+      GetAgentInputSchema,
+      GetAgentOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: true,
+        title: "Read encrypted agent metadata",
+      },
+    ),
+    toolDefinition(
       "list_agents",
       "List encrypted agents",
       "List registered agents. This metadata-only operation never exposes message content.",
@@ -80,6 +102,32 @@ export function e2eeProxyTools(): readonly Tool[] {
         idempotentHint: true,
         readOnlyHint: true,
         title: "List encrypted agents",
+      },
+    ),
+    toolDefinition(
+      "end_session",
+      "End encrypted agent session",
+      "End one hosted session lease while retaining ciphertext and local private keys.",
+      EndSessionInputSchema,
+      EndSessionOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: false,
+        title: "End encrypted agent session",
+      },
+    ),
+    toolDefinition(
+      "close_agent",
+      "Close encrypted agent",
+      "Explicitly close one hosted agent generation and all of its live session leases.",
+      CloseAgentInputSchema,
+      CloseAgentOutputSchema,
+      {
+        destructiveHint: true,
+        idempotentHint: true,
+        readOnlyHint: false,
+        title: "Close encrypted agent",
       },
     ),
     toolDefinition(
@@ -163,6 +211,18 @@ export async function callE2eeProxyTool(
     case "list_agents": {
       const input: ListAgentsInput = ListAgentsInputSchema.parse(argumentsValue);
       return toolResult(await operations.listAgents(input));
+    }
+    case "get_agent": {
+      const input: GetAgentInput = GetAgentInputSchema.parse(argumentsValue);
+      return toolResult(await operations.getAgent(input));
+    }
+    case "end_session": {
+      const input: EndSessionInput = EndSessionInputSchema.parse(argumentsValue);
+      return toolResult(await operations.endSession(input));
+    }
+    case "close_agent": {
+      const input: CloseAgentInput = CloseAgentInputSchema.parse(argumentsValue);
+      return toolResult(await operations.closeAgent(input));
     }
     case "send_message": {
       const input: SendMessageInput = SendMessageInputSchema.parse(argumentsValue);

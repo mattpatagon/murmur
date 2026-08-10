@@ -4,6 +4,18 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { z } from "zod";
 
 import {
+  type CloseAgentInput,
+  CloseAgentInputSchema,
+  type CloseAgentOutput,
+  CloseAgentOutputSchema,
+  type EndSessionInput,
+  EndSessionInputSchema,
+  type EndSessionOutput,
+  EndSessionOutputSchema,
+  type GetAgentInput,
+  GetAgentInputSchema,
+  type GetAgentOutput,
+  GetAgentOutputSchema,
   type ListAgentsInput,
   ListAgentsInputSchema,
   type ListAgentsOutput,
@@ -19,8 +31,8 @@ import {
 } from "../domain/contracts.js";
 import { BoundedHttpClientTransport } from "./bounded-http-transport.js";
 import {
-  type E2eeRemoteClient,
   type E2eeProxyRemoteClient,
+  type E2eeRemoteClient,
   ENCRYPTION_CLAIM_EXPIRED_MESSAGE,
   EncryptionClaimExpiredError,
 } from "./remote-client.js";
@@ -254,6 +266,18 @@ export class E2eeHttpRemoteClient implements E2eeRemoteClient, E2eeProxyRemoteCl
       RegisterAgentInputSchema,
       RegisterAgentOutputSchema,
     );
+  }
+
+  public async getAgent(input: GetAgentInput): Promise<GetAgentOutput> {
+    return await this.call("get_agent", input, GetAgentInputSchema, GetAgentOutputSchema);
+  }
+
+  public async endSession(input: EndSessionInput): Promise<EndSessionOutput> {
+    return await this.call("end_session", input, EndSessionInputSchema, EndSessionOutputSchema);
+  }
+
+  public async closeAgent(input: CloseAgentInput): Promise<CloseAgentOutput> {
+    return await this.call("close_agent", input, CloseAgentInputSchema, CloseAgentOutputSchema);
   }
 
   public async listAgents(input: ListAgentsInput): Promise<ListAgentsOutput> {

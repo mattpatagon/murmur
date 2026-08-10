@@ -5,9 +5,13 @@ import { join } from "node:path";
 
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage, MessageExtraInfo } from "@modelcontextprotocol/sdk/types.js";
-
-import { main, type E2eeProxyHandle, type E2eeProxyRuntime } from "../src/e2ee-proxy.js";
 import type {
+  CloseAgentInput,
+  CloseAgentOutput,
+  EndSessionInput,
+  EndSessionOutput,
+  GetAgentInput,
+  GetAgentOutput,
   ListAgentsInput,
   ListAgentsOutput,
   MarkMessagesReadInput,
@@ -49,6 +53,7 @@ import type {
   WaitForEncryptedMessagesInput,
   WaitForEncryptedMessagesOutput,
 } from "../src/e2ee/wire-tools.js";
+import { type E2eeProxyHandle, type E2eeProxyRuntime, main } from "../src/e2ee-proxy.js";
 
 class NoopTransport implements Transport {
   public onclose?: () => void;
@@ -91,6 +96,18 @@ class StartupRemote implements E2eeProxyRemoteClient {
 
   public async listAgents(_input: ListAgentsInput): Promise<ListAgentsOutput> {
     throw new Error("unexpected list call");
+  }
+
+  public async getAgent(_input: GetAgentInput): Promise<GetAgentOutput> {
+    throw new Error("unexpected get agent call");
+  }
+
+  public async endSession(_input: EndSessionInput): Promise<EndSessionOutput> {
+    throw new Error("unexpected end session call");
+  }
+
+  public async closeAgent(_input: CloseAgentInput): Promise<CloseAgentOutput> {
+    throw new Error("unexpected close agent call");
   }
 
   public async publishAgentKeyBundle(
