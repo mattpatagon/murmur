@@ -1,0 +1,252 @@
+import type { Database } from "bun:sqlite";
+
+import type { MarkMessagesReadInput, MarkMessagesReadOutput } from "../domain/contracts.js";
+import type { Clock, Instant, TenantId } from "../domain/value-objects.js";
+import type {
+  CancelEncryptedBroadcastInput,
+  CancelEncryptedBroadcastOutput,
+  ClaimEncryptionPrekeyInput,
+  ClaimEncryptionPrekeyOutput,
+  CommitEncryptedBroadcastInput,
+  CommitEncryptedBroadcastOutput,
+  EncryptedInboxOutput,
+  GetEncryptedMessagesInput,
+  GetInboxSummaryInput,
+  GetInboxSummaryOutput,
+  PrepareEncryptedBroadcastInput,
+  PrepareEncryptedBroadcastOutput,
+  PublishAgentKeyBundleInput,
+  PublishAgentKeyBundleOutput,
+  PutEncryptedBroadcastDeliveryInput,
+  PutEncryptedBroadcastDeliveryOutput,
+  PutEncryptedMessageInput,
+  PutEncryptedMessageOutput,
+} from "../e2ee/wire-tools.js";
+import { MAX_E2EE_CIPHERTEXT_BYTES } from "../e2ee/wire-contracts.js";
+import {
+  verifyHostedEncryptedEnvelope,
+  verifyHostedPublicBundle,
+} from "../e2ee/hosted-validation.js";
+import { logSafeError } from "../safe-errors.js";
+import type { E2eeMessageStore, EncryptedInboxUpdateHandler } from "./e2ee-message-store.js";
+import type { InboxSubscription } from "./message-store.js";
+import {
+  cancelSqliteEncryptedBroadcast,
+  commitSqliteEncryptedBroadcast,
+} from "./sqlite-e2ee-broadcast-finalize.js";
+import {
+  prepareSqliteEncryptedBroadcast,
+  putSqliteEncryptedBroadcastDelivery,
+} from "./sqlite-e2ee-broadcasts.js";
+import { claimSqliteEncryptionPrekey, publishSqliteAgentKeyBundle } from "./sqlite-e2ee-keys.js";
+import {
+  getSqliteEncryptedInboxSummary,
+  getSqliteEncryptedMessages,
+  existingSqliteEncryptedMessageOutput,
+  markSqliteEncryptedMessagesRead,
+  putSqliteEncryptedMessage,
+} from "./sqlite-e2ee-messages.js";
+import { pruneSqliteE2ee } from "./sqlite-e2ee-prune.js";
+import {
+  type SqliteHostedEnvelopeValidationContext,
+  sqliteHostedEnvelopeValidationContext,
+} from "./sqlite-e2ee-validation-context.js";
+
+const SQLITE_WATCH_INTERVAL_MS: number = 200;
+type IntervalHandle = ReturnType<typeof setInterval>;
+
+class SqliteEncryptedInboxSubscription implements InboxSubscription {
+  private closed: boolean;
+  private readonly handler: EncryptedInboxUpdateHandler;
+  private previousSequence: number;
+  private running: boolean;
+  private readonly store: SqliteE2eeMessageStore;
+  private timer: IntervalHandle | null;
+  private readonly agentId: string;
+
+  public constructor(
+    store: SqliteE2eeMessageStore,
+    agentId: string,
+    afterSequence: number,
+    handler: EncryptedInboxUpdateHandler,
+  ) {
+    this.agentId = agentId;
+    this.closed = false;
+    this.handler = handler;
+    this.previousSequence = afterSequence;
+    this.running = false;
+    this.store = store;
+    this.timer = setInterval((): void => {
+      void this.check();
+    }, SQLITE_WATCH_INTERVAL_MS);
+    void this.check();
+  }
+
+  private async check(): Promise<void> {
+    if (this.closed || this.running) return;
+    this.running = true;
+    try {
+      const summary: GetInboxSummaryOutput = this.store.getEncryptedInboxSummary({
+        agent_id: this.agentId,
+      });
+      if (summary.inbox_version > this.previousSequence) {
+        await this.handler(summary.inbox_version);
+        this.previousSequence = summary.inbox_version;
+      }
+    } catch (error: unknown) {
+      logSafeError("Murmur SQLite encrypted inbox watcher error", error);
+    } finally {
+      this.running = false;
+    }
+  }
+
+  public close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.timer !== null) clearInterval(this.timer);
+    this.timer = null;
+  }
+}
+
+export class SqliteE2eeMessageStore implements E2eeMessageStore {
+  private readonly clock: Clock;
+  private readonly database: Database;
+  private readonly ensureParentOpen: () => void;
+  private readonly tenantId: TenantId;
+
+  public constructor(
+    database: Database,
+    clock: Clock,
+    tenantId: TenantId,
+    ensureParentOpen: () => void,
+  ) {
+    this.clock = clock;
+    this.database = database;
+    this.ensureParentOpen = ensureParentOpen;
+    this.tenantId = tenantId;
+  }
+
+  public scopeE2ee(tenantId: TenantId): E2eeMessageStore {
+    this.ensureOpen();
+    if (!tenantId.equals(this.tenantId)) {
+      throw new Error("SQLite storage supports only the founding tenant");
+    }
+    return this;
+  }
+
+  private ensureOpen(): void {
+    this.ensureParentOpen();
+  }
+
+  private prune(): void {
+    this.ensureOpen();
+    pruneSqliteE2ee(this.database, this.clock.now());
+  }
+
+  public async publishAgentKeyBundle(
+    input: PublishAgentKeyBundleInput,
+  ): Promise<PublishAgentKeyBundleOutput> {
+    this.prune();
+    const now: Instant = this.clock.now();
+    await verifyHostedPublicBundle(input.agent_id, input.bundle, new Date(now.toISOString()), 20);
+    return publishSqliteAgentKeyBundle(this.database, input, now);
+  }
+
+  public claimEncryptionPrekey(input: ClaimEncryptionPrekeyInput): ClaimEncryptionPrekeyOutput {
+    this.prune();
+    return claimSqliteEncryptionPrekey(this.database, input, this.clock.now());
+  }
+
+  public async putEncryptedMessage(
+    input: PutEncryptedMessageInput,
+  ): Promise<PutEncryptedMessageOutput> {
+    this.prune();
+    const prior: PutEncryptedMessageOutput | null = existingSqliteEncryptedMessageOutput(
+      this.database,
+      input,
+    );
+    if (prior !== null) return prior;
+    const now: Instant = this.clock.now();
+    const validation: SqliteHostedEnvelopeValidationContext = sqliteHostedEnvelopeValidationContext(
+      this.database,
+      input.claim_id,
+    );
+    await verifyHostedEncryptedEnvelope({
+      ...validation,
+      expectedBroadcastId: null,
+      maxCiphertextBytes: MAX_E2EE_CIPHERTEXT_BYTES,
+      now: new Date(now.toISOString()),
+      putInput: input,
+      tenantId: this.tenantId.value,
+    });
+    return putSqliteEncryptedMessage(this.database, this.tenantId.value, input, now);
+  }
+
+  public getEncryptedMessages(input: GetEncryptedMessagesInput): EncryptedInboxOutput {
+    this.prune();
+    return getSqliteEncryptedMessages(this.database, input, this.clock.now());
+  }
+
+  public markEncryptedMessagesRead(input: MarkMessagesReadInput): MarkMessagesReadOutput {
+    this.prune();
+    return markSqliteEncryptedMessagesRead(this.database, input, this.clock.now());
+  }
+
+  public prepareEncryptedBroadcast(
+    input: PrepareEncryptedBroadcastInput,
+  ): PrepareEncryptedBroadcastOutput {
+    this.prune();
+    return prepareSqliteEncryptedBroadcast(this.database, input, this.clock.now());
+  }
+
+  public async putEncryptedBroadcastDelivery(
+    input: PutEncryptedBroadcastDeliveryInput,
+  ): Promise<PutEncryptedBroadcastDeliveryOutput> {
+    this.prune();
+    const now: Instant = this.clock.now();
+    const validation: SqliteHostedEnvelopeValidationContext = sqliteHostedEnvelopeValidationContext(
+      this.database,
+      input.claim_id,
+    );
+    await verifyHostedEncryptedEnvelope({
+      ...validation,
+      expectedBroadcastId: input.broadcast_id,
+      maxCiphertextBytes: MAX_E2EE_CIPHERTEXT_BYTES,
+      now: new Date(now.toISOString()),
+      putInput: { claim_id: input.claim_id, envelope: input.envelope },
+      tenantId: this.tenantId.value,
+    });
+    return putSqliteEncryptedBroadcastDelivery(this.database, this.tenantId.value, input, now);
+  }
+
+  public commitEncryptedBroadcast(
+    input: CommitEncryptedBroadcastInput,
+  ): CommitEncryptedBroadcastOutput {
+    this.prune();
+    return commitSqliteEncryptedBroadcast(this.database, input, this.clock.now());
+  }
+
+  public cancelEncryptedBroadcast(
+    input: CancelEncryptedBroadcastInput,
+  ): CancelEncryptedBroadcastOutput {
+    this.prune();
+    return cancelSqliteEncryptedBroadcast(this.database, input);
+  }
+
+  public getEncryptedInboxSummary(input: GetInboxSummaryInput): GetInboxSummaryOutput {
+    this.prune();
+    return getSqliteEncryptedInboxSummary(this.database, input, this.clock.now());
+  }
+
+  public watchEncryptedInbox(
+    agentId: string,
+    afterSequence: number,
+    handler: EncryptedInboxUpdateHandler,
+  ): InboxSubscription {
+    this.prune();
+    getSqliteEncryptedInboxSummary(this.database, { agent_id: agentId }, this.clock.now());
+    return new SqliteEncryptedInboxSubscription(this, agentId, afterSequence, handler);
+  }
+
+  public close(): void {}
+}

@@ -240,3 +240,57 @@ test("upgrades a populated SQLite v4 agent with a live compatibility lease", ():
     rmSync(directory, { force: true, recursive: true });
   }
 });
+
+test("upgrades a populated SQLite v8 database with bounded E2E tables and usage", (): void => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-store-v8-"));
+  const databasePath: string = join(directory, "messages.db");
+  const initial: SqliteMessageStore = new SqliteMessageStore(databasePath);
+  initial.registerAgent({
+    agentId: AgentId.parse("legacy-v8"),
+    displayName: DisplayName.parse("Legacy v8"),
+    metadata: { repository: "mattpatagon/murmur" },
+  });
+  initial.close();
+
+  const legacyDatabase: Database = new Database(databasePath);
+  legacyDatabase.exec(`
+    DROP TABLE e2ee_usage;
+    DROP TABLE e2ee_messages;
+    DROP TABLE e2ee_broadcast_deliveries;
+    DROP TABLE e2ee_broadcasts;
+    DROP TABLE e2ee_claims;
+    DROP TABLE e2ee_prekeys;
+    DROP TABLE e2ee_key_bundles;
+    PRAGMA user_version = 8;
+  `);
+  legacyDatabase.close();
+
+  const upgraded: SqliteMessageStore = new SqliteMessageStore(databasePath);
+  try {
+    expect(upgraded.getAgent(AgentId.parse("legacy-v8"))).not.toBeNull();
+    const database: Database = new Database(databasePath, { readonly: true });
+    try {
+      const versionRow: unknown = database.query<unknown, []>("PRAGMA user_version").get();
+      if (versionRow === null || typeof versionRow !== "object") {
+        throw new Error("Expected SQLite schema version row");
+      }
+      expect(Number(Reflect.get(versionRow, "user_version"))).toBe(9);
+      const usageRow: unknown = database
+        .query<unknown, []>(`
+          SELECT claim_count, pending_broadcast_count, retained_message_count
+          FROM e2ee_usage WHERE singleton = 1
+        `)
+        .get();
+      expect(usageRow).toEqual({
+        claim_count: 0,
+        pending_broadcast_count: 0,
+        retained_message_count: 0,
+      });
+    } finally {
+      database.close();
+    }
+  } finally {
+    upgraded.close();
+    rmSync(directory, { force: true, recursive: true });
+  }
+});

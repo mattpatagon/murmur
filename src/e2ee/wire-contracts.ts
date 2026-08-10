@@ -12,7 +12,7 @@ import {
 const KEY_BYTES: number = 32;
 const SIGNATURE_BYTES: number = 64;
 const NONCE_BYTES: number = 24;
-const MAX_CIPHERTEXT_BYTES: number = 512 * 1024 + 16;
+export const MAX_E2EE_CIPHERTEXT_BYTES: number = 512 * 1024 + 16;
 const Base64UrlSchema: z.ZodString = z
   .string()
   .min(1)
@@ -331,7 +331,9 @@ export function parseEnvelopeDto(input: unknown): EncryptedEnvelope {
     dto.header.padded_length + 16,
     "Ciphertext",
   );
-  if (ciphertext.byteLength > MAX_CIPHERTEXT_BYTES) throw new Error("Ciphertext is too large");
+  if (ciphertext.byteLength > MAX_E2EE_CIPHERTEXT_BYTES) {
+    throw new Error("Ciphertext is too large");
+  }
   return {
     ciphertext,
     ephemeralPublicKey: decodeBytes(dto.ephemeral_public_key, KEY_BYTES, "Ephemeral key"),

@@ -43,6 +43,7 @@ import {
 } from "../domain/value-objects.js";
 import { logSafeError } from "../safe-errors.js";
 import type { InboxSubscription, InboxUpdateHandler, MessageStore } from "./message-store.js";
+import type { E2eeMessageStore } from "./e2ee-message-store.js";
 import { broadcastSqliteMessage } from "./sqlite-broadcast-store.js";
 import { sendSqliteMessage } from "./sqlite-direct-message-store.js";
 import {
@@ -54,6 +55,7 @@ import {
   sqliteAgent,
 } from "./sqlite-agent-lifecycle-store.js";
 import { migrateSqliteDatabase } from "./sqlite-message-migrations.js";
+import { SqliteE2eeMessageStore } from "./sqlite-e2ee-message-store.js";
 import { pruneSqliteLifecycle } from "./sqlite-lifecycle-prune.js";
 import {
   type InboxVersionRow,
@@ -179,6 +181,16 @@ export class SqliteMessageStore implements MessageStore {
       throw new Error("SQLite storage supports only the founding tenant");
     }
     return this;
+  }
+
+  public scopeE2ee(tenantId: TenantId): E2eeMessageStore {
+    this.ensureOpen();
+    if (!tenantId.equals(TenantId.founding())) {
+      throw new Error("SQLite storage supports only the founding tenant");
+    }
+    return new SqliteE2eeMessageStore(this.database, this.clock, tenantId, (): void =>
+      this.ensureOpen(),
+    );
   }
 
   private ensureOpen(): void {
