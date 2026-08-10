@@ -19,7 +19,7 @@
 - Make SQLite idempotent sends atomic across processes with a conflict-aware insert and stored-winner
   comparison.
 
-  **Completed:** Unreleased (2026-08-10)
+  **Completed:** v0.5.0.0 (2026-08-10)
 
 - Expire abandoned HTTP sessions while preserving active SSE responses; bound global and
   per-tenant session capacity.
