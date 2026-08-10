@@ -192,17 +192,24 @@ test("deploy preflight fails closed on a denied secret metadata read", async ():
 
 test("workflow performs authoritative secret reads before applying migrations", async (): Promise<void> => {
   const workflow: string = await Bun.file(".github/workflows/deploy.yml").text();
+  const preflight: string = await Bun.file("scripts/deploy/validate-secret-permissions.sh").text();
+  const preflightPosition: number = workflow.indexOf("Validate Secret Manager rollout permissions");
+  const applyPosition: number = workflow.indexOf(
+    "Apply migrations and verify shared Postgres",
+    preflightPosition,
+  );
+  expect(preflightPosition).toBeGreaterThan(-1);
+  expect(applyPosition).toBeGreaterThan(preflightPosition);
+  expect(workflow).toContain("bash scripts/deploy/validate-secret-permissions.sh");
   const orderedMarkers: string[] = [
-    "Validate Secret Manager rollout permissions",
     "gcloud secrets versions list MURMUR_DATABASE_URL",
     "gcloud secrets get-iam-policy MURMUR_API_TOKEN",
     "--secret MURMUR_API_TOKEN",
     "--secret MURMUR_OPERATOR_TOKEN",
-    "Apply migrations and verify shared Postgres",
   ];
   let previousPosition: number = -1;
   for (const marker of orderedMarkers) {
-    const position: number = workflow.indexOf(marker, previousPosition + 1);
+    const position: number = preflight.indexOf(marker, previousPosition + 1);
     expect(position).toBeGreaterThan(previousPosition);
     previousPosition = position;
   }
@@ -210,9 +217,12 @@ test("workflow performs authoritative secret reads before applying migrations", 
 
 test("workflow resumes runtime credentials through the reachable admin database", async (): Promise<void> => {
   const workflow: string = await Bun.file(".github/workflows/deploy.yml").text();
-  expect(workflow).not.toContain('psql "$candidate_url"');
-  const inspectPosition: number = workflow.indexOf("MURMUR_RUNTIME_DATABASE_URL_TO_INSPECT");
-  const buildPosition: number = workflow.indexOf("Build production image", inspectPosition);
+  const migrations: string = await Bun.file("scripts/deploy/apply-migrations.sh").text();
+  expect(migrations).not.toContain('psql "$candidate_url"');
+  expect(migrations).toContain("MURMUR_RUNTIME_DATABASE_URL_TO_INSPECT");
+  expect(workflow).toContain("bash scripts/deploy/apply-migrations.sh");
+  const migrationPosition: number = workflow.indexOf("Apply migrations and verify shared Postgres");
+  const buildPosition: number = workflow.indexOf("Build production image", migrationPosition);
   const pushPosition: number = workflow.indexOf("Push production image", buildPosition);
   const compatibilityPosition: number = workflow.indexOf(
     "Deploy compatibility revision before runtime credential rotation",
@@ -227,8 +237,8 @@ test("workflow resumes runtime credentials through the reachable admin database"
     recoverPosition,
   );
   const deployPosition: number = workflow.indexOf("Deploy Cloud Run revision", applyPosition);
-  expect(inspectPosition).toBeGreaterThan(-1);
-  expect(buildPosition).toBeGreaterThan(inspectPosition);
+  expect(migrationPosition).toBeGreaterThan(-1);
+  expect(buildPosition).toBeGreaterThan(migrationPosition);
   expect(pushPosition).toBeGreaterThan(buildPosition);
   expect(compatibilityPosition).toBeGreaterThan(pushPosition);
   expect(recoverPosition).toBeGreaterThan(compatibilityPosition);
