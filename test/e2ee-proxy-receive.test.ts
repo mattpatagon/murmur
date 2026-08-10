@@ -379,6 +379,54 @@ test("rejects signed-envelope context relabeling and public-chain substitution",
     await expect(
       receiveEncryptedMessages(vault, remote, new FixedTestClock(), input),
     ).rejects.toThrow();
+    remote.setMessage({
+      ...message,
+      envelope: {
+        ...message.envelope,
+        header: { ...message.envelope.header, recipient_id: "attacker" },
+      },
+    });
+    await expect(
+      receiveEncryptedMessages(vault, remote, new FixedTestClock(), input),
+    ).rejects.toThrow("Encrypted message verification failed");
+    remote.setMessage({
+      ...message,
+      envelope: {
+        ...message.envelope,
+        header: { ...message.envelope.header, created_at: "2026-08-10T18:05:00.001Z" },
+      },
+    });
+    await expect(
+      receiveEncryptedMessages(vault, remote, new FixedTestClock(), input),
+    ).rejects.toThrow("Encrypted message verification failed");
+    remote.setMessage({
+      ...message,
+      envelope: {
+        ...message.envelope,
+        header: {
+          ...message.envelope.header,
+          message_kind: "orchestration_request",
+          orchestrator_policy_id: "44444444-4444-4444-8444-444444444444",
+          sender_authority: "orchestrator",
+        },
+      },
+    });
+    await expect(
+      receiveEncryptedMessages(vault, remote, new FixedTestClock(), input),
+    ).rejects.toThrow("Encrypted message verification failed");
+    const preserved: StoredPrekey | null = vault.keys.getPrekey(prekey.certificate.prekeyId);
+    if (preserved === null) throw new Error("Expected recipient prekey after rejected tampering");
+    expect(preserved.privateKey).not.toBeNull();
+    remote.setMessage(message);
+    const valid: ReceiveEncryptedMessagesResult = await receiveEncryptedMessages(
+      vault,
+      remote,
+      new FixedTestClock(),
+      input,
+    );
+    const validMessage: VerifiedDecryptedMessage | undefined = valid.messages[0];
+    if (validMessage === undefined) throw new Error("Expected valid message after tamper attempts");
+    expect(validMessage.content).toBe("received plaintext sentinel");
     remote.setMessages([
       { ...message, tenant_sequence: 2 },
       { ...message, tenant_sequence: 2 },
