@@ -27,6 +27,9 @@ const DEFAULT_MAX_REQUEST_BYTES: number = 1_048_576;
 const DEFAULT_MAX_SESSIONS: number = 1_000;
 const DEFAULT_MAX_SESSIONS_PER_TENANT: number = 100;
 const DEFAULT_MAX_AUTHENTICATIONS: number = 4;
+const DEFAULT_AUTHENTICATION_WAIT_MS: number = 2_000;
+const DEFAULT_MAX_PENDING_AUTHENTICATIONS: number = 32;
+const DEFAULT_MAX_PENDING_AUTHENTICATIONS_PER_TENANT: number = 8;
 const DEFAULT_MAX_ACTIVE_REQUESTS: number = 64;
 const DEFAULT_MAX_ACTIVE_REQUESTS_PER_PRINCIPAL: number = 8;
 const DEFAULT_MAX_ACTIVE_REQUESTS_PER_TENANT: number = 20;
@@ -99,6 +102,18 @@ type RateWindow = {
   startedAt: number;
 };
 
+async function waitForCapacity(waiters: Set<() => void>, timeoutMs: number): Promise<void> {
+  await new Promise<void>((resolve: () => void): void => {
+    const finish: () => void = (): void => {
+      clearTimeout(timeout);
+      waiters.delete(finish);
+      resolve();
+    };
+    const timeout: ReturnType<typeof setTimeout> = setTimeout(finish, timeoutMs);
+    waiters.add(finish);
+  });
+}
+
 export type MurmurHttpServer = {
   readonly mcpUrl: URL;
   readonly port: number;
@@ -148,6 +163,16 @@ function jsonResponse(status: number, body: Record<string, unknown>): Response {
     headers: { "cache-control": "no-store" },
     status,
   });
+}
+
+function authenticationCapacityResponse(): Response {
+  return Response.json(
+    { error: "Authentication capacity reached" },
+    {
+      headers: { "cache-control": "no-store", "retry-after": "1" },
+      status: 503,
+    },
+  );
 }
 
 function unauthorizedResponse(): Response {
@@ -271,6 +296,21 @@ export async function startHttpServer(
     "MURMUR_MAX_CONCURRENT_AUTHENTICATIONS",
     DEFAULT_MAX_AUTHENTICATIONS,
   );
+  const authenticationWaitMs: number = positiveIntegerEnvironment(
+    environment,
+    "MURMUR_AUTHENTICATION_WAIT_MS",
+    DEFAULT_AUTHENTICATION_WAIT_MS,
+  );
+  const maxPendingAuthentications: number = positiveIntegerEnvironment(
+    environment,
+    "MURMUR_MAX_PENDING_AUTHENTICATIONS",
+    DEFAULT_MAX_PENDING_AUTHENTICATIONS,
+  );
+  const maxPendingAuthenticationsPerTenant: number = positiveIntegerEnvironment(
+    environment,
+    "MURMUR_MAX_PENDING_AUTHENTICATIONS_PER_TENANT",
+    DEFAULT_MAX_PENDING_AUTHENTICATIONS_PER_TENANT,
+  );
   const maxActiveRequests: number = positiveIntegerEnvironment(
     environment,
     "MURMUR_MAX_ACTIVE_REQUESTS",
@@ -318,7 +358,10 @@ export async function startHttpServer(
   const activeRequestsByTenant: Map<string, number> = new Map<string, number>();
   const activeAuthenticationsByCredential: Map<string, number> = new Map<string, number>();
   const activeAuthenticationsByTenant: Map<string, number> = new Map<string, number>();
+  const pendingAuthenticationsByTenant: Map<string, number> = new Map<string, number>();
+  const authenticationCapacityWaiters: Set<() => void> = new Set<() => void>();
   let activeAuthentications: number = 0;
+  let pendingAuthentications: number = 0;
   let activeRequests: number = 0;
   let initializingSessions: number = 0;
   let stopped: boolean = false;
@@ -443,6 +486,113 @@ export async function startHttpServer(
     };
   };
 
+  const notifyAuthenticationCapacityChanged: () => void = (): void => {
+    const waiters: readonly (() => void)[] = Array.from(authenticationCapacityWaiters);
+    authenticationCapacityWaiters.clear();
+    waiters.forEach((wake: () => void): void => {
+      wake();
+    });
+  };
+
+  const tryReserveAuthenticationCapacity: (
+    admissionKey: string,
+    admittedTenantKey: string | null,
+    knownCredential: boolean,
+  ) => (() => void) | null = (
+    admissionKey: string,
+    admittedTenantKey: string | null,
+    knownCredential: boolean,
+  ): (() => void) | null => {
+    const activeForCredential: number = activeAuthenticationsByCredential.get(admissionKey) ?? 0;
+    const activeForAdmittedTenant: number =
+      admittedTenantKey === null ? 0 : (activeAuthenticationsByTenant.get(admittedTenantKey) ?? 0);
+    const unknownAuthenticationLimit: number = Math.max(1, maxAuthentications - 1);
+    if (
+      activeAuthentications >= maxAuthentications ||
+      activeForCredential >= 1 ||
+      activeForAdmittedTenant >= 2 ||
+      (!knownCredential && activeAuthentications >= unknownAuthenticationLimit)
+    ) {
+      return null;
+    }
+    activeAuthentications += 1;
+    activeAuthenticationsByCredential.set(admissionKey, activeForCredential + 1);
+    if (admittedTenantKey !== null) {
+      activeAuthenticationsByTenant.set(admittedTenantKey, activeForAdmittedTenant + 1);
+    }
+    let released: boolean = false;
+    return (): void => {
+      if (released) return;
+      released = true;
+      activeAuthentications -= 1;
+      activeAuthenticationsByCredential.delete(admissionKey);
+      if (admittedTenantKey !== null) {
+        const remainingForTenant: number =
+          (activeAuthenticationsByTenant.get(admittedTenantKey) ?? 1) - 1;
+        if (remainingForTenant === 0) {
+          activeAuthenticationsByTenant.delete(admittedTenantKey);
+        } else {
+          activeAuthenticationsByTenant.set(admittedTenantKey, remainingForTenant);
+        }
+      }
+      notifyAuthenticationCapacityChanged();
+    };
+  };
+
+  const reserveAuthenticationCapacity: (
+    admissionKey: string,
+    admittedTenantKey: string | null,
+    knownCredential: boolean,
+  ) => Promise<(() => void) | null> = async (
+    admissionKey: string,
+    admittedTenantKey: string | null,
+    knownCredential: boolean,
+  ): Promise<(() => void) | null> => {
+    if (stopped) return null;
+    const immediateReservation: (() => void) | null = tryReserveAuthenticationCapacity(
+      admissionKey,
+      admittedTenantKey,
+      knownCredential,
+    );
+    if (immediateReservation !== null || !knownCredential) return immediateReservation;
+    const pendingForTenant: number =
+      admittedTenantKey === null ? 0 : (pendingAuthenticationsByTenant.get(admittedTenantKey) ?? 0);
+    if (
+      pendingAuthentications >= maxPendingAuthentications ||
+      (admittedTenantKey !== null && pendingForTenant >= maxPendingAuthenticationsPerTenant)
+    ) {
+      return null;
+    }
+    pendingAuthentications += 1;
+    if (admittedTenantKey !== null) {
+      pendingAuthenticationsByTenant.set(admittedTenantKey, pendingForTenant + 1);
+    }
+    const deadline: number = Date.now() + authenticationWaitMs;
+    try {
+      while (!stopped && Date.now() < deadline) {
+        const reservation: (() => void) | null = tryReserveAuthenticationCapacity(
+          admissionKey,
+          admittedTenantKey,
+          knownCredential,
+        );
+        if (reservation !== null) return reservation;
+        const remainingMs: number = deadline - Date.now();
+        if (remainingMs > 0) {
+          await waitForCapacity(authenticationCapacityWaiters, remainingMs);
+        }
+      }
+      return null;
+    } finally {
+      pendingAuthentications -= 1;
+      if (admittedTenantKey !== null) {
+        const remainingForTenant: number =
+          (pendingAuthenticationsByTenant.get(admittedTenantKey) ?? 1) - 1;
+        if (remainingForTenant === 0) pendingAuthenticationsByTenant.delete(admittedTenantKey);
+        else pendingAuthenticationsByTenant.set(admittedTenantKey, remainingForTenant);
+      }
+    }
+  };
+
   const handleMcpRequest: (request: Request) => Promise<Response> = async (
     request: Request,
   ): Promise<Response> => {
@@ -460,41 +610,20 @@ export async function startHttpServer(
         ? hashTokenSecret(token).toString("base64url")
         : registeredAdmission.key;
     const knownCredential: boolean = registeredAdmission !== null;
-    const activeForCredential: number = activeAuthenticationsByCredential.get(admissionKey) ?? 0;
-    const activeForAdmittedTenant: number =
-      admittedTenantKey === null ? 0 : (activeAuthenticationsByTenant.get(admittedTenantKey) ?? 0);
-    const unknownAuthenticationLimit: number = Math.max(1, maxAuthentications - 1);
-    if (
-      activeAuthentications >= maxAuthentications ||
-      activeForCredential >= 1 ||
-      activeForAdmittedTenant >= 2 ||
-      (!knownCredential && activeAuthentications >= unknownAuthenticationLimit)
-    ) {
-      return jsonResponse(503, { error: "Authentication capacity reached" });
-    }
+    const releaseAuthenticationCapacity: (() => void) | null = await reserveAuthenticationCapacity(
+      admissionKey,
+      admittedTenantKey,
+      knownCredential,
+    );
+    if (releaseAuthenticationCapacity === null) return authenticationCapacityResponse();
     let principal: HostedPrincipal | null;
-    activeAuthentications += 1;
-    activeAuthenticationsByCredential.set(admissionKey, activeForCredential + 1);
-    if (admittedTenantKey !== null) {
-      activeAuthenticationsByTenant.set(admittedTenantKey, activeForAdmittedTenant + 1);
-    }
     try {
       principal = await authenticator.authenticate(token);
     } catch (error: unknown) {
       logSafeError("Murmur authentication backend error", error);
       return jsonResponse(503, { error: "Authentication service unavailable" });
     } finally {
-      activeAuthentications -= 1;
-      activeAuthenticationsByCredential.delete(admissionKey);
-      if (admittedTenantKey !== null) {
-        const remainingForTenant: number =
-          (activeAuthenticationsByTenant.get(admittedTenantKey) ?? 1) - 1;
-        if (remainingForTenant === 0) {
-          activeAuthenticationsByTenant.delete(admittedTenantKey);
-        } else {
-          activeAuthenticationsByTenant.set(admittedTenantKey, remainingForTenant);
-        }
-      }
+      releaseAuthenticationCapacity();
     }
     if (principal === null) return unauthorizedResponse();
 
@@ -713,6 +842,7 @@ export async function startHttpServer(
     stop: async (): Promise<void> => {
       if (stopped) return;
       stopped = true;
+      notifyAuthenticationCapacityChanged();
       const activeSessions: [string, RemoteSession][] = Array.from(sessions.entries());
       await closeSessions(activeSessions, "Murmur active-session shutdown failed");
       await authenticator.close();
