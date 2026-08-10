@@ -281,3 +281,122 @@ test("uses fixed canonical buckets and a stable outer-header vector", async (): 
   );
   sodium.memzero(digest);
 });
+
+test("round trips empty, bucket-adjacent, Unicode, and maximum tool payloads", async (): Promise<void> => {
+  const keys: Awaited<ReturnType<typeof envelopeKeys>> = await envelopeKeys();
+  const payloads: readonly string[] = [
+    "",
+    "a",
+    "b".repeat(255),
+    "c".repeat(511),
+    "d".repeat(512),
+    "e".repeat(513),
+    "f".repeat(1_023),
+    "g".repeat(1_024),
+    "agents across machines/repos 🔐 你好 мир مرحبا",
+    "z".repeat(100_000),
+  ];
+  for (let index: number = 0; index < payloads.length; index += 1) {
+    const payload: string | undefined = payloads[index];
+    if (payload === undefined) throw new Error("Expected a payload fixture");
+    const envelope: EncryptedEnvelope = await encryptEnvelope(
+      {
+        ...baseHeaderInput(),
+        idempotencyKey: `boundary-${index}`,
+        messageId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+        pairCounter: index + 1,
+      },
+      payload,
+      keys.sender.privateKey,
+      keys.recipient.publicKey,
+    );
+    expect(await decryptEnvelope(envelope, keys.sender.publicKey, keys.recipient.privateKey)).toBe(
+      payload,
+    );
+    expect(envelope.header.paddedLength & (envelope.header.paddedLength - 1)).toBe(0);
+    expect(envelope.header.paddedLength).toBeGreaterThanOrEqual(512);
+    expect(envelope.header.paddedLength).toBeLessThanOrEqual(512 * 1024);
+  }
+});
+
+test("preserves canonical round trips across deterministic randomized Unicode payloads", async (): Promise<void> => {
+  const keys: Awaited<ReturnType<typeof envelopeKeys>> = await envelopeKeys();
+  const alphabet: readonly string[] = ["a", "Z", "0", " ", "\n", "é", "你", "🔐"];
+  let state: number = 0x51f15e;
+  for (let sample: number = 0; sample < 40; sample += 1) {
+    state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+    const length: number = state % 4_096;
+    let payload: string = "";
+    for (let index: number = 0; index < length; index += 1) {
+      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+      const character: string | undefined = alphabet[state % alphabet.length];
+      if (character === undefined) throw new Error("Expected a randomized character");
+      payload += character;
+    }
+    const envelope: EncryptedEnvelope = await encryptEnvelope(
+      {
+        ...baseHeaderInput(),
+        idempotencyKey: `property-${sample}`,
+        messageId: `10000000-0000-4000-8000-${String(sample).padStart(12, "0")}`,
+        pairCounter: sample + 1,
+      },
+      payload,
+      keys.sender.privateKey,
+      keys.recipient.publicKey,
+    );
+    const firstHeader: Uint8Array = encodeEnvelopeHeader(envelope.header);
+    const secondHeader: Uint8Array = encodeEnvelopeHeader({ ...envelope.header });
+    expect(secondHeader).toEqual(firstHeader);
+    expect(await decryptEnvelope(envelope, keys.sender.publicKey, keys.recipient.privateKey)).toBe(
+      payload,
+    );
+  }
+});
+
+test("rejects valid-looking relabeling of every mutable signed header field", async (): Promise<void> => {
+  const keys: Awaited<ReturnType<typeof envelopeKeys>> = await envelopeKeys();
+  const envelope: EncryptedEnvelope = await encryptEnvelope(
+    baseHeaderInput(),
+    "systematic header binding",
+    keys.sender.privateKey,
+    keys.recipient.publicKey,
+  );
+  const header: EnvelopeHeader = envelope.header;
+  const relabeled: readonly EnvelopeHeader[] = [
+    { ...header, branchName: "feature/rebound" },
+    { ...header, broadcastId: "40000000-0000-4000-8000-000000000001" },
+    { ...header, client: "claude" },
+    { ...header, createdAt: "2026-08-10T17:00:01.000Z" },
+    { ...header, expiresAt: "2026-09-09T17:00:01.000Z" },
+    { ...header, idempotencyKey: "send-rebound" },
+    { ...header, messageId: "40000000-0000-4000-8000-000000000002" },
+    {
+      ...header,
+      messageKind: "orchestration_request",
+      orchestratorPolicyId: "40000000-0000-4000-8000-000000000003",
+      senderAuthority: "orchestrator",
+    },
+    { ...header, paddedLength: header.paddedLength * 2 },
+    { ...header, pairCounter: 2 },
+    { ...header, recipientAgentKeyId: `mak_${"F".repeat(43)}` },
+    { ...header, recipientId: "machine-c:claude:repo-c:recipient" },
+    { ...header, recipientPrekeyClass: "fallback" },
+    { ...header, recipientPrekeyId: `mpk_${"G".repeat(43)}` },
+    { ...header, recipientRootKeyId: `mrk_${"H".repeat(43)}` },
+    { ...header, repositoryName: "another/repository" },
+    { ...header, senderAgentKeyId: `mak_${"I".repeat(43)}` },
+    { ...header, senderId: "machine-d:claude:repo-d:sender" },
+    { ...header, senderRootKeyId: `mrk_${"J".repeat(43)}` },
+    { ...header, tenantId: "40000000-0000-4000-8000-000000000004" },
+    { ...header, threadId: "40000000-0000-4000-8000-000000000005" },
+  ];
+  for (const changedHeader of relabeled) {
+    await expect(
+      decryptEnvelope(
+        { ...envelope, header: changedHeader },
+        keys.sender.publicKey,
+        keys.recipient.privateKey,
+      ),
+    ).rejects.toThrow("Encrypted message verification failed");
+  }
+});
