@@ -147,13 +147,21 @@ test("enabled telemetry exports bounded protobuf spans without request secrets",
 });
 
 test("telemetry shutdown stays inside the configured exporter deadline", async (): Promise<void> => {
-  const collectorRequest: { release: (() => void) | null } = { release: null };
+  const collectorRequests: { closing: boolean; releases: Array<() => void> } = {
+    closing: false,
+    releases: [],
+  };
   const collector: Bun.Server<undefined> = Bun.serve({
     fetch: async (_request: Request): Promise<Response> =>
       await new Promise<Response>((resolve: (response: Response) => void): void => {
-        collectorRequest.release = (): void => {
+        const release: () => void = (): void => {
           resolve(new Response(null, { status: 503 }));
         };
+        if (collectorRequests.closing) {
+          release();
+          return;
+        }
+        collectorRequests.releases.push(release);
       }),
     hostname: "127.0.0.1",
     port: 0,
@@ -171,15 +179,36 @@ test("telemetry shutdown stays inside the configured exporter deadline", async (
     "/mcp",
   );
   trace.finish({ http_status_code: 200 }, false);
+  const cleanupRequests: readonly Promise<Response>[] = [
+    fetch(`http://127.0.0.1:${port}/cleanup-one`),
+    fetch(`http://127.0.0.1:${port}/cleanup-two`),
+  ];
   const startedAt: number = performance.now();
+  let shutdownElapsedMillis: number = 0;
+  const cleanupStatuses: number[] = [];
   try {
     await expect(telemetry.shutdown()).rejects.toThrow("Timeout");
+    shutdownElapsedMillis = performance.now() - startedAt;
   } finally {
-    const releaseRequest: (() => void) | null = collectorRequest.release;
-    if (releaseRequest !== null) releaseRequest();
+    collectorRequests.closing = true;
+    const lateCleanupRequest: Promise<Response> = fetch(
+      `http://127.0.0.1:${port}/cleanup-after-close`,
+    );
+    collectorRequests.releases.forEach((release: () => void): void => {
+      release();
+    });
+    collectorRequests.releases.length = 0;
+    const cleanupResponses: readonly Response[] = await Promise.all([
+      ...cleanupRequests,
+      lateCleanupRequest,
+    ]);
+    cleanupResponses.forEach((response: Response): void => {
+      cleanupStatuses.push(response.status);
+    });
     await collector.stop(true);
   }
-  expect(performance.now() - startedAt).toBeLessThan(1_000);
+  expect(shutdownElapsedMillis).toBeLessThan(1_000);
+  expect(cleanupStatuses).toEqual([503, 503, 503]);
 });
 
 test("deadline wrapper resolves, forwards rejection, and rejects stalled operations", async (): Promise<void> => {

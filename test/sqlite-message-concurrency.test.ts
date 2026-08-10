@@ -252,6 +252,17 @@ function expectConflictingRetryResults(conflicts: readonly WorkerResult[]): void
 if (process.env["MURMUR_SQLITE_RACE_WORKER"] === "1") {
   await runWorker();
 } else {
+  test("configures SQLite lock waiting before WAL conversion", (): void => {
+    const source: string = readFileSync(
+      new URL("../src/storage/sqlite-message-store.ts", import.meta.url),
+      "utf8",
+    );
+    const busyTimeoutIndex: number = source.indexOf('this.database.exec("PRAGMA busy_timeout');
+    const walIndex: number = source.indexOf('this.database.exec("PRAGMA journal_mode = WAL")');
+    expect(busyTimeoutIndex).toBeGreaterThan(-1);
+    expect(walIndex).toBeGreaterThan(busyTimeoutIndex);
+  });
+
   test("reports SQLite race worker startup exits immediately", async (): Promise<void> => {
     const directory: string = mkdtempSync(join(tmpdir(), "murmur-sqlite-startup-"));
     const worker: RaceWorker = spawnWorker(
@@ -280,7 +291,7 @@ if (process.env["MURMUR_SQLITE_RACE_WORKER"] === "1") {
     }
   }, 40_000);
 
-  test("resolves concurrent cross-process idempotent sends through the stored winner", async (): Promise<void> => {
+  test("opens SQLite concurrently and resolves idempotent sends through the stored winner", async (): Promise<void> => {
     let attempt: number = 0;
     while (attempt < 5) {
       const retries: readonly WorkerResult[] = await runConcurrentSends([

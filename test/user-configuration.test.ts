@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, type Stats, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, win32 } from "node:path";
+import { join } from "node:path";
 
 import { expect, test } from "bun:test";
 
@@ -295,10 +295,10 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
       "win32",
     ),
   ).toEqual({
-    claudeMcp: win32.join("C:\\Users\\test", ".claude.json"),
-    claudeSettings: win32.join("C:\\Users\\test", ".claude", "settings.json"),
-    codexConfig: win32.join("C:\\Users\\test", ".codex", "config.toml"),
-    codexHooks: win32.join("C:\\Users\\test", ".codex", "hooks.json"),
+    claudeMcp: "C:\\Users\\test\\.claude.json",
+    claudeSettings: "C:\\Users\\test\\.claude\\settings.json",
+    codexConfig: "C:\\Users\\test\\.codex\\config.toml",
+    codexHooks: "C:\\Users\\test\\.codex\\hooks.json",
   });
   expect(
     defaultUserConfigurationPaths(
@@ -317,7 +317,7 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
   });
 });
 
-test("creates user configuration files with platform-appropriate protection", (): void => {
+test("writes configuration everywhere and preserves POSIX mode contracts", (): void => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-private-config-"));
   const paths: UserConfigurationPaths = {
     claudeMcp: join(directory, ".claude.json"),
@@ -326,15 +326,19 @@ test("creates user configuration files with platform-appropriate protection", ()
     codexHooks: join(directory, ".codex", "hooks.json"),
   };
   try {
+    writeFileSync(paths.claudeMcp, "{}\n", { encoding: "utf8", mode: 0o640 });
     installUserConfiguration({
       clients: ["codex", "claude"],
       hookExecutable: "/usr/local/bin/murmur-hook",
       paths,
     });
     for (const path of Object.values(paths)) {
-      const status: ReturnType<typeof statSync> = statSync(path);
+      const status: Stats = statSync(path);
       expect(status.isFile()).toBe(true);
-      if (process.platform !== "win32") expect(status.mode & 0o777).toBe(0o600);
+      // Windows protection is ACL-based; the user-profile inheritance contract is documented.
+      if (process.platform !== "win32") {
+        expect(status.mode & 0o777).toBe(path === paths.claudeMcp ? 0o640 : 0o600);
+      }
     }
   } finally {
     rmSync(directory, { force: true, recursive: true });
