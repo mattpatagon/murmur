@@ -11,7 +11,10 @@ import packageMetadata from "../../package.json" with { type: "json" };
 import { RETENTION_DAYS } from "../domain/contracts.js";
 import type { AgentClient, BranchName, RepositoryName, TenantId } from "../domain/value-objects.js";
 import type { HostedControlPlane, HostedPrincipal } from "../hosted/control-plane.js";
+import type { E2eeEntitlementRecord } from "../hosted/e2ee-entitlement.js";
+import type { E2eeCapabilityOutput } from "../e2ee/wire-tools.js";
 import { logSafeError } from "../safe-errors.js";
+import type { E2eeMessageStore } from "../storage/e2ee-message-store.js";
 import type { MessageStore } from "../storage/message-store.js";
 import {
   type AdminToolContext,
@@ -20,6 +23,7 @@ import {
   callTenantAdminTool,
 } from "./murmur-admin-tools.js";
 import { callDataTool, type DataToolContext } from "./murmur-data-tools.js";
+import { callE2eeTool, type E2eeToolContext } from "./murmur-e2ee-tools.js";
 import { MurmurInboxResources } from "./murmur-inbox-resources.js";
 import { toolsForPrincipal } from "./murmur-tool-definitions.js";
 import { toolError } from "./murmur-tool-results.js";
@@ -32,6 +36,10 @@ export type MurmurApplicationDependencies = {
   readonly client: AgentClient | null;
   readonly closeStoreOnClose?: boolean;
   readonly controlPlane?: HostedControlPlane | null;
+  readonly e2eeCapability?: E2eeCapabilityOutput | null | undefined;
+  readonly e2eeEntitlement?: E2eeEntitlementRecord | null | undefined;
+  readonly e2eeSleep?: ((milliseconds: number) => Promise<void>) | undefined;
+  readonly e2eeStore?: E2eeMessageStore | null | undefined;
   readonly legacyCredentialHash?: Buffer | null;
   readonly onTenantSuspended?: ((tenantId: TenantId) => Promise<void>) | undefined;
   readonly onTokenRevoked?: ((tokenId: string) => Promise<void>) | undefined;
@@ -48,6 +56,12 @@ export class MurmurApplication {
   private readonly branchName: BranchName | null;
   private readonly client: AgentClient | null;
   private readonly controlPlane: HostedControlPlane | null;
+  private readonly closeStoreSeparately: boolean;
+  private readonly e2eeCapability: E2eeCapabilityOutput | null;
+  private readonly e2eeEntitlement: E2eeEntitlementRecord | null;
+  private readonly e2eeSleep: (milliseconds: number) => Promise<void>;
+  private readonly e2eeStore: E2eeMessageStore | null;
+  private readonly exposedToolNames: ReadonlySet<string>;
   private readonly legacyCredentialHash: Buffer | null;
   private readonly onTenantSuspended: ((tenantId: TenantId) => Promise<void>) | null;
   private readonly onTokenRevoked: ((tokenId: string) => Promise<void>) | null;
@@ -68,6 +82,12 @@ export class MurmurApplication {
         : Buffer.from(dependencies.bootstrapCredentialHash);
     this.client = dependencies.client;
     this.controlPlane = dependencies.controlPlane ?? null;
+    this.e2eeCapability = dependencies.e2eeCapability ?? null;
+    this.e2eeEntitlement = dependencies.e2eeEntitlement ?? null;
+    this.e2eeSleep =
+      dependencies.e2eeSleep ??
+      (async (milliseconds: number): Promise<void> => await Bun.sleep(milliseconds));
+    this.e2eeStore = dependencies.e2eeStore ?? null;
     this.legacyCredentialHash = dependencies.legacyCredentialHash ?? null;
     this.onTenantSuspended = dependencies.onTenantSuspended ?? null;
     this.onTokenRevoked = dependencies.onTokenRevoked ?? null;
@@ -77,6 +97,7 @@ export class MurmurApplication {
     this.store = dependencies.store;
     this.tenantOnboardingEnabled = dependencies.tenantOnboardingEnabled === true;
     this.tools = this.createTools();
+    this.exposedToolNames = new Set<string>(this.tools.map((tool: Tool): string => tool.name));
     this.server = new Server(
       { name: "murmur", version: SERVER_VERSION },
       {
@@ -92,15 +113,21 @@ export class MurmurApplication {
           `Messages expire automatically after ${RETENTION_DAYS} days. MCP notifications do not themselves guarantee that a host starts a new model turn.`,
       },
     );
+    const resourceStore: MessageStore | null =
+      this.e2eeEntitlement !== null && this.e2eeEntitlement.state === "enforced"
+        ? null
+        : this.store;
+    this.closeStoreSeparately =
+      resourceStore === null && dependencies.closeStoreOnClose !== false && this.store !== null;
     this.resources = new MurmurInboxResources(
       this.server,
-      this.store,
+      resourceStore,
       dependencies.closeStoreOnClose !== false,
     );
     this.registerRequestHandlers();
     this.resources.registerHandlers();
     this.server.onclose = (): void => {
-      void this.resources.close().catch((error: unknown): void => {
+      void this.closeApplicationResources().catch((error: unknown): void => {
         logSafeError("Murmur resource shutdown failed", error);
       });
     };
@@ -110,6 +137,7 @@ export class MurmurApplication {
     return toolsForPrincipal({
       bootstrapEnabled: this.bootstrapCredentialHash !== null,
       legacyAdoptionEnabled: this.legacyCredentialHash !== null,
+      e2eeEntitlement: this.e2eeEntitlement,
       principal: this.principal,
       tenantOnboardingEnabled: this.tenantOnboardingEnabled,
     });
@@ -130,6 +158,23 @@ export class MurmurApplication {
     try {
       const name: string = request.params.name;
       const argumentsValue: unknown = request.params.arguments;
+      if (!this.exposedToolNames.has(name)) {
+        return toolError(new Error(`Unknown tool '${name}'`));
+      }
+      if (this.e2eeCapability !== null && this.e2eeEntitlement !== null) {
+        const e2eeContext: E2eeToolContext = {
+          capability: this.e2eeCapability,
+          entitlement: this.e2eeEntitlement,
+          sleep: this.e2eeSleep,
+          store: this.e2eeStore,
+        };
+        const e2eeResult: CallToolResult | null = await callE2eeTool(
+          name,
+          argumentsValue,
+          e2eeContext,
+        );
+        if (e2eeResult !== null) return e2eeResult;
+      }
       const dataContext: DataToolContext = {
         branchName: this.branchName,
         client: this.client,
@@ -188,7 +233,12 @@ export class MurmurApplication {
   }
 
   public async close(): Promise<void> {
-    await this.resources.close();
+    await this.closeApplicationResources();
     await this.server.close();
+  }
+
+  private async closeApplicationResources(): Promise<void> {
+    await this.resources.close();
+    if (this.closeStoreSeparately && this.store !== null) await this.store.close();
   }
 }

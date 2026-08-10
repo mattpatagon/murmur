@@ -13,6 +13,7 @@ import {
 import { PostNoticeInputSchema } from "../src/domain/notice-contracts.js";
 import { AgentId, TenantId } from "../src/domain/value-objects.js";
 import type { HostedPrincipal } from "../src/hosted/control-plane.js";
+import { parseE2eeEntitlementRecord, tenantDataToolNames } from "../src/hosted/e2ee-entitlement.js";
 import { type ToolExposure, toolsForPrincipal } from "../src/mcp/murmur-tool-definitions.js";
 
 const DATA_TOOLS: readonly string[] = [
@@ -85,6 +86,31 @@ describe("MCP role-to-tool exposure", (): void => {
       tokenId: "10000000-0000-4000-8000-000000000002",
     };
     expect(names(exposure(principal))).toEqual([...DATA_TOOLS, ...TENANT_ADMIN_TOOLS].sort());
+  });
+
+  test("tenant E2E enforcement exposes ciphertext tools and blocks every plaintext route", (): void => {
+    const principal: HostedPrincipal = {
+      kind: "tenant",
+      role: "agent",
+      tenantId: TenantId.parse("00000000-0000-4000-8000-000000000001"),
+      tokenId: "10000000-0000-4000-8000-000000000009",
+    };
+    const entitlement: ReturnType<typeof parseE2eeEntitlementRecord> = parseE2eeEntitlementRecord({
+      plaintextWritesBlocked: true,
+      retainedCiphertextMessages: 0,
+      state: "enforced",
+      trustPolicyVersion: 1,
+      unreadPlaintextMessages: 0,
+    });
+    expect(names({ ...exposure(principal), e2eeEntitlement: entitlement })).toEqual(
+      [...tenantDataToolNames(entitlement)].sort(),
+    );
+    expect(names({ ...exposure(principal), e2eeEntitlement: entitlement })).not.toContain(
+      "get_messages",
+    );
+    expect(names({ ...exposure(principal), e2eeEntitlement: entitlement })).toContain(
+      "get_encrypted_messages",
+    );
   });
 
   test("bootstrap sessions expose one tool only while the bootstrap proof exists", (): void => {

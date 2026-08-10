@@ -25,10 +25,24 @@ const E2eeEntitlementRecordSchema: z.ZodType<E2eeEntitlementRecord> = z
   });
 
 export const E2EE_CAPABILITY_TOOL_NAME: string = "get_e2ee_capability";
-export const TENANT_METADATA_TOOL_NAMES: readonly string[] = ["list_agents", "register_agent"];
-export const PLAINTEXT_WRITE_TOOL_NAMES: readonly string[] = ["broadcast_message", "send_message"];
+export const TENANT_METADATA_TOOL_NAMES: readonly string[] = [
+  "close_agent",
+  "end_session",
+  "get_agent",
+  "list_agents",
+  "register_agent",
+];
+export const PLAINTEXT_WRITE_TOOL_NAMES: readonly string[] = [
+  "broadcast_message",
+  "post_notice",
+  "resolve_notice",
+  "send_message",
+  "withdraw_notice",
+];
 export const PLAINTEXT_READ_TOOL_NAMES: readonly string[] = [
+  "get_message_history",
   "get_messages",
+  "list_notices",
   "mark_messages_read",
   "wait_for_messages",
 ];

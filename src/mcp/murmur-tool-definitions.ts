@@ -60,9 +60,12 @@ import {
   TenantStatusOutputSchema,
 } from "../hosted/contracts.js";
 import type { HostedPrincipal } from "../hosted/control-plane.js";
+import { type E2eeEntitlementRecord, tenantDataToolNames } from "../hosted/e2ee-entitlement.js";
+import { encryptedWireToolDefinitions } from "../e2ee/wire-tool-definitions.js";
 
 export type ToolExposure = {
   readonly bootstrapEnabled: boolean;
+  readonly e2eeEntitlement?: E2eeEntitlementRecord | null | undefined;
   readonly legacyAdoptionEnabled: boolean;
   readonly principal: HostedPrincipal | null;
   readonly tenantOnboardingEnabled: boolean;
@@ -476,9 +479,22 @@ export function toolsForPrincipal(exposure: ToolExposure): Tool[] {
     return exposure.bootstrapEnabled ? bootstrapTools() : [];
   }
   if (principal !== null && principal.kind === "operator") return operatorTools(exposure);
-  const tools: Tool[] = dataTools();
+  const entitlement: E2eeEntitlementRecord | null = exposure.e2eeEntitlement ?? null;
+  const tools: Tool[] =
+    principal !== null && principal.kind === "tenant" && entitlement !== null
+      ? entitledDataTools(entitlement)
+      : dataTools();
   if (principal !== null && principal.kind === "tenant" && principal.role === "tenant_admin") {
     tools.push(...tenantAdminTools());
   }
   return tools;
+}
+
+function entitledDataTools(entitlement: E2eeEntitlementRecord): Tool[] {
+  const allowedNames: ReadonlySet<string> = new Set<string>(tenantDataToolNames(entitlement));
+  const selected: Map<string, Tool> = new Map<string, Tool>();
+  for (const tool of [...dataTools(), ...encryptedWireToolDefinitions()]) {
+    if (allowedNames.has(tool.name)) selected.set(tool.name, tool);
+  }
+  return Array.from(selected.values());
 }

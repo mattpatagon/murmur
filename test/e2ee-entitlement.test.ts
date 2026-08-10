@@ -101,24 +101,37 @@ test("exposes the exact off, provisioning, cutover, and enforced tool matrices",
   const off: readonly string[] = tenantDataToolNames(entitlement("off"));
   expect(off).toEqual([
     "broadcast_message",
+    "close_agent",
+    "end_session",
+    "get_agent",
     "get_e2ee_capability",
+    "get_message_history",
     "get_messages",
     "list_agents",
+    "list_notices",
     "mark_messages_read",
+    "post_notice",
     "register_agent",
+    "resolve_notice",
     "send_message",
     "wait_for_messages",
+    "withdraw_notice",
   ]);
   const provisioning: E2eeEntitlementRecord = entitlement("provisioning");
   expect(tenantDataToolNames(provisioning)).toEqual([
-    ...off.slice(0, 5),
+    ...off.slice(0, 11),
     "publish_agent_key_bundle",
-    ...off.slice(5),
+    ...off.slice(11),
   ]);
   expect(tenantDataToolNames(blockPlaintextWrites(provisioning))).toEqual([
+    "close_agent",
+    "end_session",
+    "get_agent",
     "get_e2ee_capability",
+    "get_message_history",
     "get_messages",
     "list_agents",
+    "list_notices",
     "mark_messages_read",
     "publish_agent_key_bundle",
     "register_agent",
@@ -129,7 +142,14 @@ test("exposes the exact off, provisioning, cutover, and enforced tool matrices",
     (tool: Tool): string => tool.name,
   );
   expect(new Set(enforcedNames)).toEqual(
-    new Set<string>([...encryptedNames, "list_agents", "register_agent"]),
+    new Set<string>([
+      ...encryptedNames,
+      "close_agent",
+      "end_session",
+      "get_agent",
+      "list_agents",
+      "register_agent",
+    ]),
   );
   expect(enforcedNames).not.toContain("send_message");
   expect(enforcedNames).not.toContain("broadcast_message");
