@@ -18,6 +18,9 @@ export class E2eeProxyApplication {
   readonly #operations: E2eeProxyOperations;
   readonly #resources: E2eeProxyResources;
   readonly #tools: readonly Tool[];
+  #closePromise: Promise<void> | null = null;
+  #localClosePromise: Promise<void> | null = null;
+  #onCloseCleanupStarted: boolean = false;
   public readonly server: Server;
 
   public constructor(operations: E2eeProxyOperations) {
@@ -45,6 +48,8 @@ export class E2eeProxyApplication {
     this.#resources = new E2eeProxyResources(this.server, operations);
     this.#resources.registerHandlers();
     this.server.onclose = (): void => {
+      if (this.#onCloseCleanupStarted) return;
+      this.#onCloseCleanupStarted = true;
       void this.closeLocalResources().catch((error: unknown): void => {
         logSafeError("Murmur E2E proxy shutdown failed", error);
       });
@@ -69,13 +74,49 @@ export class E2eeProxyApplication {
     }
   }
 
+  private async closeLocalResourcesOnce(): Promise<void> {
+    let resourcesFailed: boolean = false;
+    try {
+      await this.#resources.close();
+    } catch (_error: unknown) {
+      resourcesFailed = true;
+    }
+    let operationsFailed: boolean = false;
+    try {
+      await this.#operations.close();
+    } catch (_error: unknown) {
+      operationsFailed = true;
+    }
+    if (resourcesFailed || operationsFailed) {
+      throw new Error("The local E2E proxy cleanup failed");
+    }
+  }
+
   private async closeLocalResources(): Promise<void> {
-    await this.#resources.close();
-    await this.#operations.close();
+    if (this.#localClosePromise === null) {
+      this.#localClosePromise = this.closeLocalResourcesOnce();
+    }
+    await this.#localClosePromise;
+  }
+
+  private async closeOnce(): Promise<void> {
+    let localFailed: boolean = false;
+    try {
+      await this.closeLocalResources();
+    } catch (_error: unknown) {
+      localFailed = true;
+    }
+    let serverFailed: boolean = false;
+    try {
+      await this.server.close();
+    } catch (_error: unknown) {
+      serverFailed = true;
+    }
+    if (localFailed || serverFailed) throw new Error("The local E2E proxy shutdown failed");
   }
 
   public async close(): Promise<void> {
-    await this.closeLocalResources();
-    await this.server.close();
+    if (this.#closePromise === null) this.#closePromise = this.closeOnce();
+    await this.#closePromise;
   }
 }

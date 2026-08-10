@@ -168,6 +168,15 @@ class FakeProxyOperations implements E2eeProxyOperations {
   }
 }
 
+class FailingCloseOperations extends FakeProxyOperations {
+  public closeAttempts: number = 0;
+
+  public override async close(): Promise<void> {
+    this.closeAttempts += 1;
+    throw new Error("sensitive internal close detail");
+  }
+}
+
 async function callTool(
   client: Client,
   name: string,
@@ -319,4 +328,21 @@ test("local E2E MCP proxy preserves familiar data tools and verified plaintext o
     await Promise.allSettled([client.close(), application.close()]);
   }
   expect(operations.calls.at(-1)).toBe("close");
+});
+
+test("local E2E proxy closes its MCP transport even when endpoint cleanup fails", async (): Promise<void> => {
+  const operations: FailingCloseOperations = new FailingCloseOperations();
+  const application: E2eeProxyApplication = new E2eeProxyApplication(operations);
+  const transports: [InMemoryTransport, InMemoryTransport] = InMemoryTransport.createLinkedPair();
+  const client: Client = new Client(
+    { name: "proxy-cleanup-test", version: "1.0.0" },
+    { capabilities: {} },
+  );
+  await application.server.connect(transports[1]);
+  await client.connect(transports[0]);
+  await expect(application.close()).rejects.toThrow("local E2E proxy shutdown failed");
+  await expect(application.close()).rejects.toThrow("local E2E proxy shutdown failed");
+  expect(operations.closeAttempts).toBe(1);
+  await expect(client.listTools()).rejects.toThrow();
+  await client.close();
 });
