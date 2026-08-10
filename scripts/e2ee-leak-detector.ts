@@ -1,5 +1,6 @@
 import { type Dirent, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { gunzipSync } from "node:zlib";
 
 const MAX_CAPTURE_FILES: number = 1_000;
 const MAX_CAPTURE_FILE_BYTES: number = 16 * 1024 * 1024;
@@ -19,6 +20,7 @@ export type LeakEncoding =
 
 export type LeakFinding = {
   readonly capture: string;
+  readonly container: "gzip" | "raw";
   readonly encoding: LeakEncoding;
   readonly sentinel_index: number;
 };
@@ -100,6 +102,36 @@ function contains(haystack: Uint8Array, needle: Uint8Array): boolean {
   return Buffer.from(haystack.buffer, haystack.byteOffset, haystack.byteLength).includes(needle);
 }
 
+function gzipPayload(bytes: Uint8Array): Uint8Array | null {
+  if (bytes.byteLength < 2 || bytes[0] !== 0x1f || bytes[1] !== 0x8b) return null;
+  try {
+    return gunzipSync(bytes, { maxOutputLength: MAX_CAPTURE_FILE_BYTES });
+  } catch (_error: unknown) {
+    throw new Error("E2E leak capture has an invalid or oversized gzip payload");
+  }
+}
+
+function scanRepresentation(
+  capture: string,
+  container: LeakFinding["container"],
+  bytes: Uint8Array,
+  patterns: readonly (readonly Pattern[])[],
+  findings: LeakFinding[],
+): void {
+  patterns.forEach((sentinelPatterns: readonly Pattern[], sentinelIndex: number): void => {
+    sentinelPatterns.forEach((pattern: Pattern): void => {
+      if (contains(bytes, pattern.bytes)) {
+        findings.push({
+          capture,
+          container,
+          encoding: pattern.encoding,
+          sentinel_index: sentinelIndex,
+        });
+      }
+    });
+  });
+}
+
 export function scanE2eeCaptures(
   capturePath: string,
   sentinels: readonly string[],
@@ -122,17 +154,12 @@ export function scanE2eeCaptures(
     }
     const bytes: Buffer = readFileSync(file);
     filesScanned += 1;
-    patterns.forEach((sentinelPatterns: readonly Pattern[], sentinelIndex: number): void => {
-      sentinelPatterns.forEach((pattern: Pattern): void => {
-        if (contains(bytes, pattern.bytes)) {
-          findings.push({
-            capture: basename(file),
-            encoding: pattern.encoding,
-            sentinel_index: sentinelIndex,
-          });
-        }
-      });
-    });
+    const capture: string = basename(file);
+    scanRepresentation(capture, "raw", bytes, patterns, findings);
+    const decompressed: Uint8Array | null = gzipPayload(bytes);
+    if (decompressed !== null) {
+      scanRepresentation(capture, "gzip", decompressed, patterns, findings);
+    }
   }
   return { bytes_scanned: bytesScanned, files_scanned: filesScanned, findings };
 }

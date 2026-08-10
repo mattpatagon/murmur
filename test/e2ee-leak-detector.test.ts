@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 
 import {
   assertNoE2eePlaintextLeak,
@@ -74,6 +75,39 @@ test("accepts clean bounded binary captures and rejects symlink traversal", (): 
     expect(result).toEqual({ bytes_scanned: 4_096, files_scanned: 1, findings: [] });
     symlinkSync(join(directory, "ciphertext.capture"), join(directory, "linked.capture"));
     expect((): LeakScanResult => scanE2eeCaptures(directory, [SENTINEL])).toThrow("symbolic links");
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("decodes bounded gzip captures before declaring plaintext absent", (): void => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-e2ee-leak-gzip-"));
+  try {
+    const capture: Buffer = gzipSync(Buffer.from(`prefix ${SENTINEL} suffix`, "utf8"));
+    expect(capture.includes(Buffer.from(SENTINEL, "utf8"))).toBe(false);
+    writeFileSync(join(directory, "http-body.capture.gz"), capture);
+    const result: LeakScanResult = scanE2eeCaptures(directory, [SENTINEL]);
+    expect(result.findings).toContainEqual({
+      capture: "http-body.capture.gz",
+      container: "gzip",
+      encoding: "raw_utf8",
+      sentinel_index: 0,
+    });
+    expect((): LeakScanResult => assertNoE2eePlaintextLeak(directory, [SENTINEL])).toThrow(
+      "reversible sentinel encoding",
+    );
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("fails closed on gzip bombs or malformed gzip captures", (): void => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-e2ee-leak-bad-gzip-"));
+  try {
+    writeFileSync(join(directory, "broken.capture.gz"), Uint8Array.from([0x1f, 0x8b, 0, 0]));
+    expect((): LeakScanResult => scanE2eeCaptures(directory, [SENTINEL])).toThrow(
+      "invalid or oversized gzip payload",
+    );
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }
