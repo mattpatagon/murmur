@@ -54,7 +54,7 @@ export class LocalVaultKeys {
   }
 
   public getRoot(): StoredRootKey | null {
-    const statement: Statement<unknown, []> = this.#database.query(`
+    using statement: Statement<unknown, []> = this.#database.prepare(`
       SELECT root_key_id, public_key, private_key, created_at FROM root_keys WHERE singleton = 1
     `);
     const row: unknown = statement.get();
@@ -66,8 +66,8 @@ export class LocalVaultKeys {
     if (existing !== null) return existing;
     const pair: SigningKeyPair = await createSigningKeyPair(null);
     const generatedId: string = await rootKeyId(pair.publicKey);
-    const statement: Statement<unknown, [number, string, Uint8Array, Uint8Array, string]> =
-      this.#database.query(`
+    using statement: Statement<unknown, [number, string, Uint8Array, Uint8Array, string]> =
+      this.#database.prepare(`
         INSERT OR IGNORE INTO root_keys(
           singleton, root_key_id, public_key, private_key, created_at
         ) VALUES (?, ?, ?, ?, ?)
@@ -94,7 +94,7 @@ export class LocalVaultKeys {
   }
 
   public getAgent(agentId: string): StoredAgentKey | null {
-    const statement: Statement<unknown, [string]> = this.#database.query(`
+    using statement: Statement<unknown, [string]> = this.#database.prepare(`
       SELECT agent_id, root_key_id, signing_key_id, public_key, private_key,
              created_at, expires_at, certificate_signature
       FROM agent_keys WHERE agent_id = ?
@@ -104,7 +104,7 @@ export class LocalVaultKeys {
   }
 
   public listAgents(): readonly StoredAgentKey[] {
-    const statement: Statement<unknown, []> = this.#database.query(`
+    using statement: Statement<unknown, []> = this.#database.prepare(`
       SELECT agent_id, root_key_id, signing_key_id, public_key, private_key,
              created_at, expires_at, certificate_signature
       FROM agent_keys ORDER BY agent_id LIMIT 1001
@@ -176,10 +176,10 @@ export class LocalVaultKeys {
       }
       let result: Changes;
       if (current === null) {
-        const insert: Statement<
+        using insert: Statement<
           unknown,
           [string, string, string, Uint8Array, Uint8Array, string, string, Uint8Array]
-        > = this.#database.query(`
+        > = this.#database.prepare(`
           INSERT INTO agent_keys(
             agent_id, root_key_id, signing_key_id, public_key, private_key,
             created_at, expires_at, certificate_signature
@@ -196,10 +196,10 @@ export class LocalVaultKeys {
           certificate.signature,
         );
       } else {
-        const rotate: Statement<
+        using rotate: Statement<
           unknown,
           [string, Uint8Array, Uint8Array, string, string, Uint8Array, string, string]
-        > = this.#database.query(`
+        > = this.#database.prepare(`
           UPDATE agent_keys SET
             signing_key_id = ?, public_key = ?, private_key = ?,
             created_at = ?, expires_at = ?, certificate_signature = ?
@@ -228,7 +228,7 @@ export class LocalVaultKeys {
   }
 
   public listPrekeys(agentId: string, prekeyClass: PrekeyClass): readonly StoredPrekey[] {
-    const statement: Statement<unknown, [string, PrekeyClass]> = this.#database.query(`
+    using statement: Statement<unknown, [string, PrekeyClass]> = this.#database.prepare(`
       SELECT p.agent_id, p.agent_signing_key_id,
              p.prekey_id, p.prekey_class, p.public_key, p.private_key,
              p.created_at, p.expires_at, p.consumed_at, p.certificate_signature
@@ -241,7 +241,7 @@ export class LocalVaultKeys {
   }
 
   public getPrekey(prekeyIdValue: string): StoredPrekey | null {
-    const statement: Statement<unknown, [string]> = this.#database.query(`
+    using statement: Statement<unknown, [string]> = this.#database.prepare(`
       SELECT p.agent_id, p.agent_signing_key_id,
              p.prekey_id, p.prekey_class, p.public_key, p.private_key,
              p.created_at, p.expires_at, p.consumed_at, p.certificate_signature
@@ -284,10 +284,10 @@ export class LocalVaultKeys {
     }
     this.#database.exec("BEGIN IMMEDIATE");
     try {
-      const insert: Statement<
+      using insert: Statement<
         unknown,
         [string, string, string, PrekeyClass, Uint8Array, Uint8Array, string, string, Uint8Array]
-      > = this.#database.query(`
+      > = this.#database.prepare(`
         INSERT INTO prekeys(
           prekey_id, agent_id, agent_signing_key_id, prekey_class, public_key, private_key,
           created_at, expires_at, certificate_signature
@@ -320,7 +320,7 @@ export class LocalVaultKeys {
   }
 
   public purgeExpiredPrivatePrekeys(now: string): number {
-    const statement: Statement<unknown, [string]> = this.#database.query(`
+    using statement: Statement<unknown, [string]> = this.#database.prepare(`
       UPDATE prekeys SET private_key = NULL
       WHERE expires_at <= ? AND private_key IS NOT NULL
     `);
@@ -328,7 +328,7 @@ export class LocalVaultKeys {
   }
 
   public getPin(tenantId: string, agentId: string): PeerPin | null {
-    const statement: Statement<unknown, [string, string]> = this.#database.query(`
+    using statement: Statement<unknown, [string, string]> = this.#database.prepare(`
       SELECT tenant_id, agent_id, root_key_id, public_key, verification_mode, verified_at
       FROM peer_pins WHERE tenant_id = ? AND agent_id = ?
     `);
@@ -337,7 +337,7 @@ export class LocalVaultKeys {
   }
 
   public listPins(): readonly PeerPin[] {
-    const statement: Statement<unknown, []> = this.#database.query(`
+    using statement: Statement<unknown, []> = this.#database.prepare(`
       SELECT tenant_id, agent_id, root_key_id, public_key, verification_mode, verified_at
       FROM peer_pins ORDER BY tenant_id, agent_id LIMIT 10001
     `);
@@ -347,7 +347,7 @@ export class LocalVaultKeys {
   }
 
   public getExpectedPeerRoot(tenantId: string, agentId: string): ExpectedPeerRoot | null {
-    const statement: Statement<unknown, [string, string]> = this.#database.query(`
+    using statement: Statement<unknown, [string, string]> = this.#database.prepare(`
       SELECT tenant_id, agent_id, root_key_id, verified_at
       FROM peer_root_expectations WHERE tenant_id = ? AND agent_id = ?
     `);
@@ -356,7 +356,7 @@ export class LocalVaultKeys {
   }
 
   public listExpectedPeerRoots(): readonly ExpectedPeerRoot[] {
-    const statement: Statement<unknown, []> = this.#database.query(`
+    using statement: Statement<unknown, []> = this.#database.prepare(`
       SELECT tenant_id, agent_id, root_key_id, verified_at
       FROM peer_root_expectations ORDER BY tenant_id, agent_id LIMIT 10001
     `);
@@ -381,7 +381,7 @@ export class LocalVaultKeys {
     if (existing !== null && existing.rootKeyId !== expected.rootKeyId) {
       throw new Error("Peer root expectation changed and requires an audited reset");
     }
-    const statement: Statement<unknown, [string, string, string, string]> = this.#database.query(`
+    using statement: Statement<unknown, [string, string, string, string]> = this.#database.prepare(`
       INSERT INTO peer_root_expectations(tenant_id, agent_id, root_key_id, verified_at)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(tenant_id, agent_id) DO UPDATE SET verified_at = excluded.verified_at
@@ -398,7 +398,7 @@ export class LocalVaultKeys {
   public getUsablePin(tenantId: string, agentId: string, now: Date): PeerPin | null {
     const pin: PeerPin | null = this.getPin(tenantId, agentId);
     if (pin === null || pin.verificationMode !== "organization") return pin;
-    const statement: Statement<unknown, [string]> = this.#database.query(`
+    using statement: Statement<unknown, [string]> = this.#database.prepare(`
       SELECT expires_at FROM trust_policy_state WHERE tenant_id = ?
     `);
     const row: unknown = statement.get(tenantId);
@@ -419,7 +419,7 @@ export class LocalVaultKeys {
       throw new Error("Peer root fingerprint does not match its key");
     this.#database.exec("BEGIN IMMEDIATE");
     try {
-      const revokedStatement: Statement<unknown, [string, string]> = this.#database.query(`
+      using revokedStatement: Statement<unknown, [string, string]> = this.#database.prepare(`
         SELECT 1 FROM trust_policy_revocations WHERE tenant_id = ? AND root_key_id = ?
       `);
       if (revokedStatement.get(pin.tenantId, pin.rootKeyId) !== null) {
@@ -441,8 +441,8 @@ export class LocalVaultKeys {
           throw new Error("Peer verification mode cannot be downgraded");
         }
       }
-      const statement: Statement<unknown, [string, string, string, Uint8Array, string, string]> =
-        this.#database.query(`
+      using statement: Statement<unknown, [string, string, string, Uint8Array, string, string]> =
+        this.#database.prepare(`
           INSERT INTO peer_pins(
             tenant_id, agent_id, root_key_id, public_key, verification_mode, verified_at
           ) VALUES (?, ?, ?, ?, ?, ?)
@@ -458,7 +458,7 @@ export class LocalVaultKeys {
         pin.verificationMode,
         pin.verifiedAt,
       );
-      const clearExpectation: Statement<unknown, [string, string]> = this.#database.query(`
+      using clearExpectation: Statement<unknown, [string, string]> = this.#database.prepare(`
         DELETE FROM peer_root_expectations WHERE tenant_id = ? AND agent_id = ?
       `);
       clearExpectation.run(pin.tenantId, pin.agentId);

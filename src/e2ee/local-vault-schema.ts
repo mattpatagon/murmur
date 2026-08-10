@@ -10,7 +10,7 @@ const UserVersionRowSchema: z.ZodType<{ readonly user_version: number }> = z.obj
 });
 
 function schemaVersion(database: Database): number {
-  const statement: Statement<unknown, []> = database.query("PRAGMA user_version");
+  using statement: Statement<unknown, []> = database.prepare("PRAGMA user_version");
   return UserVersionRowSchema.parse(statement.get()).user_version;
 }
 

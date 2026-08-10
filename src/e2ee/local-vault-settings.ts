@@ -34,7 +34,7 @@ export class LocalVaultSettings {
         "The local E2E vault is already bound to another tenant; use a separate vault path",
       );
     }
-    const statement: Statement<unknown, [string, string]> = this.#database.query(`
+    using statement: Statement<unknown, [string, string]> = this.#database.prepare(`
       INSERT INTO active_tenant_binding(singleton, tenant_id, bound_at)
       VALUES (1, ?, ?)
       ON CONFLICT(singleton) DO UPDATE SET
@@ -46,7 +46,7 @@ export class LocalVaultSettings {
   }
 
   public getActiveTenant(): ActiveTenantBinding | null {
-    const statement: Statement<unknown, []> = this.#database.query(`
+    using statement: Statement<unknown, []> = this.#database.prepare(`
       SELECT tenant_id, bound_at FROM active_tenant_binding WHERE singleton = 1
     `);
     const row: unknown = statement.get();

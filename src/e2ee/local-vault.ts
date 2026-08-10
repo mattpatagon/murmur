@@ -1,4 +1,4 @@
-import { type Changes, Database, type Statement } from "bun:sqlite";
+import { type Changes, constants, Database, type Statement } from "bun:sqlite";
 import { timingSafeEqual } from "node:crypto";
 import process from "node:process";
 import { z } from "zod";
@@ -114,7 +114,7 @@ export class LocalE2eeVault {
 
   public getOutbox(logicalId: string): OutboxItem | null {
     this.#ensureOpen();
-    const statement: Statement<unknown, [string]> = this.#database.query(`
+    using statement: Statement<unknown, [string]> = this.#database.prepare(`
       SELECT logical_id, tenant_id, sender_id, recipient_id, pair_counter,
              plaintext, plaintext_digest, claim_id, envelope_json, created_at, thread_id
       FROM outbox WHERE logical_id = ?
@@ -141,7 +141,8 @@ export class LocalE2eeVault {
         this.#database.exec("COMMIT");
         return afterLock;
       }
-      const pendingStatement: Statement<unknown, [string, string, string]> = this.#database.query(`
+      using pendingStatement: Statement<unknown, [string, string, string]> =
+        this.#database.prepare(`
         SELECT COUNT(*) AS count FROM outbox
         WHERE tenant_id = ? AND sender_id = ? AND recipient_id = ?
       `);
@@ -150,7 +151,8 @@ export class LocalE2eeVault {
       );
       if (pending !== 0) throw new Error("Resolve the existing pair outbox before sending again");
 
-      const counterStatement: Statement<unknown, [string, string, string]> = this.#database.query(`
+      using counterStatement: Statement<unknown, [string, string, string]> =
+        this.#database.prepare(`
         SELECT last_counter AS count FROM pair_counters
         WHERE tenant_id = ? AND sender_id = ? AND recipient_id = ?
       `);
@@ -163,18 +165,18 @@ export class LocalE2eeVault {
       if (previousCounter >= Number.MAX_SAFE_INTEGER) throw new Error("Pair counter is exhausted");
       const pairCounter: number = previousCounter + 1;
 
-      const upsertCounter: Statement<unknown, [string, string, string, number]> =
-        this.#database.query(`
+      using upsertCounter: Statement<unknown, [string, string, string, number]> =
+        this.#database.prepare(`
           INSERT INTO pair_counters(tenant_id, sender_id, recipient_id, last_counter)
           VALUES (?, ?, ?, ?)
           ON CONFLICT(tenant_id, sender_id, recipient_id) DO UPDATE SET
             last_counter = excluded.last_counter
         `);
       upsertCounter.run(input.tenantId, input.senderId, input.recipientId, pairCounter);
-      const insert: Statement<
+      using insert: Statement<
         unknown,
         [string, string, string, string, number, string, Uint8Array, string, string]
-      > = this.#database.query(`
+      > = this.#database.prepare(`
         INSERT INTO outbox(
           logical_id, tenant_id, sender_id, recipient_id, pair_counter,
           plaintext, plaintext_digest, created_at, thread_id
@@ -215,7 +217,7 @@ export class LocalE2eeVault {
     ) {
       throw new Error("Outbox envelope conflict");
     }
-    const statement: Statement<unknown, [string, string, string]> = this.#database.query(`
+    using statement: Statement<unknown, [string, string, string]> = this.#database.prepare(`
       UPDATE outbox SET claim_id = ?, envelope_json = ? WHERE logical_id = ?
     `);
     statement.run(claimId, envelopeJson, logicalId);
@@ -239,8 +241,8 @@ export class LocalE2eeVault {
       }
       const nextCounter: number = existing.pairCounter + 1;
       if (!Number.isSafeInteger(nextCounter)) throw new Error("Pair counter is exhausted");
-      const updateCounter: Statement<unknown, [number, string, string, string]> =
-        this.#database.query(`
+      using updateCounter: Statement<unknown, [number, string, string, string]> =
+        this.#database.prepare(`
           UPDATE pair_counters SET last_counter = ?
           WHERE tenant_id = ? AND sender_id = ? AND recipient_id = ?
         `);
@@ -250,7 +252,7 @@ export class LocalE2eeVault {
       ) {
         throw new Error("Outbox pair counter is unavailable");
       }
-      const updateOutbox: Statement<unknown, [number, string, string]> = this.#database.query(`
+      using updateOutbox: Statement<unknown, [number, string, string]> = this.#database.prepare(`
         UPDATE outbox
         SET pair_counter = ?, claim_id = NULL, envelope_json = NULL, created_at = ?
         WHERE logical_id = ?
@@ -270,7 +272,7 @@ export class LocalE2eeVault {
 
   public resolveOutbox(logicalId: string): boolean {
     this.#ensureOpen();
-    const statement: Statement<unknown, [string]> = this.#database.query(
+    using statement: Statement<unknown, [string]> = this.#database.prepare(
       "DELETE FROM outbox WHERE logical_id = ?",
     );
     return statement.run(logicalId).changes === 1;
@@ -278,7 +280,7 @@ export class LocalE2eeVault {
 
   public getSentReceipt(logicalId: string): SentReceipt | null {
     this.#ensureOpen();
-    const statement: Statement<unknown, [string]> = this.#database.query(`
+    using statement: Statement<unknown, [string]> = this.#database.prepare(`
       SELECT logical_id, tenant_id, sender_id, recipient_id, pair_counter,
              plaintext_digest, claim_id, envelope_json, verification_mode, expires_at
       FROM sent_receipts WHERE logical_id = ?
@@ -302,10 +304,10 @@ export class LocalE2eeVault {
         this.#database.exec("COMMIT");
         return existing;
       }
-      const insert: Statement<
+      using insert: Statement<
         unknown,
         [string, string, string, string, number, Uint8Array, string, string, string, string]
-      > = this.#database.query(`
+      > = this.#database.prepare(`
         INSERT OR IGNORE INTO sent_receipts(
           logical_id, tenant_id, sender_id, recipient_id, pair_counter,
           plaintext_digest, claim_id, envelope_json, verification_mode, expires_at
@@ -331,7 +333,7 @@ export class LocalE2eeVault {
       ) {
         throw new Error("Sent receipt idempotency conflict");
       }
-      const remove: Statement<unknown, [string]> = this.#database.query(
+      using remove: Statement<unknown, [string]> = this.#database.prepare(
         "DELETE FROM outbox WHERE logical_id = ?",
       );
       if (remove.run(logicalId).changes !== 1) throw new Error("Committed outbox did not resolve");
@@ -345,7 +347,7 @@ export class LocalE2eeVault {
 
   public getCachedMessage(messageId: string): CachedMessage | null {
     this.#ensureOpen();
-    const statement: Statement<unknown, [string]> = this.#database.query(`
+    using statement: Statement<unknown, [string]> = this.#database.prepare(`
       SELECT message_id, tenant_id, sender_id, recipient_id, pair_counter, plaintext, expires_at
       FROM decrypted_cache WHERE message_id = ?
     `);
@@ -365,7 +367,7 @@ export class LocalE2eeVault {
         this.#database.exec("COMMIT");
         return existing;
       }
-      const replayStatement: Statement<unknown, [string, string, string]> = this.#database.query(`
+      using replayStatement: Statement<unknown, [string, string, string]> = this.#database.prepare(`
         SELECT last_counter AS count FROM replay_ledger
         WHERE tenant_id = ? AND sender_id = ? AND recipient_id = ?
       `);
@@ -386,10 +388,10 @@ export class LocalE2eeVault {
         throw new Error("Recipient prekey is unavailable");
       }
 
-      const insertCache: Statement<
+      using insertCache: Statement<
         unknown,
         [string, string, string, string, number, string, string]
-      > = this.#database.query(`
+      > = this.#database.prepare(`
           INSERT INTO decrypted_cache(
             message_id, tenant_id, sender_id, recipient_id, pair_counter, plaintext, expires_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -403,8 +405,8 @@ export class LocalE2eeVault {
         input.plaintext,
         input.expiresAt,
       );
-      const upsertReplay: Statement<unknown, [string, string, string, number]> =
-        this.#database.query(`
+      using upsertReplay: Statement<unknown, [string, string, string, number]> =
+        this.#database.prepare(`
           INSERT INTO replay_ledger(tenant_id, sender_id, recipient_id, last_counter)
           VALUES (?, ?, ?, ?)
           ON CONFLICT(tenant_id, sender_id, recipient_id) DO UPDATE SET
@@ -412,7 +414,7 @@ export class LocalE2eeVault {
         `);
       upsertReplay.run(input.tenantId, input.senderId, input.recipientId, input.pairCounter);
       if (prekey.certificate.prekeyClass === "one_time") {
-        const consume: Statement<unknown, [string, string]> = this.#database.query(`
+        using consume: Statement<unknown, [string, string]> = this.#database.prepare(`
           UPDATE prekeys SET private_key = NULL, consumed_at = ?
           WHERE prekey_id = ? AND private_key IS NOT NULL
         `);
@@ -432,11 +434,11 @@ export class LocalE2eeVault {
   public purgeExpired(now: string): number {
     this.#ensureOpen();
     this.keys.purgeExpiredPrivatePrekeys(now);
-    const statement: Statement<unknown, [string]> = this.#database.query(
+    using statement: Statement<unknown, [string]> = this.#database.prepare(
       "DELETE FROM decrypted_cache WHERE expires_at <= ?",
     );
     const deleted: number = statement.run(now).changes;
-    const receipts: Statement<unknown, [string]> = this.#database.query(
+    using receipts: Statement<unknown, [string]> = this.#database.prepare(
       "DELETE FROM sent_receipts WHERE expires_at <= ?",
     );
     receipts.run(now);
@@ -448,7 +450,7 @@ export class LocalE2eeVault {
     if (messageIds.length === 0 || messageIds.length > 500) {
       throw new Error("Cache purge requires between 1 and 500 message IDs");
     }
-    const statement: Statement<unknown, [string]> = this.#database.query(
+    using statement: Statement<unknown, [string]> = this.#database.prepare(
       "DELETE FROM decrypted_cache WHERE message_id = ?",
     );
     return messageIds.reduce(
@@ -460,6 +462,22 @@ export class LocalE2eeVault {
   public close(): void {
     if (this.#closed) return;
     this.#closed = true;
-    this.#database.close(false);
+    let maintenanceFailed: boolean = false;
+    try {
+      this.#database.fileControl(constants.SQLITE_FCNTL_PERSIST_WAL, 0);
+      // biome-ignore lint/security/noSecrets: This fixed SQLite pragma contains no credential material.
+      this.#database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } catch (_error: unknown) {
+      maintenanceFailed = true;
+    }
+    let closeFailed: boolean = false;
+    try {
+      this.#database.close(true);
+    } catch (_error: unknown) {
+      closeFailed = true;
+    }
+    if (maintenanceFailed || closeFailed) {
+      throw new Error("The local E2E vault database could not close cleanly");
+    }
   }
 }

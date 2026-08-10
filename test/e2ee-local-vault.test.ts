@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -108,6 +108,22 @@ test("creates one installation root across concurrent vault handles with owner-o
       first.close();
       second.close();
     }
+  });
+});
+
+test("finalizes statements and truncates sidecars before strict close", async (): Promise<void> => {
+  await withTempDirectory(async (directory: string): Promise<void> => {
+    const path: string = join(directory, "vault.sqlite");
+    const moved: string = join(directory, "closed-vault.sqlite");
+    const vault: LocalE2eeVault = new LocalE2eeVault(path, "linux");
+    await vault.keys.getOrCreateRoot("2026-08-10T17:00:00.000Z");
+    expect(vault.keys.getRoot()).not.toBeNull();
+    vault.close();
+    renameSync(path, moved);
+    expect(existsSync(path)).toBe(false);
+    expect(existsSync(moved)).toBe(true);
+    expect(existsSync(`${path}-wal`)).toBe(false);
+    expect(existsSync(`${path}-shm`)).toBe(false);
   });
 });
 

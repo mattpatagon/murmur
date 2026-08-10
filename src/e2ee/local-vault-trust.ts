@@ -70,7 +70,7 @@ export class LocalVaultTrust {
   }
 
   public getPolicyState(tenantId: string): StoredTrustPolicyState | null {
-    const statement: Statement<unknown, [string]> = this.#database.query(`
+    using statement: Statement<unknown, [string]> = this.#database.prepare(`
       SELECT tenant_id, issuer_key_id, issuer_public_key, version,
              expires_at, signature, imported_at
       FROM trust_policy_state WHERE tenant_id = ?
@@ -80,7 +80,7 @@ export class LocalVaultTrust {
   }
 
   public revokedRootIds(tenantId: string): ReadonlySet<string> {
-    const statement: Statement<unknown, [string]> = this.#database.query(`
+    using statement: Statement<unknown, [string]> = this.#database.prepare(`
       SELECT root_key_id FROM trust_policy_revocations
       WHERE tenant_id = ? ORDER BY root_key_id
     `);
@@ -92,7 +92,7 @@ export class LocalVaultTrust {
   }
 
   #existingPins(tenantId: string): ReadonlyMap<string, PeerPin> {
-    const statement: Statement<unknown, [string]> = this.#database.query(`
+    using statement: Statement<unknown, [string]> = this.#database.prepare(`
       SELECT tenant_id, agent_id, root_key_id, public_key, verification_mode, verified_at
       FROM peer_pins WHERE tenant_id = ? ORDER BY agent_id
     `);
@@ -144,10 +144,10 @@ export class LocalVaultTrust {
   }
 
   #writePolicy(policy: OrganizationTrustPolicy, importedAt: string): void {
-    const stateStatement: Statement<
+    using stateStatement: Statement<
       unknown,
       [string, string, Uint8Array, number, string, Uint8Array, string]
-    > = this.#database.query(`
+    > = this.#database.prepare(`
       INSERT INTO trust_policy_state(
         tenant_id, issuer_key_id, issuer_public_key, version, expires_at, signature, imported_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -168,8 +168,8 @@ export class LocalVaultTrust {
       policy.signature,
       importedAt,
     );
-    const revocationStatement: Statement<unknown, [string, string, string, string]> =
-      this.#database.query(`
+    using revocationStatement: Statement<unknown, [string, string, string, string]> =
+      this.#database.prepare(`
         INSERT OR IGNORE INTO trust_policy_revocations(
           tenant_id, root_key_id, revoked_at, reason
         ) VALUES (?, ?, ?, ?)
@@ -182,18 +182,18 @@ export class LocalVaultTrust {
         revocation.reason,
       );
     }
-    const deletePriorOrganizationPins: Statement<unknown, [string]> = this.#database.query(`
+    using deletePriorOrganizationPins: Statement<unknown, [string]> = this.#database.prepare(`
       DELETE FROM peer_pins WHERE tenant_id = ? AND verification_mode = 'organization'
     `);
     deletePriorOrganizationPins.run(policy.tenantId);
-    const deleteRevokedPins: Statement<unknown, [string, string]> = this.#database.query(`
+    using deleteRevokedPins: Statement<unknown, [string, string]> = this.#database.prepare(`
       DELETE FROM peer_pins WHERE tenant_id = ? AND root_key_id = ?
     `);
     for (const revocation of policy.revocations) {
       deleteRevokedPins.run(policy.tenantId, revocation.rootKeyId);
     }
-    const upsertPin: Statement<unknown, [string, string, string, Uint8Array, string]> =
-      this.#database.query(`
+    using upsertPin: Statement<unknown, [string, string, string, Uint8Array, string]> =
+      this.#database.prepare(`
         INSERT INTO peer_pins(
           tenant_id, agent_id, root_key_id, public_key, verification_mode, verified_at
         ) VALUES (?, ?, ?, ?, 'organization', ?)
@@ -212,7 +212,7 @@ export class LocalVaultTrust {
         importedAt,
       );
     }
-    const deleteExpectations: Statement<unknown, [string, string]> = this.#database.query(`
+    using deleteExpectations: Statement<unknown, [string, string]> = this.#database.prepare(`
       DELETE FROM peer_root_expectations WHERE tenant_id = ? AND agent_id = ?
     `);
     for (const binding of policy.bindings) {
