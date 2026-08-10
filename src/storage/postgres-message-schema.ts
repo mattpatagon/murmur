@@ -31,9 +31,19 @@ export async function verifyPostgresMessageSchema(
           ) AS agents_tenant_column,
           EXISTS (
             SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'murmur' AND table_name = 'agents'
+              AND column_name = 'authority'
+          ) AS agents_authority_column,
+          EXISTS (
+            SELECT 1 FROM information_schema.columns
             WHERE table_schema = 'murmur' AND table_name = 'broadcasts'
               AND column_name = 'tenant_id'
           ) AS broadcasts_tenant_column,
+          EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'murmur' AND table_name = 'broadcasts'
+              AND column_name = 'sender_authority'
+          ) AS broadcasts_authority_column,
           EXISTS (
             SELECT 1 FROM information_schema.columns
             WHERE table_schema = 'murmur' AND table_name = 'messages'
@@ -49,6 +59,21 @@ export async function verifyPostgresMessageSchema(
             WHERE table_schema = 'murmur' AND table_name = 'messages'
               AND column_name = 'recipient_generation'
           ) AS messages_recipient_generation_column,
+          EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'murmur' AND table_name = 'messages'
+              AND column_name = 'sender_authority'
+          ) AS messages_authority_column,
+          EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'murmur' AND table_name = 'messages'
+              AND column_name = 'message_kind'
+          ) AS messages_kind_column,
+          EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'murmur' AND table_name = 'messages'
+              AND column_name = 'orchestrator_policy_id'
+          ) AS messages_policy_column,
           EXISTS (
             SELECT 1 FROM information_schema.columns
             WHERE table_schema = 'murmur' AND table_name = 'messages'
@@ -82,10 +107,15 @@ export async function verifyPostgresMessageSchema(
     row.broadcasts_table !== null &&
     row.messages_table !== null &&
     row.agents_tenant_column &&
+    row.agents_authority_column &&
     row.broadcasts_tenant_column &&
+    row.broadcasts_authority_column &&
     row.messages_tenant_column &&
     row.messages_tenant_sequence_column &&
     row.messages_recipient_generation_column &&
+    row.messages_authority_column &&
+    row.messages_kind_column &&
+    row.messages_policy_column &&
     row.repository_column &&
     row.branch_column &&
     row.client_column &&

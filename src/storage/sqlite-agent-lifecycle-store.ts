@@ -27,6 +27,7 @@ import type {
   RegisterAgentCommand,
   RegisterAgentResult,
 } from "../domain/models.js";
+import { type SenderAuthority, SenderAuthoritySchema } from "../domain/orchestration.js";
 import {
   type AgentId,
   type Instant,
@@ -42,21 +43,20 @@ import {
 
 type StoredAgentRow = {
   readonly agent_id: string;
+  readonly authority: SenderAuthority;
   readonly closed_at: string | null;
   readonly close_reason: string | null;
   readonly generation: number;
   readonly metadata_json: string;
 };
-
 function repositoryFromMetadata(metadata: JsonObject): string | null {
   const repository: unknown = metadata["repository"];
   return typeof repository === "string" ? repository : null;
 }
-
 function storedAgent(database: Database, agentId: AgentId): StoredAgentRow | null {
   const raw: unknown = database
     .query<unknown, [string]>(`
-      SELECT agent_id, closed_at, close_reason, generation, metadata_json
+      SELECT agent_id, authority, closed_at, close_reason, generation, metadata_json
       FROM agents WHERE agent_id = ?
     `)
     .get(agentId.value);
@@ -66,8 +66,10 @@ function storedAgent(database: Database, agentId: AgentId): StoredAgentRow | nul
   if (typeof generation !== "number" && typeof generation !== "bigint") {
     throw new Error("Stored agent generation is invalid");
   }
+  const authority: SenderAuthority = SenderAuthoritySchema.parse(Reflect.get(raw, "authority"));
   return {
     agent_id: String(Reflect.get(raw, "agent_id")),
+    authority,
     closed_at:
       Reflect.get(raw, "closed_at") === null ? null : String(Reflect.get(raw, "closed_at")),
     close_reason:
@@ -76,7 +78,6 @@ function storedAgent(database: Database, agentId: AgentId): StoredAgentRow | nul
     metadata_json: String(Reflect.get(raw, "metadata_json")),
   };
 }
-
 function mergeDivergentMetadata(currentJson: string, incoming: JsonObject): JsonObject {
   const parsed: unknown = JSON.parse(currentJson);
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
@@ -88,7 +89,6 @@ function mergeDivergentMetadata(currentJson: string, incoming: JsonObject): Json
     ...(typeof currentRepository === "string" ? { repository: currentRepository } : {}),
   };
 }
-
 function ensureOpenCapacity(database: Database): void {
   const row: unknown = database
     .query<unknown, []>("SELECT COUNT(*) AS count FROM agents WHERE closed_at IS NULL")
@@ -100,7 +100,6 @@ function ensureOpenCapacity(database: Database): void {
   }
   if (Number(count) >= MAX_OPEN_AGENTS) throw new AgentCapacityError();
 }
-
 function ensureRetainedCapacity(database: Database): void {
   const row: unknown = database.query<unknown, []>("SELECT COUNT(*) AS count FROM agents").get();
   if (row === null || typeof row !== "object") throw new Error("Agent count is invalid");
@@ -110,7 +109,6 @@ function ensureRetainedCapacity(database: Database): void {
   }
   if (Number(count) >= MAX_RETAINED_AGENTS) throw new AgentCapacityError();
 }
-
 function supersedeSessions(
   database: Database,
   agentId: AgentId,
@@ -124,7 +122,6 @@ function supersedeSessions(
     `)
     .run(now.toISOString(), agentId.value, generation.value);
 }
-
 export function renewSqliteSession(
   database: Database,
   agentId: AgentId,
@@ -258,18 +255,23 @@ export function registerSqliteAgent(
       ensureRetainedCapacity(database);
       ensureOpenCapacity(database);
       database
-        .query<unknown, [string, string, string, string, string]>(`
-          INSERT INTO agents(agent_id, display_name, metadata_json, created_at, last_seen_at)
-          VALUES (?, ?, ?, ?, ?)
+        .query<unknown, [string, string, string, string, string, string]>(`
+          INSERT INTO agents(
+            agent_id, authority, display_name, metadata_json, created_at, last_seen_at
+          ) VALUES (?, ?, ?, ?, ?, ?)
         `)
         .run(
           command.agentId.value,
+          command.authority ?? "peer",
           command.displayName.value,
           JSON.stringify(metadata),
           now.toISOString(),
           now.toISOString(),
         );
     } else {
+      if (existing.authority !== (command.authority ?? "peer")) {
+        throw new Error("The agent ID is reserved for a different authority");
+      }
       const currentMetadata: JsonObject = JsonObjectSchema.parse(
         JSON.parse(existing.metadata_json),
       );
@@ -335,7 +337,6 @@ export function registerSqliteAgent(
     throw error;
   }
 }
-
 export function listSqliteAgents(
   database: Database,
   query: ListAgentsQuery,
@@ -399,7 +400,6 @@ export function listSqliteAgents(
   }
   return { agents, nextCursor };
 }
-
 export function endSqliteSession(
   database: Database,
   command: EndSessionCommand,
@@ -445,7 +445,6 @@ export function endSqliteSession(
     throw error;
   }
 }
-
 export function closeSqliteAgent(
   database: Database,
   command: CloseAgentCommand,

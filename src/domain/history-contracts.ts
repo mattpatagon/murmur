@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { AgentGeneration } from "./lifecycle-values.js";
 import type { GetMessagesQuery, Message } from "./models.js";
+import { MessageKindSchema, SenderAuthoritySchema } from "./orchestration.js";
 import { AgentId, Sequence, ThreadId } from "./value-objects.js";
 import { MessageContextDtoSchema, type MessageContextDto } from "./contracts.js";
 
@@ -46,11 +47,14 @@ export type HistoryMessageDto = {
   readonly created_at: string;
   readonly expires_at: string;
   readonly message_id: string;
+  readonly message_kind: "message" | "orchestration_request";
+  readonly orchestrator_policy_id: string | null;
   readonly read_at: string | null;
   readonly recipient_generation: number;
   readonly recipient_id: string;
   readonly sender_generation: number;
   readonly sender_id: string;
+  readonly sender_authority: "orchestrator" | "peer";
   readonly sequence: number;
   readonly thread_id: string;
 };
@@ -61,11 +65,14 @@ export const HistoryMessageDtoSchema: z.ZodType<HistoryMessageDto> = z.strictObj
   created_at: InstantTextSchema,
   expires_at: InstantTextSchema,
   message_id: z.string().uuid(),
+  message_kind: MessageKindSchema,
+  orchestrator_policy_id: z.string().uuid().nullable(),
   read_at: InstantTextSchema.nullable(),
   recipient_generation: GenerationNumberSchema,
   recipient_id: AgentIdTextSchema,
   sender_generation: GenerationNumberSchema,
   sender_id: AgentIdTextSchema,
+  sender_authority: SenderAuthoritySchema,
   sequence: SequenceNumberSchema,
   thread_id: z.string().min(1).max(200),
 });
@@ -82,11 +89,15 @@ export function toHistoryMessageDto(message: Message): HistoryMessageDto {
     created_at: message.createdAt.toISOString(),
     expires_at: message.expiresAt.toISOString(),
     message_id: message.messageId.value,
+    message_kind: message.messageKind,
+    orchestrator_policy_id:
+      message.orchestratorPolicyId === null ? null : message.orchestratorPolicyId.value,
     read_at: message.readAt === null ? null : message.readAt.toISOString(),
     recipient_generation: message.recipientGeneration.value,
     recipient_id: message.recipientId.value,
     sender_generation: message.senderGeneration.value,
     sender_id: message.senderId.value,
+    sender_authority: message.senderAuthority,
     sequence: message.sequence.value,
     thread_id: message.threadId.value,
   };

@@ -3,9 +3,10 @@ import { z } from "zod";
 
 import { broadcastRequestMatches } from "../domain/broadcasts.js";
 import { RETENTION_DAYS } from "../domain/contracts.js";
-import { IdempotencyConflictError } from "../domain/errors.js";
+import { AgentAuthorityError, IdempotencyConflictError } from "../domain/errors.js";
 import { SessionKey } from "../domain/lifecycle-values.js";
 import type { Agent, BroadcastMessageCommand, BroadcastMessageResult } from "../domain/models.js";
+import type { SenderAuthority } from "../domain/orchestration.js";
 import {
   BroadcastId,
   Instant,
@@ -77,6 +78,7 @@ function existingBroadcastResult(
       clientName: row.client_name,
       content: row.content,
       repositoryName: row.repository_name,
+      senderAuthority: row.sender_authority,
       threadId: row.thread_id,
     },
     command,
@@ -161,13 +163,15 @@ function insertRecipients(
       string,
       string,
       string,
+      string,
     ]
   > = database.query(`
     INSERT INTO messages(
       message_id, thread_id, sender_id, recipient_id,
       sender_generation, recipient_generation, broadcast_id, content,
+      sender_authority,
       repository_name, branch_name, client_name, created_at, expires_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   for (const recipient of recipients) {
     insert.run(
@@ -179,6 +183,7 @@ function insertRecipients(
       recipient.generation,
       broadcastId.value,
       command.content.value,
+      sender.authority,
       command.repositoryName.value,
       command.branchName.value,
       command.client.value,
@@ -210,6 +215,8 @@ export function broadcastSqliteMessage(
       now,
       true,
     );
+    const senderAuthority: SenderAuthority = command.senderAuthority ?? "peer";
+    if (sender.authority !== senderAuthority) throw new AgentAuthorityError();
     const recipients: readonly RecipientRow[] = activeRecipients(database, command, now);
     const broadcastId: BroadcastId = BroadcastId.generate();
     const threadId: ThreadId = command.threadId === null ? ThreadId.generate() : command.threadId;
@@ -231,6 +238,7 @@ export function broadcastSqliteMessage(
           string,
           string,
           string,
+          string,
           string | null,
           string | null,
           string | null,
@@ -239,17 +247,18 @@ export function broadcastSqliteMessage(
         ]
       >(`
         INSERT INTO broadcasts(
-          broadcast_id, thread_id, sender_id, sender_generation, content,
+          broadcast_id, thread_id, sender_id, sender_generation, sender_authority, content,
           repository_name, branch_name, client_name,
           audience_repository_name, audience_machine_name, idempotency_key,
           created_at, expires_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .run(
         broadcastId.value,
         threadId.value,
         command.senderId.value,
         sender.generation.value,
+        senderAuthority,
         command.content.value,
         command.repositoryName.value,
         command.branchName.value,

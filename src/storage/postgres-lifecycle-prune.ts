@@ -68,6 +68,14 @@ export async function prunePostgresLifecycle(
           AND session.ended_at IS NULL
           AND session.lease_expires_at > ${timestamp}::timestamptz
       )
+      AND NOT EXISTS (
+        SELECT 1 FROM murmur.access_tokens AS token
+        WHERE token.tenant_id = agent.tenant_id
+          AND token.token_role = 'orchestrator'
+          AND token.orchestrator_agent_id = agent.agent_id
+          AND token.revoked_at IS NULL
+          AND (token.expires_at IS NULL OR token.expires_at > ${timestamp}::timestamptz)
+      )
     ORDER BY agent.agent_id ASC
     LIMIT 1000
   `,
@@ -88,6 +96,14 @@ export async function prunePostgresLifecycle(
             AND session.generation = agent.generation
             AND session.ended_at IS NULL
             AND session.lease_expires_at > ${timestamp}::timestamptz
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM murmur.access_tokens AS token
+          WHERE token.tenant_id = agent.tenant_id
+            AND token.token_role = 'orchestrator'
+            AND token.orchestrator_agent_id = agent.agent_id
+            AND token.revoked_at IS NULL
+            AND (token.expires_at IS NULL OR token.expires_at > ${timestamp}::timestamptz)
         )
       RETURNING 1
     ) SELECT COUNT(*)::int AS count FROM updated
@@ -136,6 +152,14 @@ export async function prunePostgresLifecycle(
         SELECT 1 FROM murmur.notices AS notice
         WHERE notice.tenant_id = agent.tenant_id AND notice.withdrawn_by_id = agent.agent_id
       )
+      AND NOT EXISTS (
+        SELECT 1 FROM murmur.access_tokens AS token
+        WHERE token.tenant_id = agent.tenant_id
+          AND token.token_role = 'orchestrator'
+          AND token.orchestrator_agent_id = agent.agent_id
+          AND token.revoked_at IS NULL
+          AND (token.expires_at IS NULL OR token.expires_at > ${timestamp}::timestamptz)
+      )
     ORDER BY agent.agent_id ASC
     LIMIT 1000
   `;
@@ -167,6 +191,14 @@ export async function prunePostgresLifecycle(
         AND NOT EXISTS (
           SELECT 1 FROM murmur.notices AS notice
           WHERE notice.tenant_id = agent.tenant_id AND notice.withdrawn_by_id = agent.agent_id
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM murmur.access_tokens AS token
+          WHERE token.tenant_id = agent.tenant_id
+            AND token.token_role = 'orchestrator'
+            AND token.orchestrator_agent_id = agent.agent_id
+            AND token.revoked_at IS NULL
+            AND (token.expires_at IS NULL OR token.expires_at > ${timestamp}::timestamptz)
         )
       RETURNING 1
     ) SELECT COUNT(*)::int AS count FROM deleted

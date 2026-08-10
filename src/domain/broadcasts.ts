@@ -7,6 +7,7 @@ export type StoredBroadcastRequest = {
   readonly clientName: string;
   readonly content: string;
   readonly repositoryName: string;
+  readonly senderAuthority: string;
   readonly threadId: string;
 };
 
@@ -24,6 +25,7 @@ export function broadcastRequestMatches(
   stored: StoredBroadcastRequest,
   command: BroadcastMessageCommand,
 ): boolean {
+  const requestedAuthority: string = command.senderAuthority ?? "peer";
   const sameThread: boolean =
     command.threadId === null || stored.threadId === command.threadId.value;
   return (
@@ -33,6 +35,7 @@ export function broadcastRequestMatches(
     nullableValueEquals(stored.branchName, command.branchName) &&
     nullableValueEquals(stored.clientName, command.client) &&
     nullableValueEquals(stored.repositoryName, command.repositoryName) &&
+    stored.senderAuthority === requestedAuthority &&
     sameThread
   );
 }

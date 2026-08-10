@@ -103,7 +103,7 @@ if [ -z "$second_tenant_id" ]; then
   echo 'Hosted verification did not create a second tenant for direct RLS probes' >&2
   exit 1
 fi
-for tenant_table in agents agent_sessions messages broadcasts access_tokens notices; do
+for tenant_table in agents agent_sessions messages broadcasts access_tokens notices orchestrator_policies; do
   expected_rows="$(psql "$admin_url" --tuples-only --no-align --quiet \
     --command "select count(*) from murmur.$tenant_table where tenant_id = '$founding_tenant_id'::uuid")"
   visible_rows="$(psql "$app_url" --tuples-only --no-align --quiet \
@@ -132,7 +132,87 @@ if psql "$app_url" --set ON_ERROR_STOP=1 \
   echo 'murmur_app unexpectedly wrote an agent outside its tenant context' >&2
   exit 1
 fi
+
+provenance_tenant_id="$(psql "$admin_url" --tuples-only --no-align --quiet \
+  --command "select message.tenant_id
+    from murmur.messages as message
+    join murmur.agents as agent
+      on agent.tenant_id = message.tenant_id and agent.agent_id = message.sender_id
+    where agent.authority = 'peer'
+    order by message.tenant_id limit 1")"
+if [ -z "$provenance_tenant_id" ]; then
+  echo 'Hosted verification did not create a peer agent for provenance probes' >&2
+  exit 1
+fi
+if psql "$app_url" --set ON_ERROR_STOP=1 \
+  --command "begin;
+    set local murmur.tenant_id = '$provenance_tenant_id';
+    update murmur.agents
+    set authority = 'orchestrator'
+    where tenant_id = '$provenance_tenant_id'::uuid
+      and agent_id = (
+        select agent_id from murmur.agents
+        where tenant_id = '$provenance_tenant_id'::uuid and authority = 'peer'
+        order by agent_id limit 1
+      );
+    rollback;" >/dev/null 2>&1; then
+  echo 'murmur_app unexpectedly changed stored agent authority' >&2
+  exit 1
+fi
+if psql "$app_url" --set ON_ERROR_STOP=1 \
+  --command "begin;
+    set local murmur.tenant_id = '$provenance_tenant_id';
+    update murmur.messages
+    set sender_authority = 'orchestrator'
+    where tenant_id = '$provenance_tenant_id'::uuid;
+    rollback;" >/dev/null 2>&1; then
+  echo 'murmur_app unexpectedly changed stored message provenance' >&2
+  exit 1
+fi
+if psql "$app_url" --set ON_ERROR_STOP=1 \
+  --command "begin;
+    set local murmur.tenant_id = '$provenance_tenant_id';
+    insert into murmur.messages(
+      tenant_id, tenant_sequence, message_id, thread_id, sender_id, recipient_id,
+      content, created_at, expires_at, sender_authority, message_kind
+    )
+    select
+      '$provenance_tenant_id'::uuid, 999998, pg_catalog.gen_random_uuid(),
+      'ci-provenance-spoof', agent_id, agent_id, 'spoofed authority',
+      pg_catalog.statement_timestamp(),
+      pg_catalog.statement_timestamp() + interval '30 days',
+      'orchestrator', 'message'
+    from murmur.agents
+    where tenant_id = '$provenance_tenant_id'::uuid and authority = 'peer'
+    order by agent_id
+    limit 1;
+    rollback;" >/dev/null 2>&1; then
+  echo 'murmur_app unexpectedly inserted spoofed message authority' >&2
+  exit 1
+fi
+if psql "$app_url" --set ON_ERROR_STOP=1 \
+  --command "begin;
+    set local murmur.tenant_id = '$provenance_tenant_id';
+    insert into murmur.broadcasts(
+      tenant_id, broadcast_id, thread_id, sender_id, content,
+      repository_name, branch_name, client_name, created_at, expires_at,
+      sender_authority
+    )
+    select
+      '$provenance_tenant_id'::uuid, pg_catalog.gen_random_uuid(),
+      'ci-broadcast-spoof', agent_id, 'spoofed broadcast authority',
+      'ci/provenance', 'ci', 'codex', pg_catalog.statement_timestamp(),
+      pg_catalog.statement_timestamp() + interval '30 days', 'orchestrator'
+    from murmur.agents
+    where tenant_id = '$provenance_tenant_id'::uuid and authority = 'peer'
+    order by agent_id
+    limit 1;
+    rollback;" >/dev/null 2>&1; then
+  echo 'murmur_app unexpectedly inserted spoofed broadcast authority' >&2
+  exit 1
+fi
 unset founding_tenant_id second_tenant_id tenant_table expected_rows visible_rows no_context_rows
+unset provenance_tenant_id
 
 assigned_sequence="$(psql "$app_url" \
   --set ON_ERROR_STOP=1 --tuples-only --no-align --quiet \

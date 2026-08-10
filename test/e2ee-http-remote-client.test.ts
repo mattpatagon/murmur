@@ -107,6 +107,7 @@ test("validates remote outputs and applies absolute request deadlines", async ()
 test("forwards metadata-only agent lifecycle operations through the encrypted endpoint", async (): Promise<void> => {
   const agent: AgentDto = {
     agent_id: "alice",
+    authority: "peer",
     closed_at: null,
     close_reason: null,
     created_at: "2026-08-10T20:00:00.000Z",

@@ -1,10 +1,11 @@
 import type { Sql } from "postgres";
 import { z } from "zod";
 
-import { TenantId } from "../domain/value-objects.js";
+import { PersonalId } from "../domain/orchestration.js";
+import { AgentId, RepositoryName, TenantId } from "../domain/value-objects.js";
 import { logSafeError } from "../safe-errors.js";
 import type { CredentialAdmission, HostedPrincipal } from "./control-plane-contracts.js";
-import { type AuthRow, AuthRowSchema } from "./control-plane-rows.js";
+import { type AuthRowV2, AuthRowV2Schema } from "./control-plane-rows.js";
 import {
   credentialAdmissionKey,
   type DatabaseCredentialHint,
@@ -93,28 +94,51 @@ export class HostedAuthenticator {
     const credentialHash: Buffer = hashTokenSecret(token);
     const rawRows: unknown = await this.database`
       SELECT principal_kind, token_id::text AS token_id, key_id,
-        tenant_id::text AS tenant_id, token_role
-      FROM murmur.authenticate_principal(${credentialHash})
+        tenant_id::text AS tenant_id, token_role,
+        personal_id::text AS personal_id, repository_name, orchestrator_agent_id
+      FROM murmur.authenticate_principal_v2(${credentialHash})
     `;
-    const row: AuthRow | undefined = z.array(AuthRowSchema).parse(rawRows)[0];
+    const row: AuthRowV2 | undefined = z.array(AuthRowV2Schema).parse(rawRows)[0];
     if (row === undefined) return null;
     if (row.principal_kind === "bootstrap") {
-      if (row.tenant_id !== null || row.token_role !== null) {
+      if (
+        row.tenant_id !== null ||
+        row.token_role !== null ||
+        row.personal_id !== null ||
+        row.repository_name !== null ||
+        row.orchestrator_agent_id !== null
+      ) {
         throw new Error("Bootstrap authentication returned tenant fields");
       }
       return { keyId: row.key_id, kind: "bootstrap", tokenId: row.token_id };
     }
     if (row.principal_kind === "operator") {
-      if (row.tenant_id !== null || row.token_role !== null) {
+      if (
+        row.tenant_id !== null ||
+        row.token_role !== null ||
+        row.personal_id !== null ||
+        row.repository_name !== null ||
+        row.orchestrator_agent_id !== null
+      ) {
         throw new Error("Operator authentication returned tenant fields");
       }
       return { credentialHash, keyId: row.key_id, kind: "operator", tokenId: row.token_id };
     }
-    if (row.tenant_id === null || row.token_role === null) {
+    if (row.tenant_id === null || row.token_role === null || row.personal_id === null) {
       throw new Error("Tenant authentication omitted tenant fields");
     }
+    if (
+      (row.token_role === "orchestrator" && row.orchestrator_agent_id === null) ||
+      (row.token_role !== "orchestrator" && row.orchestrator_agent_id !== null)
+    ) {
+      throw new Error("Tenant authentication returned an invalid agent binding");
+    }
     return {
+      agentId: row.orchestrator_agent_id === null ? null : AgentId.parse(row.orchestrator_agent_id),
       kind: "tenant",
+      personalId: PersonalId.parse(row.personal_id),
+      repositoryName:
+        row.repository_name === null ? null : RepositoryName.parse(row.repository_name),
       role: row.token_role,
       tenantId: TenantId.parse(row.tenant_id),
       tokenId: row.token_id,

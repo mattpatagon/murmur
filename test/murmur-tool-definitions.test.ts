@@ -11,7 +11,8 @@ import {
   SendMessageInputSchema,
 } from "../src/domain/contracts.js";
 import { PostNoticeInputSchema } from "../src/domain/notice-contracts.js";
-import { AgentId, TenantId } from "../src/domain/value-objects.js";
+import { PersonalId } from "../src/domain/orchestration.js";
+import { AgentId, RepositoryName, TenantId } from "../src/domain/value-objects.js";
 import type { HostedPrincipal } from "../src/hosted/control-plane.js";
 import { parseE2eeEntitlementRecord, tenantDataToolNames } from "../src/hosted/e2ee-entitlement.js";
 import { type ToolExposure, toolsForPrincipal } from "../src/mcp/murmur-tool-definitions.js";
@@ -38,6 +39,14 @@ const TENANT_ADMIN_TOOLS: readonly string[] = [
   "list_access_tokens",
   "revoke_access_token",
 ];
+const WORKER_ORCHESTRATION_TOOLS: readonly string[] = ["ask_orchestrator", "get_orchestrator"];
+const ADMIN_ORCHESTRATION_TOOLS: readonly string[] = [
+  "clear_orchestrator_policy",
+  "create_orchestrator_token",
+  "list_orchestrator_policies",
+  "set_orchestrator_policy",
+];
+const BOSS_ORCHESTRATION_TOOLS: readonly string[] = ["get_delegation", "get_orchestrator"];
 const OPERATOR_TOOLS: readonly string[] = [
   "adopt_legacy_founding_token",
   "create_operator_token",
@@ -111,6 +120,45 @@ describe("MCP role-to-tool exposure", (): void => {
     expect(names({ ...exposure(principal), e2eeEntitlement: entitlement })).toContain(
       "get_encrypted_messages",
     );
+  });
+
+  test("strict multi-tenant sessions expose orchestration tools by authenticated role", (): void => {
+    const personalId: PersonalId = PersonalId.parse("20000000-0000-4000-8000-000000000001");
+    const tenantId: TenantId = TenantId.parse("00000000-0000-4000-8000-000000000001");
+    const agent: HostedPrincipal = {
+      kind: "tenant",
+      personalId,
+      repositoryName: RepositoryName.parse("mattpatagon/murmur"),
+      role: "agent",
+      tenantId,
+      tokenId: "10000000-0000-4000-8000-000000000006",
+    };
+    const admin: HostedPrincipal = {
+      ...agent,
+      role: "tenant_admin",
+      tokenId: "10000000-0000-4000-8000-000000000007",
+    };
+    const boss: HostedPrincipal = {
+      ...agent,
+      agentId: AgentId.parse("boss-agent"),
+      role: "orchestrator",
+      tokenId: "10000000-0000-4000-8000-000000000008",
+    };
+    expect(names({ ...exposure(agent), orchestrationEnabled: true })).toEqual(
+      [...DATA_TOOLS, ...WORKER_ORCHESTRATION_TOOLS].sort(),
+    );
+    expect(names({ ...exposure(admin), orchestrationEnabled: true })).toEqual(
+      [
+        ...DATA_TOOLS,
+        ...WORKER_ORCHESTRATION_TOOLS,
+        ...TENANT_ADMIN_TOOLS,
+        ...ADMIN_ORCHESTRATION_TOOLS,
+      ].sort(),
+    );
+    expect(names({ ...exposure(boss), orchestrationEnabled: true })).toEqual(
+      [...DATA_TOOLS, ...BOSS_ORCHESTRATION_TOOLS].sort(),
+    );
+    expect(names(exposure(boss))).toEqual([]);
   });
 
   test("bootstrap sessions expose one tool only while the bootstrap proof exists", (): void => {
@@ -217,5 +265,34 @@ describe("MCP role-to-tool exposure", (): void => {
       expect(annotations.readOnlyHint).toBe(false);
       expect(annotations.idempotentHint).toBe(false);
     }
+  });
+
+  test("advertises only retry-safe orchestration mutations as idempotent", (): void => {
+    const tenantId: TenantId = TenantId.parse("00000000-0000-4000-8000-000000000001");
+    const principal: HostedPrincipal = {
+      kind: "tenant",
+      personalId: PersonalId.parse("20000000-0000-4000-8000-000000000001"),
+      role: "tenant_admin",
+      tenantId,
+      tokenId: "10000000-0000-4000-8000-000000000009",
+    };
+    const tools: Tool[] = toolsForPrincipal({
+      ...exposure(principal),
+      orchestrationEnabled: true,
+    });
+    const setPolicy: Tool | undefined = tools.find(
+      (tool: Tool): boolean => tool.name === "set_orchestrator_policy",
+    );
+    const ask: Tool | undefined = tools.find(
+      (tool: Tool): boolean => tool.name === "ask_orchestrator",
+    );
+    if (setPolicy === undefined || setPolicy.annotations === undefined) {
+      throw new Error("Expected set policy annotations");
+    }
+    if (ask === undefined || ask.annotations === undefined) {
+      throw new Error("Expected ask orchestrator annotations");
+    }
+    expect(setPolicy.annotations.idempotentHint).toBe(false);
+    expect(ask.annotations.idempotentHint).toBe(true);
   });
 });

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
-import type { Instant, TenantId } from "../domain/value-objects.js";
+import { PersonalId } from "../domain/orchestration.js";
+import type { AgentId, Instant, RepositoryName, TenantId } from "../domain/value-objects.js";
 import type {
   IssuedOperatorToken,
   IssuedToken,
@@ -33,14 +34,21 @@ export function issueToken(
   role: TenantTokenRole,
   name: string,
   expiresAt: Instant | null,
+  personalId: PersonalId | null,
+  repositoryName: RepositoryName | null,
+  agentId: AgentId | null,
 ): IssuedTokenMaterial {
   const issued: ReturnType<typeof issueSecret> = issueSecret("mur");
+  const selectedPersonalId: PersonalId = personalId ?? PersonalId.parse(issued.tokenId);
   return {
     hash: issued.hash,
     token: {
+      agentId,
       expiresAt,
       keyId: issued.keyId,
       name,
+      personalId: selectedPersonalId,
+      repositoryName,
       role,
       secret: issued.secret,
       tenantId,

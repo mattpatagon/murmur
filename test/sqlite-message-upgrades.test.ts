@@ -174,7 +174,7 @@ test("upgrades a SQLite v2 message while preserving repository context", (): voi
   }
 });
 
-test("upgrades a populated SQLite v4 agent with a live compatibility lease", (): void => {
+test("upgrades populated SQLite v4 lifecycle and provenance rows", (): void => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-store-v4-"));
   const databasePath: string = join(directory, "messages.db");
   const legacyDatabase: Database = new Database(databasePath, { create: true });
@@ -219,10 +219,21 @@ test("upgrades a populated SQLite v4 agent with a live compatibility lease", ():
       UNIQUE(sender_id, idempotency_key)
     );
     INSERT INTO agents(agent_id, display_name, metadata_json, created_at, last_seen_at)
-    VALUES (
-      'legacy-active', 'Legacy active', '{"repository":"mattpatagon/murmur"}',
-      strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day'),
-      strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 minutes')
+      VALUES
+        (
+          'legacy-active', 'Legacy active', '{"repository":"mattpatagon/murmur"}',
+          strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day'),
+          strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 minutes')
+        ),
+        ('alice', 'Alice', '{}', '2026-08-04T11:00:00.000Z', '2026-08-04T11:00:00.000Z'),
+        ('bob', 'Bob', '{}', '2026-08-04T11:00:00.000Z', '2026-08-04T11:00:00.000Z');
+    INSERT INTO messages(
+      message_id, thread_id, sender_id, recipient_id, content, repository_name,
+      branch_name, client_name, idempotency_key, created_at, expires_at, read_at
+    ) VALUES (
+      '00000000-0000-4000-8000-000000000004', 'legacy-v4-thread', 'alice', 'bob',
+      'legacy v4 message', 'mattpatagon/murmur', 'feature/legacy', 'codex', NULL,
+      '2026-08-04T11:45:00.000Z', '2026-09-03T11:45:00.000Z', NULL
     );
     PRAGMA user_version = 4;
   `);
@@ -235,6 +246,21 @@ test("upgrades a populated SQLite v4 agent with a live compatibility lease", ():
     expect(agent.generation.value).toBe(1);
     expect(agent.state).toBe("active");
     expect(agent.liveSessionCount).toBe(1);
+    const alice: Agent | null = store.getAgent(AgentId.parse("alice"));
+    if (alice === null) throw new Error("Expected migrated agent");
+    expect(alice.authority).toBe("peer");
+    const messages: readonly Message[] = store.getMessages({
+      afterSequence: Sequence.zero(),
+      agentId: AgentId.parse("bob"),
+      limit: 100,
+      threadId: null,
+      unreadOnly: false,
+    });
+    const message: Message | undefined = messages[0];
+    if (message === undefined) throw new Error("Expected migrated message");
+    expect(message.senderAuthority).toBe("peer");
+    expect(message.messageKind).toBe("message");
+    expect(message.orchestratorPolicyId).toBeNull();
   } finally {
     store.close();
     rmSync(directory, { force: true, recursive: true });
@@ -261,6 +287,11 @@ test("upgrades a populated SQLite v8 database with bounded E2E tables and usage"
     DROP TABLE e2ee_claims;
     DROP TABLE e2ee_prekeys;
     DROP TABLE e2ee_key_bundles;
+    ALTER TABLE messages DROP COLUMN orchestrator_policy_id;
+    ALTER TABLE messages DROP COLUMN message_kind;
+    ALTER TABLE messages DROP COLUMN sender_authority;
+    ALTER TABLE broadcasts DROP COLUMN sender_authority;
+    ALTER TABLE agents DROP COLUMN authority;
     PRAGMA user_version = 8;
   `);
   legacyDatabase.close();

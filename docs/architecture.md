@@ -56,6 +56,12 @@ The client cannot supply a tenant ID, principal role, server request ID, trace p
 identifier for audit correlation. Each request reauthenticates so revocation and suspension apply
 immediately; matching live sessions are also closed proactively.
 
+Strict multi-tenant authentication also derives a stable personal identity, optional
+credential-bound repository, and optional orchestrator agent binding. Those authenticated values
+select an orchestrator policy; request headers and MCP arguments cannot select another policy.
+Local, legacy, and hybrid modes omit the orchestration surface because they have no equivalent
+human-grant boundary.
+
 Local stdio skips hosted authentication and HTTP admission but uses the same MCP application and
 MessageStore contract. Context is detected from Git or explicit environment values. Context a
 server cannot determine must be supplied by the client before a send or broadcast is accepted.
@@ -84,10 +90,22 @@ stable creator identity may withdraw it. Notice reads use stable keyset cursors 
 default session. Creator, resolver, and withdrawer references preserve identity generation lineage
 until the notice leaves its audit window.
 
+PostgreSQL ties each persisted sender-authority value to the registered tenant agent through a
+composite foreign key, so broadcast fan-out validates authority without a row-trigger lookup for
+every delivery.
+
 SQLite serializes local transactions, uses WAL mode, and polls an inbox version on a bounded
 interval. PostgreSQL uses transactions, advisory locks where required for recipient ordering,
 tenant-qualified constraints, and `LISTEN/NOTIFY`. Notifications contain validated minimal metadata;
 message content remains in the database.
+
+Messages persist write-once provenance: authenticated sender authority, ordinary-versus-routed
+message kind, and the server-selected policy ID for an orchestration request. A routed ask resolves
+the effective personal/organization and repository/global policy and inserts the durable request in
+one transaction. Duplicate lookup precedes current-policy resolution, preserving the first stored
+message and policy identifier after clear, revocation, or rotation. Private human delegation text
+is stored separately under forced RLS and is returned only to tenant administrators or the exact
+assigned orchestrator credential.
 
 PostgreSQL production has separate migration and runtime credentials. The runtime role is a
 non-owner, non-superuser without `BYPASSRLS`; forced RLS applies even if application authorization

@@ -122,9 +122,10 @@ test("E2E hooks request only a content-free inbox summary", async (): Promise<vo
       agentGeneration: 1,
       inboxVersion: 42,
       messageCount: 3,
+      orchestration: { kind: "unavailable" },
       senderIds: [],
     });
-    expect(tools).toEqual(["register_agent", "get_inbox_summary"]);
+    expect(tools).toEqual(["register_agent", "get_orchestrator", "get_inbox_summary"]);
     expect(requests.join("\n")).not.toContain("get_messages");
     expect(requests.join("\n")).not.toContain("content");
     expect(deleteCount).toBe(1);

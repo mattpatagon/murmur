@@ -351,6 +351,16 @@ export function migrateSqliteDatabase(database: Database): void {
           retained_message_count INTEGER NOT NULL DEFAULT 0 CHECK(retained_message_count >= 0)
         );
         INSERT INTO e2ee_usage(singleton) VALUES (1);
+        ALTER TABLE agents ADD COLUMN authority TEXT NOT NULL DEFAULT 'peer'
+          CHECK(authority = 'peer');
+        ALTER TABLE broadcasts ADD COLUMN sender_authority TEXT NOT NULL DEFAULT 'peer'
+          CHECK(sender_authority = 'peer');
+        ALTER TABLE messages ADD COLUMN sender_authority TEXT NOT NULL DEFAULT 'peer'
+          CHECK(sender_authority = 'peer');
+        ALTER TABLE messages ADD COLUMN message_kind TEXT NOT NULL DEFAULT 'message'
+          CHECK(message_kind = 'message');
+        ALTER TABLE messages ADD COLUMN orchestrator_policy_id TEXT
+          CHECK(orchestrator_policy_id IS NULL);
         PRAGMA user_version = 9;
       `);
     }

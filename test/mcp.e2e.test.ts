@@ -262,7 +262,7 @@ test("a broadcast fans out to every matching MCP inbox and pushes each update", 
     ]);
     rmSync(directory, { force: true, recursive: true });
   }
-});
+}, 10_000);
 
 test("generic MCP clients must provide complete message context", async (): Promise<void> => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-generic-mcp-"));

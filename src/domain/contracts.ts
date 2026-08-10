@@ -2,13 +2,14 @@ import { z } from "zod";
 
 import { AgentGeneration, SessionKey, SessionKeyInputSchema } from "./lifecycle-values.js";
 import type { Message } from "./models.js";
+import { MessageKindSchema, SenderAuthoritySchema } from "./orchestration.js";
 import {
   AgentClient,
   BranchName,
   IdempotencyKey,
+  MachineName,
   MessageContent,
   MessageId,
-  MachineName,
   RepositoryName,
   Sequence,
   ThreadId,
@@ -80,9 +81,12 @@ export type MessageDto = {
   readonly created_at: string;
   readonly expires_at: string;
   readonly message_id: string;
+  readonly message_kind: "message" | "orchestration_request";
+  readonly orchestrator_policy_id: string | null;
   readonly read_at: string | null;
   readonly recipient_id: string;
   readonly sender_id: string;
+  readonly sender_authority: "orchestrator" | "peer";
   readonly sequence: number;
   readonly thread_id: string;
 };
@@ -110,9 +114,12 @@ export const MessageDtoSchema: z.ZodType<MessageDto> = z.strictObject({
   created_at: InstantTextSchema,
   expires_at: InstantTextSchema,
   message_id: MessageIdTextSchema,
+  message_kind: MessageKindSchema,
+  orchestrator_policy_id: z.string().uuid().nullable(),
   read_at: InstantTextSchema.nullable(),
   recipient_id: AgentIdTextSchema,
   sender_id: AgentIdTextSchema,
+  sender_authority: SenderAuthoritySchema,
   sequence: SequenceNumberSchema,
   thread_id: ThreadIdTextSchema,
 });
@@ -130,9 +137,13 @@ export function toMessageDto(message: Message): MessageDto {
     created_at: message.createdAt.toISOString(),
     expires_at: message.expiresAt.toISOString(),
     message_id: message.messageId.value,
+    message_kind: message.messageKind,
+    orchestrator_policy_id:
+      message.orchestratorPolicyId === null ? null : message.orchestratorPolicyId.value,
     read_at: readAt,
     recipient_id: message.recipientId.value,
     sender_id: message.senderId.value,
+    sender_authority: message.senderAuthority,
     sequence: message.sequence.value,
     thread_id: message.threadId.value,
   };

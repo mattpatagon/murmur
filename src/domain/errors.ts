@@ -47,6 +47,20 @@ export class NoticeOwnershipError extends Error {
   }
 }
 
+export class AgentAuthorityError extends Error {
+  public constructor() {
+    super("The authenticated authority cannot act as this agent");
+    this.name = "AgentAuthorityError";
+  }
+}
+
+export class AgentAuthorityConflictError extends Error {
+  public constructor() {
+    super("The agent ID is reserved for a different authority");
+    this.name = "AgentAuthorityConflictError";
+  }
+}
+
 export class IdempotencyConflictError extends Error {
   public constructor(key: string) {
     super(`Idempotency key '${key}' was already used for a different message`);

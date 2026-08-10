@@ -81,6 +81,7 @@ export async function responsePayload(response: Response): Promise<unknown> {
 export function initializeRequest(
   id: number,
   name: string = "remote-test",
+  version: string = "1.0.0",
 ): Record<string, unknown> {
   return {
     id,
@@ -88,7 +89,7 @@ export function initializeRequest(
     method: "initialize",
     params: {
       capabilities: {},
-      clientInfo: { name, version: "1.0.0" },
+      clientInfo: { name, version },
       protocolVersion: LATEST_PROTOCOL_VERSION,
     },
   };
@@ -222,8 +223,12 @@ export class TenantBurstAuthenticator extends HostedAuthenticator {
   }
 }
 
-export async function initializeSession(url: URL): Promise<string> {
-  const response: Response = await postJson(url, initializeRequest(1), null);
+export async function initializeSession(
+  url: URL,
+  name: string = "remote-test",
+  version: string = "1.0.0",
+): Promise<string> {
+  const response: Response = await postJson(url, initializeRequest(1, name, version), null);
   expect(response.status).toBe(200);
   JsonRpcEnvelopeSchema.parse(await responsePayload(response));
   const sessionId: string | null = response.headers.get("mcp-session-id");

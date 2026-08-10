@@ -1,17 +1,15 @@
 import { z } from "zod";
-
-import { OperatorTokenSecretSchema, TenantTokenSecretSchema } from "./token-secret.js";
-
 import type {
   AdminAuditEvent,
-  IssuedToken,
   IssuedOperatorToken,
+  IssuedToken,
   OperatorTokenSummary,
   TenantStatus,
   TenantSummary,
   TenantTokenRole,
   TokenSummary,
 } from "./control-plane.js";
+import { OperatorTokenSecretSchema, TenantTokenSecretSchema } from "./token-secret.js";
 
 const InstantSchema: z.ZodISODateTime = z.iso.datetime({ offset: true });
 const TenantIdSchema: z.ZodString = z.string().uuid();
@@ -29,6 +27,11 @@ const TenantSlugSchema: z.ZodString = z
 const TenantDisplayNameSchema: z.ZodString = z.string().trim().min(1).max(200);
 const TokenRoleSchema: z.ZodEnum<{
   agent: "agent";
+  orchestrator: "orchestrator";
+  tenant_admin: "tenant_admin";
+}> = z.enum(["agent", "tenant_admin", "orchestrator"]);
+const CreatableTokenRoleSchema: z.ZodEnum<{
+  agent: "agent";
   tenant_admin: "tenant_admin";
 }> = z.enum(["agent", "tenant_admin"]);
 const TenantStatusSchema: z.ZodEnum<{
@@ -39,7 +42,9 @@ const TenantStatusSchema: z.ZodEnum<{
 export type CreateTokenInput = {
   readonly expires_at?: string | undefined;
   readonly name: string;
-  readonly role: TenantTokenRole;
+  readonly personal_id?: string | undefined;
+  readonly repository?: string | undefined;
+  readonly role: "agent" | "tenant_admin";
 };
 
 export type RevokeTokenInput = { readonly key_id: string };
@@ -74,9 +79,12 @@ export type MintTenantAdminTokenInput = TenantIdInput & {
 export type ListTenantsInput = ListPageInput;
 
 export type IssuedTokenDto = {
+  readonly agent_id: string | null;
   readonly expires_at: string | null;
   readonly key_id: string;
   readonly name: string;
+  readonly personal_id: string;
+  readonly repository: string | null;
   readonly role: TenantTokenRole;
   readonly secret: string;
   readonly tenant_id: string;
@@ -84,11 +92,14 @@ export type IssuedTokenDto = {
 };
 
 export type TokenSummaryDto = {
+  readonly agent_id: string | null;
   readonly created_at: string;
   readonly expires_at: string | null;
   readonly key_id: string;
   readonly last_used_at: string | null;
   readonly name: string;
+  readonly personal_id: string;
+  readonly repository: string | null;
   readonly revoked_at: string | null;
   readonly role: TenantTokenRole;
   readonly token_id: string;
@@ -168,7 +179,15 @@ export type TenantStatusOutput = Record<string, unknown> & {
 export const CreateTokenInputSchema: z.ZodType<CreateTokenInput> = z.strictObject({
   expires_at: InstantSchema.optional(),
   name: TokenNameSchema,
-  role: TokenRoleSchema,
+  personal_id: z.string().uuid().optional(),
+  repository: z
+    .string()
+    .trim()
+    .min(3)
+    .max(500)
+    .regex(/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/u)
+    .optional(),
+  role: CreatableTokenRoleSchema,
 });
 
 export const RevokeTokenInputSchema: z.ZodType<RevokeTokenInput> = z.strictObject({
@@ -221,9 +240,17 @@ export const MintTenantAdminTokenInputSchema: z.ZodType<MintTenantAdminTokenInpu
 export const ListTenantsInputSchema: z.ZodType<ListTenantsInput> = listPageInputSchema();
 
 export const IssuedTokenDtoSchema: z.ZodType<IssuedTokenDto> = z.strictObject({
+  agent_id: z.string().min(1).max(200).nullable(),
   expires_at: InstantSchema.nullable(),
   key_id: KeyIdSchema,
   name: TokenNameSchema,
+  personal_id: z.string().uuid(),
+  repository: z
+    .string()
+    .min(3)
+    .max(500)
+    .regex(/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/u)
+    .nullable(),
   role: TokenRoleSchema,
   secret: TenantTokenSecretSchema,
   tenant_id: TenantIdSchema,
@@ -231,11 +258,19 @@ export const IssuedTokenDtoSchema: z.ZodType<IssuedTokenDto> = z.strictObject({
 });
 
 export const TokenSummaryDtoSchema: z.ZodType<TokenSummaryDto> = z.strictObject({
+  agent_id: z.string().min(1).max(200).nullable(),
   created_at: InstantSchema,
   expires_at: InstantSchema.nullable(),
   key_id: KeyIdSchema,
   last_used_at: InstantSchema.nullable(),
   name: TokenNameSchema,
+  personal_id: z.string().uuid(),
+  repository: z
+    .string()
+    .min(3)
+    .max(500)
+    .regex(/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/u)
+    .nullable(),
   revoked_at: InstantSchema.nullable(),
   role: TokenRoleSchema,
   token_id: z.string().uuid(),
@@ -323,9 +358,12 @@ export const TenantStatusOutputSchema: z.ZodType<TenantStatusOutput> = z.strictO
 
 export function toIssuedTokenDto(token: IssuedToken): IssuedTokenDto {
   return {
+    agent_id: token.agentId === null ? null : token.agentId.value,
     expires_at: token.expiresAt === null ? null : token.expiresAt.toISOString(),
     key_id: token.keyId,
     name: token.name,
+    personal_id: token.personalId.value,
+    repository: token.repositoryName === null ? null : token.repositoryName.value,
     role: token.role,
     secret: token.secret,
     tenant_id: token.tenantId.value,
@@ -335,11 +373,14 @@ export function toIssuedTokenDto(token: IssuedToken): IssuedTokenDto {
 
 export function toTokenSummaryDto(token: TokenSummary): TokenSummaryDto {
   return {
+    agent_id: token.agentId === null ? null : token.agentId.value,
     created_at: token.createdAt.toISOString(),
     expires_at: token.expiresAt === null ? null : token.expiresAt.toISOString(),
     key_id: token.keyId,
     last_used_at: token.lastUsedAt === null ? null : token.lastUsedAt.toISOString(),
     name: token.name,
+    personal_id: token.personalId.value,
+    repository: token.repositoryName === null ? null : token.repositoryName.value,
     revoked_at: token.revokedAt === null ? null : token.revokedAt.toISOString(),
     role: token.role,
     token_id: token.tokenId,

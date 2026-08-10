@@ -88,6 +88,7 @@ function registration(): RegisterAgentOutput {
   return {
     agent: {
       agent_id: SENDER_ID,
+      authority: "peer",
       closed_at: null,
       close_reason: null,
       created_at: NOW,

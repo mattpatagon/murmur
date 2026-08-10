@@ -1,9 +1,11 @@
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
+import packageMetadata from "../package.json" with { type: "json" };
 
-import { InboxOutputSchema, type InboxOutput } from "./domain/contracts.js";
-import { type RegisterAgentOutput, RegisterAgentOutputSchema } from "./domain/agent-contracts.js";
+import type { RegisterAgentOutput } from "./domain/agent-contracts.js";
 import { type ListNoticesOutput, ListNoticesOutputSchema } from "./domain/notice-contracts.js";
 import { type GetInboxSummaryOutput, GetInboxSummaryOutputSchema } from "./e2ee/wire-tools.js";
+import { parseHookRegistration, summarizeHookInbox } from "./hook-message-compatibility.js";
+import { type HookOrchestrationState, hookOrchestrationState } from "./hook-orchestration.js";
 import type { AgentIdentity, InboxSummary, JsonRpcExchange } from "./hook-types.js";
 import {
   isRecord,
@@ -12,6 +14,8 @@ import {
   requestHeaders,
   rpcResult,
 } from "./hook-protocol.js";
+
+const HOOK_VERSION: string = packageMetadata.version;
 
 export async function checkRemoteInbox(
   identity: AgentIdentity,
@@ -35,7 +39,7 @@ export async function checkRemoteInbox(
       method: "initialize",
       params: {
         capabilities: {},
-        clientInfo: { name: "murmur-hook", version: "0.1.0" },
+        clientInfo: { name: "murmur-hook", version: HOOK_VERSION },
         protocolVersion: LATEST_PROTOCOL_VERSION,
       },
     },
@@ -80,13 +84,28 @@ export async function checkRemoteInbox(
     });
     const registrationResult: unknown = rpcResult(registration.body);
     if (!isRecord(registrationResult)) throw new Error("Murmur returned an invalid tool result");
-    const registered: RegisterAgentOutput = RegisterAgentOutputSchema.parse(
+    const registered: RegisterAgentOutput = parseHookRegistration(
       registrationResult["structuredContent"],
     );
-    const inboxResponse: JsonRpcExchange = await postJsonRpc({
+    const orchestratorResponse: JsonRpcExchange = await postJsonRpc({
       body: {
         jsonrpc: "2.0",
         id: 3,
+        method: "tools/call",
+        params: { name: "get_orchestrator", arguments: {} },
+      },
+      headers,
+      timeoutMs: remainingTimeoutMs(deadline),
+      url: options.url,
+    });
+    const orchestratorToolResult: unknown = rpcResult(orchestratorResponse.body);
+    const orchestration: HookOrchestrationState = isRecord(orchestratorToolResult)
+      ? hookOrchestrationState(orchestratorToolResult["structuredContent"])
+      : { kind: "unavailable" };
+    const inboxResponse: JsonRpcExchange = await postJsonRpc({
+      body: {
+        jsonrpc: "2.0",
+        id: 4,
         method: "tools/call",
         params:
           options.e2ee === true
@@ -119,24 +138,20 @@ export async function checkRemoteInbox(
         agentGeneration: registered.agent.generation,
         inboxVersion: summary.inbox_version,
         messageCount: summary.unread_count,
+        orchestration,
         senderIds: [],
       };
     }
-    const inbox: InboxOutput = InboxOutputSchema.parse(toolResult["structuredContent"]);
+    const inbox: ReturnType<typeof summarizeHookInbox> = summarizeHookInbox(
+      toolResult["structuredContent"],
+      afterSequence,
+      orchestration,
+    );
     const noticeCount: number = await openNoticeCount(identity, options, headers, deadline);
-    const lastMessage: InboxOutput["messages"][number] | undefined = inbox.messages.at(-1);
     return {
       agentGeneration: registered.agent.generation,
-      inboxVersion: lastMessage === undefined ? afterSequence : lastMessage.sequence,
-      messageCount: inbox.messages.length,
+      ...inbox,
       ...(options.includeNotices === true ? { noticeCount } : {}),
-      senderIds: [
-        ...new Set(
-          inbox.messages.map(
-            (message: InboxOutput["messages"][number]): string => message.sender_id,
-          ),
-        ),
-      ].slice(0, 5),
     };
   } finally {
     await closeRemoteSession(options.url, headers, deadline);
@@ -157,7 +172,7 @@ async function openNoticeCount(
   const response: JsonRpcExchange = await postJsonRpc({
     body: {
       jsonrpc: "2.0",
-      id: 4,
+      id: 5,
       method: "tools/call",
       params: {
         name: "list_notices",
@@ -207,7 +222,7 @@ export async function endRemoteAgentSession(
       method: "initialize",
       params: {
         capabilities: {},
-        clientInfo: { name: "murmur-hook", version: "0.1.0" },
+        clientInfo: { name: "murmur-hook", version: HOOK_VERSION },
         protocolVersion: LATEST_PROTOCOL_VERSION,
       },
     },

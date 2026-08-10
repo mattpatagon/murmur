@@ -110,7 +110,6 @@ export async function startHttpServer(
   const initializingByTenant: Map<string, number> = new Map<string, number>();
   let initializingSessions: number = 0;
   let stopped: boolean = false;
-
   const closeSessions: (
     matches: readonly [string, RemoteSession][],
     context: string,
@@ -130,7 +129,6 @@ export async function startHttpServer(
       if (result.status === "rejected") logSafeError(context, result.reason);
     });
   };
-
   const closeSessionsForToken: (tokenId: string) => Promise<void> = async (
     tokenId: string,
   ): Promise<void> => {
@@ -139,7 +137,6 @@ export async function startHttpServer(
     );
     await closeSessions(matches, "Murmur revoked-session shutdown failed");
   };
-
   const closeSessionsForTenant: (tenantId: TenantId) => Promise<void> = async (
     tenantId: TenantId,
   ): Promise<void> => {
@@ -148,7 +145,6 @@ export async function startHttpServer(
     );
     await closeSessions(matches, "Murmur suspended-tenant session shutdown failed");
   };
-
   const scheduleCloseSessionsForToken: (tokenId: string) => Promise<void> = async (
     tokenId: string,
   ): Promise<void> => {
@@ -365,8 +361,13 @@ export async function startHttpServer(
             onRepositoryDivergence: (): void => recordRepositoryDivergence(observability),
             principal,
             repositoryName,
-            store: principal.kind === "tenant" ? store.scope(principal.tenantId) : null,
+            store:
+              principal.kind === "tenant" &&
+              (principal.role !== "orchestrator" || authenticator.orchestrationEnabled)
+                ? store.scope(principal.tenantId)
+                : null,
             tenantOnboardingEnabled: authenticator.tenantOnboardingEnabled,
+            orchestrationEnabled: authenticator.orchestrationEnabled,
           });
           const session: RemoteSession = {
             activeResponses: 0,

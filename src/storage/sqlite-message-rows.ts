@@ -3,6 +3,11 @@ import { z } from "zod";
 import { StorageCorruptionError } from "../domain/errors.js";
 import type { Agent, Message } from "../domain/models.js";
 import {
+  MessageKindSchema,
+  OrchestratorPolicyId,
+  SenderAuthoritySchema,
+} from "../domain/orchestration.js";
+import {
   AgentClient,
   AgentId,
   BranchName,
@@ -25,6 +30,7 @@ import {
 
 type AgentRow = {
   readonly agent_id: string;
+  readonly authority: "orchestrator" | "peer";
   readonly closed_at: string | null;
   readonly close_reason: string | null;
   readonly created_at: string;
@@ -46,12 +52,15 @@ type MessageRow = {
   readonly expires_at: string;
   readonly idempotency_key: string | null;
   readonly message_id: string;
+  readonly message_kind: "message" | "orchestration_request";
+  readonly orchestrator_policy_id: string | null;
   readonly read_at: string | null;
   readonly recipient_id: string;
   readonly recipient_generation: number;
   readonly repository_name: string | null;
   readonly sender_id: string;
   readonly sender_generation: number;
+  readonly sender_authority: "orchestrator" | "peer";
   readonly sequence: number;
   readonly thread_id: string;
 };
@@ -69,6 +78,7 @@ export type BroadcastRow = {
   readonly repository_name: string;
   readonly sender_id: string;
   readonly sender_generation: number;
+  readonly sender_authority: "orchestrator" | "peer";
   readonly thread_id: string;
 };
 
@@ -89,6 +99,7 @@ const SafeSqlIntegerSchema: z.ZodType<number> = z
 
 const AgentRowSchema: z.ZodType<AgentRow> = z.strictObject({
   agent_id: z.string(),
+  authority: SenderAuthoritySchema,
   closed_at: z.string().nullable(),
   close_reason: z.string().nullable(),
   created_at: z.string(),
@@ -110,12 +121,15 @@ const MessageRowSchema: z.ZodType<MessageRow> = z.strictObject({
   expires_at: z.string(),
   idempotency_key: z.string().nullable(),
   message_id: z.string(),
+  message_kind: MessageKindSchema,
+  orchestrator_policy_id: z.string().uuid().nullable(),
   read_at: z.string().nullable(),
   recipient_id: z.string(),
   recipient_generation: SafeSqlIntegerSchema.pipe(z.number().positive()),
   repository_name: z.string().nullable(),
   sender_id: z.string(),
   sender_generation: SafeSqlIntegerSchema.pipe(z.number().positive()),
+  sender_authority: SenderAuthoritySchema,
   sequence: SafeSqlIntegerSchema.pipe(z.number().nonnegative()),
   thread_id: z.string(),
 });
@@ -133,6 +147,7 @@ export const BroadcastRowSchema: z.ZodType<BroadcastRow> = z.strictObject({
   repository_name: z.string(),
   sender_id: z.string(),
   sender_generation: SafeSqlIntegerSchema.pipe(z.number().positive()),
+  sender_authority: SenderAuthoritySchema,
   thread_id: z.string(),
 });
 
@@ -162,6 +177,7 @@ export function mapAgentRow(input: unknown): Agent {
     const row: AgentRow = AgentRowSchema.parse(input);
     return {
       agentId: AgentId.parse(row.agent_id),
+      authority: row.authority,
       closedAt: row.closed_at === null ? null : Instant.parse(row.closed_at),
       closeReason:
         row.close_reason === null ? null : AgentCloseReasonSchema.parse(row.close_reason),
@@ -191,6 +207,11 @@ export function mapMessageRow(input: unknown): Message {
       createdAt: Instant.parse(row.created_at),
       expiresAt: Instant.parse(row.expires_at),
       messageId: MessageId.parse(row.message_id),
+      messageKind: row.message_kind,
+      orchestratorPolicyId:
+        row.orchestrator_policy_id === null
+          ? null
+          : OrchestratorPolicyId.parse(row.orchestrator_policy_id),
       readAt,
       recipientId: AgentId.parse(row.recipient_id),
       recipientGeneration: AgentGeneration.parse(row.recipient_generation),
@@ -198,6 +219,7 @@ export function mapMessageRow(input: unknown): Message {
         row.repository_name === null ? null : RepositoryName.parse(row.repository_name),
       senderId: AgentId.parse(row.sender_id),
       senderGeneration: AgentGeneration.parse(row.sender_generation),
+      senderAuthority: row.sender_authority,
       sequence: Sequence.parse(row.sequence),
       threadId: ThreadId.parse(row.thread_id),
     };

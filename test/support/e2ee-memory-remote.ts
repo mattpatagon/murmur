@@ -68,6 +68,7 @@ function signingChain(bundle: PublicAgentKeyBundleDto): PublicAgentSigningChainD
 function agent(input: RegisterAgentInput): AgentDto {
   return {
     agent_id: input.agent_id,
+    authority: "peer",
     closed_at: null,
     close_reason: null,
     created_at: NOW,
