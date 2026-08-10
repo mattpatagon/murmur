@@ -9,11 +9,14 @@ import {
   listLocalPeerTrust,
   localE2eeFingerprint,
   localE2eeStatus,
+  replenishLocalPrekeys,
+  rotateLocalAgentKey,
   trustPeerFingerprint,
 } from "../src/e2ee/local-commands.js";
 import { LocalE2eeVault } from "../src/e2ee/local-vault.js";
 import type {
   LocalPeerTrustSummary,
+  LocalPrekeyReplenishment,
   LocalPublicIdentityExport,
 } from "../src/e2ee/local-commands.js";
 import type { StoredAgentKey, StoredPrekey, StoredRootKey } from "../src/e2ee/local-vault-rows.js";
@@ -60,6 +63,49 @@ test("reports local status and stages an exact strict fingerprint without creati
     ).toThrow("requires an audited reset");
   } finally {
     vault.close();
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("replenishes bounded prekeys and rotates one agent generation concurrently", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-e2ee-key-command-"));
+  const path: string = join(directory, "vault.sqlite");
+  const first: LocalE2eeVault = new LocalE2eeVault(path, "linux");
+  const second: LocalE2eeVault = new LocalE2eeVault(path, "linux");
+  const agentId: string = "machine-a:codex:repo-a:alice";
+  try {
+    const replenished: LocalPrekeyReplenishment = await replenishLocalPrekeys(
+      first,
+      agentId,
+      Instant.parse("2026-08-10T19:00:00.000Z"),
+    );
+    expect(replenished).toMatchObject({ fallback_available: 1, one_time_available: 20 });
+    expect(
+      await replenishLocalPrekeys(second, agentId, Instant.parse("2026-08-10T19:01:00.000Z")),
+    ).toEqual(replenished);
+    const previousKeyId: string = replenished.agent_key_id;
+    const rotations: readonly [
+      Awaited<ReturnType<typeof rotateLocalAgentKey>>,
+      Awaited<ReturnType<typeof rotateLocalAgentKey>>,
+    ] = await Promise.all([
+      rotateLocalAgentKey(first, agentId, Instant.parse("2026-08-11T19:00:00.000Z")),
+      rotateLocalAgentKey(second, agentId, Instant.parse("2026-08-11T19:00:00.000Z")),
+    ]);
+    expect(rotations[0].signing_key_id).toBe(rotations[1].signing_key_id);
+    expect(rotations[0].signing_key_id).not.toBe(previousKeyId);
+    const afterRotation: LocalPrekeyReplenishment = await replenishLocalPrekeys(
+      first,
+      agentId,
+      Instant.parse("2026-08-11T19:01:00.000Z"),
+    );
+    expect(afterRotation).toMatchObject({
+      agent_key_id: rotations[0].signing_key_id,
+      fallback_available: 1,
+      one_time_available: 20,
+    });
+  } finally {
+    second.close();
+    first.close();
     rmSync(directory, { force: true, recursive: true });
   }
 });

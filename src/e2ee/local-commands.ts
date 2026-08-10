@@ -43,6 +43,12 @@ export type LocalPublicIdentityExport = {
   readonly root_public_key: string;
 };
 
+export type LocalPrekeyReplenishment = {
+  readonly agent_key_id: string;
+  readonly fallback_available: number;
+  readonly one_time_available: number;
+};
+
 function pinSummary(pin: PeerPin): LocalPeerTrustSummary {
   return {
     agent_id: pin.agentId,
@@ -121,6 +127,82 @@ export function exportLocalPublicIdentity(vault: LocalE2eeVault): LocalPublicIde
     protocol: "murmur-e2ee-v1",
     root_key_id: root.rootKeyId,
     root_public_key: Buffer.from(root.publicKey).toString("base64url"),
+  };
+}
+
+export async function rotateLocalAgentKey(
+  vault: LocalE2eeVault,
+  agentId: string,
+  now: Instant,
+): Promise<AgentKeyCertificateDto> {
+  if (vault.keys.getAgent(agentId) === null) {
+    throw new Error("The local E2E agent key is not initialized; use an encrypted tool first");
+  }
+  const rotated: StoredAgentKey = await vault.keys.getOrCreateAgent(
+    agentId,
+    now.toISOString(),
+    now.addDays(90).toISOString(),
+    now.toISOString(),
+    true,
+  );
+  return agentCertificateToDto(rotated.certificate);
+}
+
+function availableCurrentPrekeys(
+  vault: LocalE2eeVault,
+  agent: StoredAgentKey,
+  prekeyClass: "fallback" | "one_time",
+  now: Instant,
+): readonly StoredPrekey[] {
+  const nowMillis: number = now.toEpochMilliseconds();
+  return vault.keys
+    .listPrekeys(agent.certificate.agentId, prekeyClass)
+    .filter(
+      (prekey: StoredPrekey): boolean =>
+        prekey.privateKey !== null &&
+        prekey.consumedAt === null &&
+        prekey.certificate.agentSigningKeyId === agent.certificate.signingKeyId &&
+        Date.parse(prekey.certificate.expiresAt) > nowMillis,
+    );
+}
+
+export async function replenishLocalPrekeys(
+  vault: LocalE2eeVault,
+  agentId: string,
+  now: Instant,
+): Promise<LocalPrekeyReplenishment> {
+  const agent: StoredAgentKey = await vault.keys.getOrCreateAgent(
+    agentId,
+    now.toISOString(),
+    now.addDays(90).toISOString(),
+    now.addDays(30).toISOString(),
+  );
+  let fallback: readonly StoredPrekey[] = availableCurrentPrekeys(vault, agent, "fallback", now);
+  if (fallback.length === 0) {
+    await vault.keys.replenishPrekeys(
+      agentId,
+      "fallback",
+      1,
+      now.toISOString(),
+      now.addDays(37).toISOString(),
+    );
+    fallback = availableCurrentPrekeys(vault, agent, "fallback", now);
+  }
+  let oneTime: readonly StoredPrekey[] = availableCurrentPrekeys(vault, agent, "one_time", now);
+  if (oneTime.length < 20) {
+    await vault.keys.replenishPrekeys(
+      agentId,
+      "one_time",
+      20 - oneTime.length,
+      now.toISOString(),
+      now.addDays(37).toISOString(),
+    );
+    oneTime = availableCurrentPrekeys(vault, agent, "one_time", now);
+  }
+  return {
+    agent_key_id: agent.certificate.signingKeyId,
+    fallback_available: fallback.length,
+    one_time_available: oneTime.length,
   };
 }
 

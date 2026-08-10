@@ -119,6 +119,7 @@ export class LocalVaultKeys {
     createdAt: string,
     expiresAt: string,
     minimumValidUntil: string = createdAt,
+    forceRotation: boolean = false,
   ): Promise<StoredAgentKey> {
     const existing: StoredAgentKey | null = this.getAgent(agentId);
     const createdMillis: number = Date.parse(createdAt);
@@ -133,7 +134,11 @@ export class LocalVaultKeys {
     ) {
       throw new Error("Agent key validity window is invalid");
     }
-    if (existing !== null && Date.parse(existing.certificate.expiresAt) > minimumValidMillis) {
+    if (
+      !forceRotation &&
+      existing !== null &&
+      Date.parse(existing.certificate.expiresAt) > minimumValidMillis
+    ) {
       return existing;
     }
     const root: StoredRootKey = await this.getOrCreateRoot(createdAt);
@@ -153,9 +158,20 @@ export class LocalVaultKeys {
     this.#database.exec("BEGIN IMMEDIATE");
     try {
       const current: StoredAgentKey | null = this.getAgent(agentId);
-      if (current !== null && Date.parse(current.certificate.expiresAt) > minimumValidMillis) {
+      const concurrentRotationWon: boolean =
+        forceRotation &&
+        current !== null &&
+        (existing === null ||
+          current.certificate.signingKeyId !== existing.certificate.signingKeyId);
+      if (
+        concurrentRotationWon ||
+        (!forceRotation &&
+          current !== null &&
+          Date.parse(current.certificate.expiresAt) > minimumValidMillis)
+      ) {
         this.#database.exec("COMMIT");
         sodium.memzero(pair.privateKey);
+        if (current === null) throw new Error("Concurrent E2E rotation winner is unavailable");
         return current;
       }
       let result: Changes;
