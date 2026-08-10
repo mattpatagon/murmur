@@ -1,5 +1,11 @@
 import sodium from "libsodium-wrappers";
 
+import {
+  type MarkMessagesReadInput,
+  MarkMessagesReadInputSchema,
+  type MarkMessagesReadOutput,
+  MarkMessagesReadOutputSchema,
+} from "../domain/contracts.js";
 import type { Clock, Instant } from "../domain/value-objects.js";
 import { verifyAgentKeyCertificate } from "./certificates.js";
 import { decryptEnvelope, verifyEnvelopeSignature } from "./envelope.js";
@@ -23,6 +29,10 @@ import {
   type EncryptedMessageDto,
   type GetEncryptedMessagesInput,
   GetEncryptedMessagesInputSchema,
+  type WaitForEncryptedMessagesInput,
+  WaitForEncryptedMessagesInputSchema,
+  type WaitForEncryptedMessagesOutput,
+  WaitForEncryptedMessagesOutputSchema,
 } from "./wire-tools.js";
 
 const MAX_CLOCK_SKEW_MS: number = 5 * 60 * 1000;
@@ -47,6 +57,12 @@ export type ReceiveEncryptedMessagesResult = {
   readonly agentId: string;
   readonly inboxVersion: number;
   readonly messages: readonly VerifiedDecryptedMessage[];
+};
+
+export type WaitForDecryptedMessagesResult = {
+  readonly agentId: string;
+  readonly messages: readonly VerifiedDecryptedMessage[];
+  readonly timedOut: boolean;
 };
 
 function validateEnvelopeWindow(envelope: EncryptedEnvelope, now: Instant): void {
@@ -210,6 +226,38 @@ async function decryptOne(
   };
 }
 
+function validateSequenceOrder(
+  messages: readonly EncryptedMessageDto[],
+  afterSequence: number,
+): number {
+  let previous: number = afterSequence;
+  messages.forEach((message: EncryptedMessageDto): void => {
+    if (message.tenant_sequence <= previous) {
+      throw new Error("Hosted Murmur returned an invalid encrypted inbox order");
+    }
+    previous = message.tenant_sequence;
+  });
+  return previous;
+}
+
+async function decryptMessages(
+  vault: LocalE2eeVault,
+  messages: readonly EncryptedMessageDto[],
+  tenantId: string,
+  recipientId: string,
+  identity: LocalPublishedIdentity,
+  now: Instant,
+  trustOnFirstUse: boolean,
+): Promise<readonly VerifiedDecryptedMessage[]> {
+  const decrypted: VerifiedDecryptedMessage[] = [];
+  for (const message of messages) {
+    decrypted.push(
+      await decryptOne(vault, message, tenantId, recipientId, identity, now, trustOnFirstUse),
+    );
+  }
+  return decrypted;
+}
+
 export async function receiveEncryptedMessages(
   vault: LocalE2eeVault,
   remote: E2eeRemoteClient,
@@ -235,19 +283,71 @@ export async function receiveEncryptedMessages(
   if (output.agent_id !== parsedInput.agent_id) {
     throw new Error("Hosted Murmur changed the encrypted inbox identity");
   }
-  const messages: VerifiedDecryptedMessage[] = [];
-  for (const message of output.messages) {
-    messages.push(
-      await decryptOne(
-        vault,
-        message,
-        capability.tenant_id,
-        parsedInput.agent_id,
-        identity,
-        now,
-        trustOnFirstUse,
-      ),
-    );
+  const newestSequence: number = validateSequenceOrder(output.messages, parsedInput.after_sequence);
+  if (output.inbox_version < newestSequence) {
+    throw new Error("Hosted Murmur returned an invalid encrypted inbox version");
   }
+  const messages: readonly VerifiedDecryptedMessage[] = await decryptMessages(
+    vault,
+    output.messages,
+    capability.tenant_id,
+    parsedInput.agent_id,
+    identity,
+    now,
+    trustOnFirstUse,
+  );
   return { agentId: parsedInput.agent_id, inboxVersion: output.inbox_version, messages };
+}
+
+export async function waitForDecryptedMessages(
+  vault: LocalE2eeVault,
+  remote: E2eeRemoteClient,
+  clock: Clock,
+  input: WaitForEncryptedMessagesInput,
+  trustOnFirstUse: boolean = false,
+): Promise<WaitForDecryptedMessagesResult> {
+  const parsedInput: WaitForEncryptedMessagesInput =
+    WaitForEncryptedMessagesInputSchema.parse(input);
+  const now: Instant = clock.now();
+  const capability: Awaited<ReturnType<typeof getE2eeCapability>> = await getE2eeCapability(
+    remote,
+    false,
+  );
+  const identity: LocalPublishedIdentity = await publishLocalIdentity(
+    vault,
+    remote,
+    parsedInput.agent_id,
+    now,
+  );
+  const output: WaitForEncryptedMessagesOutput = WaitForEncryptedMessagesOutputSchema.parse(
+    await remote.waitForEncryptedMessages(parsedInput),
+  );
+  if (output.agent_id !== parsedInput.agent_id) {
+    throw new Error("Hosted Murmur changed the encrypted wait identity");
+  }
+  validateSequenceOrder(output.messages, parsedInput.after_sequence);
+  const messages: readonly VerifiedDecryptedMessage[] = await decryptMessages(
+    vault,
+    output.messages,
+    capability.tenant_id,
+    parsedInput.agent_id,
+    identity,
+    now,
+    trustOnFirstUse,
+  );
+  return { agentId: parsedInput.agent_id, messages, timedOut: output.timed_out };
+}
+
+export async function markEncryptedMessagesRead(
+  vault: LocalE2eeVault,
+  remote: E2eeRemoteClient,
+  input: MarkMessagesReadInput,
+): Promise<MarkMessagesReadOutput> {
+  const parsedInput: MarkMessagesReadInput = MarkMessagesReadInputSchema.parse(input);
+  await getE2eeCapability(remote, false);
+  const output: MarkMessagesReadOutput = MarkMessagesReadOutputSchema.parse(
+    await remote.markMessagesRead(parsedInput),
+  );
+  vault.purgeCachedMessages(parsedInput.message_ids);
+  return output;
 }
