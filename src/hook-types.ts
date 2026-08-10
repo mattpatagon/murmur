@@ -12,6 +12,7 @@ export type AgentIdentity = {
 };
 
 export type InboxSummary = {
+  readonly agentGeneration: number;
   readonly inboxVersion: number;
   readonly messageCount: number;
   readonly noticeCount?: number | undefined;

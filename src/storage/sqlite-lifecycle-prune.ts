@@ -30,20 +30,32 @@ export function pruneSqliteLifecycle(database: Database, now: Instant): number {
       .run(timestamp, dormantCutoff, timestamp).changes;
     const deletedSessions: number = database
       .query<unknown, [string]>(`
-        DELETE FROM agent_sessions WHERE ended_at IS NOT NULL AND ended_at <= ?
+        DELETE FROM agent_sessions WHERE rowid IN (
+          SELECT rowid FROM agent_sessions
+          WHERE ended_at IS NOT NULL AND ended_at <= ?
+          ORDER BY ended_at ASC, agent_id ASC, generation ASC, session_key ASC
+          LIMIT 1000
+        )
       `)
       .run(gcCutoff).changes;
     const deletedAgents: number = database
       .query<unknown, [string]>(`
-        DELETE FROM agents
-        WHERE closed_at IS NOT NULL AND closed_at <= ?
+        DELETE FROM agents WHERE agent_id IN (
+          SELECT agent_id FROM agents AS candidate
+          WHERE candidate.closed_at IS NOT NULL AND candidate.closed_at <= ?
           AND NOT EXISTS (
             SELECT 1 FROM messages
-            WHERE sender_id = agents.agent_id OR recipient_id = agents.agent_id
+            WHERE sender_id = candidate.agent_id OR recipient_id = candidate.agent_id
           )
           AND NOT EXISTS (
-            SELECT 1 FROM broadcasts WHERE sender_id = agents.agent_id
+            SELECT 1 FROM broadcasts WHERE sender_id = candidate.agent_id
           )
+          AND NOT EXISTS (SELECT 1 FROM notices WHERE creator_id = candidate.agent_id)
+          AND NOT EXISTS (SELECT 1 FROM notices WHERE resolved_by_id = candidate.agent_id)
+          AND NOT EXISTS (SELECT 1 FROM notices WHERE withdrawn_by_id = candidate.agent_id)
+          ORDER BY candidate.closed_at ASC, candidate.agent_id ASC
+          LIMIT 1000
+        )
       `)
       .run(gcCutoff).changes;
     database.exec("COMMIT");

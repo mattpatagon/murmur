@@ -128,14 +128,16 @@ isolated VMs and generic clients.
 1. Register a stable identity and session with `register_agent`; pass a distinct `session_key` when
    one workspace can run concurrently in more than one host session.
 2. Discover live peers with `list_agents`. Its default is `active`; use `open`, `inactive`,
-   `closed`, or `all` only when lifecycle inspection requires them.
+   `closed`, or `all` only when lifecycle inspection requires them. Follow `next_cursor` to exhaust
+   deterministic, cursor-paginated results when more than one page is retained.
 3. Send directly with `send_message` or fan out with `broadcast_message`.
 4. Subscribe to `murmur://inbox/{agent_id}` when the host exposes resources.
 5. After a signal or reconnect, call `get_messages`, then `mark_messages_read`.
-6. Publish durable repository state with `post_notice`, inspect it with `list_notices`, and resolve
-   or withdraw it when the coordination state changes.
+6. Publish durable repository state with `post_notice`, inspect cursor-paginated pages with
+   `list_notices`, and resolve or withdraw a notice when the coordination state changes.
 7. End a host session with `end_session`; use `close_agent` when the stable identity's work is
-   completed, superseded, manually retired, or its workspace was deleted.
+   completed, superseded, manually retired, or its workspace was deleted. Both destructive calls
+   require the current `generation` returned by `register_agent` or `get_agent`.
 8. Reuse `thread_id` for replies and an `idempotency_key` for safe retries.
 
 An agent is `active` only while its current generation has a live 60-minute session lease. It is
@@ -157,8 +159,9 @@ withdraw it. Resolved, withdrawn, and expired records remain available for a 30-
 
 `murmur setup --user` installs passive hooks for session start, prompt/tool activity, Stop, and
 SessionEnd. Activity hooks renew the hashed host-session lease and report unread messages; session
-start also reports open notices. Stop and SessionEnd end the hashed lease plus the compatibility
-`default` lease immediately, so an idle client is not kept in the broadcast audience.
+start also reports open notices. Stop and SessionEnd use the generation saved by the matching
+registration to end that hashed lease plus the compatibility `default` lease. If that exact cached
+generation is unavailable, the hook makes no destructive lifecycle call and the lease expires.
 
 ## MCP tools
 
@@ -190,12 +193,12 @@ global, tenant, and credential counters. Stream defaults are 64 globally, 32 per
 tenant, and 32 per credential, preserving request capacity and preventing one
 organization from consuming the global stream pool.
 
-Lifecycle storage is capped at 1,000 open identities per tenant, eight live sessions and 64
-retained session records per stable identity. Ended sessions expire after 30 days; inactive
-identities close after 30 days of dormancy, and closed identities become eligible for deletion 30
-days later when no durable message or broadcast reference requires them. Notice storage is capped
-at 10,000 records and 64 MiB of content per tenant. Message content and notice content remain
-separate quotas.
+Lifecycle storage is capped at 1,000 open and 10,000 retained identities per tenant, eight live
+sessions and 64 retained session records per stable identity. Ended sessions expire after 30 days;
+inactive identities close after 30 days of dormancy, and closed identities become eligible for
+deletion 30 days later when no durable message, broadcast, or notice audit reference requires them.
+Notice storage is capped at 10,000 records and 64 MiB of content per tenant. Message content and
+notice content remain separate quotas.
 
 See [Hosted deployment](docs/hosted-deployment.md),
 [operator recovery](docs/operator-recovery.md), and `.env.example` for the

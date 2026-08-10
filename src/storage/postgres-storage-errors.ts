@@ -13,7 +13,11 @@ function stringProperty(error: unknown, property: string): string | null {
 export function normalizePostgresStorageError(error: unknown): unknown {
   const code: string | null = stringProperty(error, "code");
   const message: string | null = stringProperty(error, "message");
-  if (code === "54000" && message === "tenant agent quota exceeded") {
+  if (
+    code === "54000" &&
+    (message === "tenant agent quota exceeded" ||
+      message === "tenant retained-agent quota exceeded")
+  ) {
     return new AgentCapacityError();
   }
   if (code === "54000" && message === "tenant retained-notice quota exceeded") {

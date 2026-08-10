@@ -345,29 +345,27 @@ jobs:
             --region "$REGION" \
             --to-latest \
             --quiet
-          if [ "$ADOPTION_REQUIRED" = 'true' ] || [ "$TENANT_CONTRACT_FINALIZE_REQUIRED" = 'true' ]; then
-            while IFS= read -r revision; do
-              if [ -n "$revision" ] && [ "$revision" != "$latest_revision" ]; then
-                gcloud run revisions delete "$revision" \
-                  --project "$PROJECT_ID" \
-                  --region "$REGION" \
-                  --quiet
-              fi
-            done < <(gcloud run revisions list \
-              --project "$PROJECT_ID" \
-              --region "$REGION" \
-              --service "$SERVICE" \
-              --format 'value(metadata.name)')
-            unexpected_revision="$(gcloud run revisions list \
+          while IFS= read -r revision; do
+            if [ -n "$revision" ] && [ "$revision" != "$latest_revision" ]; then
+              gcloud run revisions delete "$revision" \
+                --project "$PROJECT_ID" \
+                --region "$REGION" \
+                --quiet
+            fi
+          done < <(gcloud run revisions list \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --service "$SERVICE" \
+            --format 'value(metadata.name)')
+          unexpected_revision="$(gcloud run revisions list \
               --project "$PROJECT_ID" \
               --region "$REGION" \
               --service "$SERVICE" \
               --filter "metadata.name!=$latest_revision" \
               --format 'value(metadata.name)' | head -1)"
-            if [ -n "$unexpected_revision" ]; then
-              echo "Prior incompatible revision remained active: $unexpected_revision" >&2
-              exit 1
-            fi
+          if [ -n "$unexpected_revision" ]; then
+            echo "Prior incompatible revision remained active: $unexpected_revision" >&2
+            exit 1
           fi
           curl --fail --silent --show-error "$PRODUCTION_URL/health" >/dev/null
 

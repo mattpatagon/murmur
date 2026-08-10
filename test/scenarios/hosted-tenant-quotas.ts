@@ -41,6 +41,45 @@ export async function verifyHostedTenantQuotas(scenario: HostedTenantScenario): 
         { agent_id: `quota-agent-${scenario.unique}`, display_name: "Quota rejected" },
       ),
     ).toContain("Open agent capacity reached");
+    await quotaDatabase`
+      UPDATE murmur.tenant_resource_usage AS usage
+      SET
+        agent_count = (
+          SELECT count(*) FROM murmur.agents AS agent
+          WHERE agent.tenant_id = usage.tenant_id AND agent.closed_at IS NULL
+        ),
+        retained_agent_count = 10000
+      WHERE usage.tenant_id = ${scenario.tenantA.tenant.tenant_id}::uuid
+    `;
+    expect(
+      await callToolExpectingError(
+        scenario.server.mcpUrl,
+        scenario.agentAToken.token.secret,
+        scenario.agentASession,
+        414,
+        "register_agent",
+        { agent_id: `retained-quota-agent-${scenario.unique}`, display_name: "Quota rejected" },
+      ),
+    ).toContain("Open agent capacity reached");
+    await quotaDatabase`
+      UPDATE murmur.tenant_resource_usage
+      SET notice_content_bytes = 67108864
+      WHERE tenant_id = ${scenario.tenantA.tenant.tenant_id}::uuid
+    `;
+    expect(
+      await callToolExpectingError(
+        scenario.server.mcpUrl,
+        scenario.agentAToken.token.secret,
+        scenario.agentASession,
+        415,
+        "post_notice",
+        {
+          actor_id: scenario.senderA,
+          content: "notice byte quota rejected",
+          kind: "decision",
+        },
+      ),
+    ).toContain("Retained notice capacity reached");
     expect(
       await callToolExpectingError(
         scenario.server.mcpUrl,
@@ -85,6 +124,10 @@ export async function verifyHostedTenantQuotas(scenario: HostedTenantScenario): 
       SET
         agent_count = (
           SELECT count(*) FROM murmur.agents AS agent
+          WHERE agent.tenant_id = usage.tenant_id AND agent.closed_at IS NULL
+        ),
+        retained_agent_count = (
+          SELECT count(*) FROM murmur.agents AS agent
           WHERE agent.tenant_id = usage.tenant_id
         ),
         access_token_count = (
@@ -108,6 +151,15 @@ export async function verifyHostedTenantQuotas(scenario: HostedTenantScenario): 
           SELECT coalesce(sum(octet_length(message.content)), 0)::bigint
           FROM murmur.messages AS message
           WHERE message.tenant_id = usage.tenant_id
+        ),
+        notice_count = (
+          SELECT count(*) FROM murmur.notices AS notice
+          WHERE notice.tenant_id = usage.tenant_id
+        ),
+        notice_content_bytes = (
+          SELECT coalesce(sum(octet_length(notice.content)), 0)::bigint
+          FROM murmur.notices AS notice
+          WHERE notice.tenant_id = usage.tenant_id
         )
       WHERE usage.tenant_id = ${scenario.tenantA.tenant.tenant_id}::uuid
     `;

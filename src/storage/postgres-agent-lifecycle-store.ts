@@ -20,11 +20,12 @@ import type {
   EndSessionCommand,
   EndSessionResult,
   ListAgentsQuery,
+  ListAgentsResult,
   RegisterAgentCommand,
   RegisterAgentResult,
 } from "../domain/models.js";
 import {
-  AgentId,
+  type AgentId,
   type Instant,
   type JsonObject,
   JsonObjectSchema,
@@ -314,50 +315,66 @@ export async function listPostgresAgents(
   tenantId: TenantId,
   query: ListAgentsQuery,
   now: Instant,
-): Promise<readonly Agent[]> {
-  return await database.begin(async (transaction: TransactionSql): Promise<readonly Agent[]> => {
+): Promise<ListAgentsResult> {
+  return await database.begin(async (transaction: TransactionSql): Promise<ListAgentsResult> => {
     await setPostgresTenantContext(transaction, tenantId);
     await endExpiredPostgresSessions(transaction, tenantId, now);
-    const rawIds: unknown = await transaction`
-      SELECT agent.agent_id FROM murmur.agents AS agent
+    const cursor: string | null = query.cursor === null ? null : query.cursor.value;
+    const raw: unknown = await transaction`
+      SELECT
+        agent.agent_id,
+        agent.display_name,
+        agent.metadata::text AS metadata_json,
+        agent.generation,
+        agent.close_reason,
+        to_char(agent.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
+        to_char(agent.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS last_seen_at,
+        CASE WHEN agent.closed_at IS NULL THEN NULL ELSE
+          to_char(agent.closed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        END AS closed_at,
+        session.live_session_count,
+        session.lease_expires_at,
+        CASE
+          WHEN agent.closed_at IS NOT NULL THEN 'closed'
+          WHEN session.live_session_count > 0 THEN 'active'
+          ELSE 'inactive'
+        END AS state
+      FROM murmur.agents AS agent
+      CROSS JOIN LATERAL (
+        SELECT
+          COUNT(*)::int AS live_session_count,
+          CASE WHEN MAX(lease_expires_at) IS NULL THEN NULL ELSE
+            to_char(MAX(lease_expires_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+          END AS lease_expires_at
+        FROM murmur.agent_sessions AS current_session
+        WHERE current_session.tenant_id = agent.tenant_id
+          AND current_session.agent_id = agent.agent_id
+          AND current_session.generation = agent.generation
+          AND current_session.ended_at IS NULL
+          AND current_session.lease_expires_at > ${now.toISOString()}::timestamptz
+      ) AS session
       WHERE agent.tenant_id = ${tenantId.value}::uuid AND (
         ${query.state} = 'all'
         OR (${query.state} = 'open' AND agent.closed_at IS NULL)
         OR (${query.state} = 'closed' AND agent.closed_at IS NOT NULL)
-        OR (${query.state} = 'active' AND agent.closed_at IS NULL AND EXISTS (
-          SELECT 1 FROM murmur.agent_sessions AS session
-          WHERE session.tenant_id = agent.tenant_id
-            AND session.agent_id = agent.agent_id
-            AND session.generation = agent.generation
-            AND session.ended_at IS NULL
-            AND session.lease_expires_at > ${now.toISOString()}::timestamptz
-        ))
-        OR (${query.state} = 'inactive' AND agent.closed_at IS NULL AND NOT EXISTS (
-          SELECT 1 FROM murmur.agent_sessions AS session
-          WHERE session.tenant_id = agent.tenant_id
-            AND session.agent_id = agent.agent_id
-            AND session.generation = agent.generation
-            AND session.ended_at IS NULL
-            AND session.lease_expires_at > ${now.toISOString()}::timestamptz
-        ))
+        OR (${query.state} = 'active' AND agent.closed_at IS NULL
+          AND session.live_session_count > 0)
+        OR (${query.state} = 'inactive' AND agent.closed_at IS NULL
+          AND session.live_session_count = 0)
       )
-      ORDER BY agent.last_seen_at DESC, agent.agent_id ASC
-      LIMIT 1000
+      AND (${cursor}::text IS NULL OR agent.agent_id > ${cursor}::text)
+      ORDER BY agent.agent_id ASC
+      LIMIT ${query.limit + 1}
     `;
-    const ids: { readonly agent_id: string }[] = z
-      .array(z.strictObject({ agent_id: z.string() }))
-      .parse(rawIds);
-    const agents: Agent[] = [];
-    for (const id of ids) {
-      const agent: Agent = await postgresAgentInTransaction(
-        transaction,
-        tenantId,
-        AgentId.parse(id.agent_id),
-        now,
-      );
-      agents.push(agent);
+    const rows: Agent[] = z.array(AgentRowSchema).parse(raw).map(mapAgentRow);
+    const agents: Agent[] = rows.slice(0, query.limit);
+    let nextCursor: AgentId | null = null;
+    if (rows.length > query.limit) {
+      const lastAgent: Agent | undefined = agents.at(-1);
+      if (lastAgent === undefined) throw new Error("Agent page unexpectedly has no cursor row");
+      nextCursor = lastAgent.agentId;
     }
-    return agents;
+    return { agents, nextCursor };
   });
 }
 
@@ -379,7 +396,7 @@ export async function endPostgresSession(
     );
     if (row === null) return { ended: 0, generation: null };
     const generation: AgentGeneration = AgentGeneration.parse(row.generation);
-    if (command.expectedGeneration !== null && !generation.equals(command.expectedGeneration)) {
+    if (!generation.equals(command.expectedGeneration)) {
       throw new StaleAgentGenerationError(command.agentId.value);
     }
     const keys: string[] = [command.sessionKey.value];
@@ -425,7 +442,7 @@ export async function closePostgresAgent(
     );
     if (row === null) throw new UnknownAgentError(command.agentId.value);
     const generation: AgentGeneration = AgentGeneration.parse(row.generation);
-    if (command.expectedGeneration !== null && !generation.equals(command.expectedGeneration)) {
+    if (!generation.equals(command.expectedGeneration)) {
       throw new StaleAgentGenerationError(command.agentId.value);
     }
     const alreadyClosed: boolean = row.closed_at !== null;

@@ -2,7 +2,7 @@ import type { Database, Statement } from "bun:sqlite";
 
 import { type UserVersionRow, UserVersionRowSchema } from "./sqlite-message-rows.js";
 
-const SUPPORTED_SCHEMA_VERSION: number = 7;
+const SUPPORTED_SCHEMA_VERSION: number = 8;
 
 function schemaVersion(database: Database): number {
   const statement: Statement<unknown, []> = database.query("PRAGMA user_version");
@@ -143,6 +143,9 @@ export function migrateSqliteDatabase(database: Database): void {
         );
         CREATE INDEX agent_sessions_live_lease
           ON agent_sessions(agent_id, generation, ended_at, lease_expires_at);
+        CREATE INDEX agent_sessions_ended_cleanup
+          ON agent_sessions(ended_at, agent_id, generation, session_key)
+          WHERE ended_at IS NOT NULL;
         CREATE INDEX agents_open_activity
           ON agents(closed_at, last_seen_at DESC, agent_id);
         INSERT INTO agent_sessions(
@@ -215,7 +218,26 @@ export function migrateSqliteDatabase(database: Database): void {
         CREATE INDEX notices_repository_state
           ON notices(repository_name, resolved_at, withdrawn_at, expires_at, created_at DESC);
         CREATE INDEX notices_expiration ON notices(expires_at);
+        CREATE INDEX notices_creator_agent ON notices(creator_id);
+        CREATE INDEX notices_resolver_agent ON notices(resolved_by_id)
+          WHERE resolved_by_id IS NOT NULL;
+        CREATE INDEX notices_withdrawer_agent ON notices(withdrawn_by_id)
+          WHERE withdrawn_by_id IS NOT NULL;
         PRAGMA user_version = 7;
+      `);
+      version = 7;
+    }
+    if (version === 7) {
+      database.exec(`
+        CREATE INDEX IF NOT EXISTS agent_sessions_ended_cleanup
+          ON agent_sessions(ended_at, agent_id, generation, session_key)
+          WHERE ended_at IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS notices_creator_agent ON notices(creator_id);
+        CREATE INDEX IF NOT EXISTS notices_resolver_agent ON notices(resolved_by_id)
+          WHERE resolved_by_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS notices_withdrawer_agent ON notices(withdrawn_by_id)
+          WHERE withdrawn_by_id IS NOT NULL;
+        PRAGMA user_version = 8;
       `);
     }
     database.exec("COMMIT");

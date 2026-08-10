@@ -38,44 +38,65 @@ test("hook session keys are deterministic hashes that never expose raw host sess
 });
 
 test("Stop bypasses debounce, does not check the inbox, and ends hash plus default", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-hook-stop-"));
   let checked: boolean = false;
+  let endedGeneration: number = 0;
   let endedSessionKey: string = "";
   let endedEvent: string = "";
   const rawSessionId: string = "stop-session-id";
-  const output: HookOutput | null = await handleHook(
-    {
-      cwd: "/work/repo",
-      hook_event_name: "Stop",
-      session_id: rawSessionId,
-    },
-    "codex",
-    {
-      checkInbox: async (): Promise<InboxSummary> => {
-        checked = true;
-        return { inboxVersion: 0, messageCount: 0, senderIds: [] };
+  const environment: NodeJS.ProcessEnv = {
+    MURMUR_API_TOKEN: "test-token",
+    MURMUR_MACHINE_ID: "vm",
+  };
+  const checkInbox: () => Promise<InboxSummary> = async (): Promise<InboxSummary> => {
+    checked = true;
+    return { agentGeneration: 7, inboxVersion: 0, messageCount: 0, senderIds: [] };
+  };
+  try {
+    await handleHook(
+      { cwd: "/work/repo", hook_event_name: "SessionStart", session_id: rawSessionId },
+      "codex",
+      { cacheDirectory: directory, checkInbox, environment, now: 0 },
+    );
+    checked = false;
+    const output: HookOutput | null = await handleHook(
+      {
+        cwd: "/work/repo",
+        hook_event_name: "Stop",
+        session_id: rawSessionId,
       },
-      debounceMs: 60_000,
-      endSession: async (
-        _identity: AgentIdentity,
-        options: {
-          readonly eventName: "SessionEnd" | "Stop";
-          readonly sessionKey: string;
-          readonly token: string;
-          readonly timeoutMs: number;
-          readonly url: string;
+      "codex",
+      {
+        cacheDirectory: directory,
+        checkInbox,
+        debounceMs: 60_000,
+        endSession: async (
+          _identity: AgentIdentity,
+          options: {
+            readonly eventName: "SessionEnd" | "Stop";
+            readonly expectedGeneration: number;
+            readonly sessionKey: string;
+            readonly token: string;
+            readonly timeoutMs: number;
+            readonly url: string;
+          },
+        ): Promise<void> => {
+          endedSessionKey = options.sessionKey;
+          endedEvent = options.eventName;
+          endedGeneration = options.expectedGeneration;
         },
-      ): Promise<void> => {
-        endedSessionKey = options.sessionKey;
-        endedEvent = options.eventName;
+        environment,
+        now: 1,
       },
-      environment: { MURMUR_API_TOKEN: "test-token", MURMUR_MACHINE_ID: "vm" },
-      now: 1,
-    },
-  );
-  expect(output).toBeNull();
-  expect(checked).toBe(false);
-  expect(endedEvent).toBe("Stop");
-  expect(endedSessionKey).toBe(hookSessionKey(rawSessionId));
+    );
+    expect(output).toBeNull();
+    expect(checked).toBe(false);
+    expect(endedEvent).toBe("Stop");
+    expect(endedGeneration).toBe(7);
+    expect(endedSessionKey).toBe(hookSessionKey(rawSessionId));
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
 });
 
 test("real hook teardown preserves another pane and SessionStart reports open notices", async (): Promise<void> => {
@@ -96,11 +117,12 @@ test("real hook teardown preserves another pane and SessionStart reports open no
   });
   const url: string = server.mcpUrl.toString();
   try {
+    await checkRemoteInbox(identity, { timeoutMs: 2_000, token, url });
     await checkRemoteInbox(identity, { sessionKey: "hook-pane-a", timeoutMs: 2_000, token, url });
     await checkRemoteInbox(identity, { sessionKey: "hook-pane-b", timeoutMs: 2_000, token, url });
     const verificationStore: SqliteMessageStore = new SqliteMessageStore(databasePath);
     try {
-      expect(requireAgent(verificationStore, identity.agentId).liveSessionCount).toBe(2);
+      expect(requireAgent(verificationStore, identity.agentId).liveSessionCount).toBe(3);
       verificationStore.postNotice({
         actorId: AgentId.parse(identity.agentId),
         branchName: null,
@@ -121,6 +143,7 @@ test("real hook teardown preserves another pane and SessionStart reports open no
       expect(start.noticeCount).toBe(1);
       await endRemoteAgentSession(identity, {
         eventName: "Stop",
+        expectedGeneration: 1,
         sessionKey: "hook-pane-a",
         timeoutMs: 2_000,
         token,
@@ -129,6 +152,7 @@ test("real hook teardown preserves another pane and SessionStart reports open no
       expect(requireAgent(verificationStore, identity.agentId).liveSessionCount).toBe(1);
       await endRemoteAgentSession(identity, {
         eventName: "SessionEnd",
+        expectedGeneration: 1,
         sessionKey: "hook-pane-b",
         timeoutMs: 2_000,
         token,

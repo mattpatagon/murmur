@@ -80,7 +80,9 @@ broadcast's original recipient snapshot. Current inbox tools address the current
 Repository coordination notices are separate from inbox messages. A notice records a kind,
 creator generation, repository, optional branch, bounded lifetime, and terminal resolution or
 withdrawal audit fields. Any registered tenant actor may resolve a notice, while only the same
-stable creator identity may withdraw it. Notice reads do not create a default session.
+stable creator identity may withdraw it. Notice reads use stable keyset cursors and do not create a
+default session. Creator, resolver, and withdrawer references preserve identity generation lineage
+until the notice leaves its audit window.
 
 SQLite serializes local transactions, uses WAL mode, and polls an inbox version on a bounded
 interval. PostgreSQL uses transactions, advisory locks where required for recipient ordering,
@@ -100,12 +102,13 @@ subscriptions, request rates, agents, tokens, retained messages, stored bytes, m
 broadcast fan-out. Admission returns a safe retryable status before allocating downstream resources
 when a bound is full.
 
-Agent lifecycle storage permits 1,000 open identities per tenant, eight live sessions and 64
-retained session rows per stable identity. Expired leases become ended sessions and are removed after
-30 days; inactive identities close after 30 dormant days, and unreferenced closed identities become
-eligible for deletion 30 days later. Notices allow one- through 90-day lifetimes, default to 14 days,
-retain terminal audit state for 30 days, and are capped per tenant at 10,000 rows and 64 MiB of
-content.
+Agent lifecycle storage permits 1,000 open and 10,000 retained identities per tenant, eight live
+sessions and 64 retained session rows per stable identity. Expired leases become ended sessions and
+are removed after 30 days; inactive identities close after 30 dormant days, and unreferenced closed
+identities become eligible for deletion 30 days later. Destructive lifecycle mutations require an
+exact current-generation guard, and dormant pruning serializes with registration and delivery before
+rechecking eligibility. Notices allow one- through 90-day lifetimes, default to 14 days, retain
+terminal audit state for 30 days, and are capped per tenant at 10,000 rows and 64 MiB of content.
 
 Queues are finite and waits have deadlines. Shutdown stops new admission, closes the HTTP server,
 closes applications and stores, then flushes telemetry within a bounded timeout. Cleanup remains

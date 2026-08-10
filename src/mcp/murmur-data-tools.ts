@@ -44,6 +44,7 @@ import {
   type SendMessageOutput,
   SendMessageOutputSchema,
   toAgentDto,
+  toListAgentsOutput,
   toMessageDto,
   type WaitForMessagesInput,
   WaitForMessagesInputSchema,
@@ -80,7 +81,6 @@ import type {
   MessageStore,
 } from "../storage/message-store.js";
 import { toolResult } from "./murmur-tool-results.js";
-import { recordRepositoryDivergence } from "../observability/lifecycle-metrics.js";
 import { callHistoryTool } from "./murmur-history-tools.js";
 import { callLifecycleTool } from "./murmur-lifecycle-tools.js";
 import { callNoticeTool } from "./murmur-notice-tools.js";
@@ -91,6 +91,7 @@ export type DataToolContext = {
   readonly branchName: BranchName | null;
   readonly client: AgentClient | null;
   readonly notifyResourceListChanged: () => Promise<void>;
+  readonly recordRepositoryDivergence: () => void;
   readonly repositoryName: RepositoryName | null;
   readonly store: MessageStore | null;
 };
@@ -256,10 +257,12 @@ export async function callDataTool(
         ...(context.repositoryName === null ? {} : { repository: context.repositoryName.value }),
       });
       const command: RegisterAgentCommand = { ...parsed, metadata };
-      const wasKnown: boolean = (await store.getAgent(command.agentId)) !== null;
+      const previous: Agent | null = await store.getAgent(command.agentId);
       const result: RegisterAgentResult = await store.registerAgent(command);
-      if (result.repositoryDiverged) recordRepositoryDivergence();
-      if (!wasKnown) await context.notifyResourceListChanged();
+      if (result.repositoryDiverged) context.recordRepositoryDivergence();
+      if ((previous === null || previous.state !== "active") && result.agent.state === "active") {
+        await context.notifyResourceListChanged();
+      }
       const output: RegisterAgentOutput = RegisterAgentOutputSchema.parse({
         agent: toAgentDto(result.agent),
         inbox_uri: inboxUri(command.agentId),
@@ -272,9 +275,9 @@ export async function callDataTool(
     }
     case "list_agents": {
       const input: ListAgentsInput = ListAgentsInputSchema.parse(argumentsValue);
-      const output: ListAgentsOutput = ListAgentsOutputSchema.parse({
-        agents: (await store.listAgents(listAgentsQuery(input))).map(toAgentDto),
-      });
+      const output: ListAgentsOutput = ListAgentsOutputSchema.parse(
+        toListAgentsOutput(await store.listAgents(listAgentsQuery(input))),
+      );
       return toolResult(output);
     }
     case "get_agent": {

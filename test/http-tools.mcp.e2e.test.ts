@@ -6,14 +6,58 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { z } from "zod";
 
 import { type MurmurHttpServer, startHttpServer } from "../src/http-server.js";
+import { createHttpObservability } from "../src/observability/request-observation.js";
+import { type LogOutput, StructuredLogger } from "../src/observability/structured-logger.js";
+import { createTelemetry } from "../src/observability/telemetry.js";
 import {
   initializeSession,
+  initializeRequest,
   JsonRpcEnvelopeSchema,
   postJson,
   requestHeaders,
   responsePayload,
   testEnvironment,
 } from "./support/http-mcp-harness.js";
+
+class CapturingLogOutput implements LogOutput {
+  public readonly errors: string[] = [];
+  public readonly infos: string[] = [];
+
+  public error(line: string): void {
+    this.errors.push(line);
+  }
+
+  public info(line: string): void {
+    this.infos.push(line);
+  }
+}
+
+async function postForRepository(
+  url: URL,
+  body: Record<string, unknown>,
+  repository: string,
+  sessionId: string | null,
+): Promise<Response> {
+  const headers: Headers = requestHeaders(sessionId);
+  headers.set("X-Murmur-Repository", repository);
+  return await fetch(url, { body: JSON.stringify(body), headers, method: "POST" });
+}
+
+async function initializeForRepository(url: URL, repository: string): Promise<string> {
+  const response: Response = await postForRepository(url, initializeRequest(90), repository, null);
+  expect(response.status).toBe(200);
+  await responsePayload(response);
+  const sessionId: string | null = response.headers.get("mcp-session-id");
+  if (sessionId === null) throw new Error("Repository session did not receive an MCP session ID");
+  const initialized: Response = await postForRepository(
+    url,
+    { jsonrpc: "2.0", method: "notifications/initialized" },
+    repository,
+    sessionId,
+  );
+  expect(initialized.status).toBe(202);
+  return sessionId;
+}
 
 test("remote MCP serves tools with repository context", async (): Promise<void> => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-http-"));
@@ -113,4 +157,72 @@ test("remote MCP serves tools with repository context", async (): Promise<void> 
     await server.stop();
     rmSync(directory, { force: true, recursive: true });
   }
+});
+
+test("repository divergence emits one caller-free structured event", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-lifecycle-observability-"));
+  const environment: NodeJS.ProcessEnv = {
+    ...testEnvironment(join(directory, "messages.db")),
+    MURMUR_LOG_LEVEL: "info",
+  };
+  const output: CapturingLogOutput = new CapturingLogOutput();
+  const server: MurmurHttpServer = await startHttpServer(environment, {
+    observability: createHttpObservability(
+      new StructuredLogger(environment, output),
+      createTelemetry(environment),
+    ),
+  });
+  const agentId: string = "divergent-agent-secret";
+  const repositoryA: string = "owner/private-repository-a";
+  const repositoryB: string = "owner/private-repository-b";
+  try {
+    const sessionA: string = await initializeForRepository(server.mcpUrl, repositoryA);
+    const sessionB: string = await initializeForRepository(server.mcpUrl, repositoryB);
+    const first: Response = await postForRepository(
+      server.mcpUrl,
+      {
+        id: 91,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: {
+          arguments: { agent_id: agentId, session_key: "pane-a" },
+          name: "register_agent",
+        },
+      },
+      repositoryA,
+      sessionA,
+    );
+    expect(first.status).toBe(200);
+    await responsePayload(first);
+    const divergent: Response = await postForRepository(
+      server.mcpUrl,
+      {
+        id: 92,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: {
+          arguments: { agent_id: agentId, session_key: "pane-b" },
+          name: "register_agent",
+        },
+      },
+      repositoryB,
+      sessionB,
+    );
+    expect(divergent.status).toBe(200);
+    expect(JSON.stringify(await responsePayload(divergent))).toContain(
+      '"repository_diverged":true',
+    );
+  } finally {
+    await server.stop();
+    rmSync(directory, { force: true, recursive: true });
+  }
+  const divergenceEvents: string[] = output.infos.filter((line: string): boolean =>
+    line.includes('"event":"agent.repository_divergence"'),
+  );
+  expect(divergenceEvents).toHaveLength(1);
+  const event: string | undefined = divergenceEvents[0];
+  if (event === undefined) throw new Error("Repository divergence event was not emitted");
+  expect(event).not.toContain(agentId);
+  expect(event).not.toContain(repositoryA);
+  expect(event).not.toContain(repositoryB);
 });

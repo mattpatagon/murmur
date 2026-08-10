@@ -88,6 +88,17 @@ create index notices_repository_open
 create index notices_terminal_cleanup
   on murmur.notices(tenant_id, expires_at, resolved_at, withdrawn_at, notice_id);
 
+create index notices_creator_agent
+  on murmur.notices(tenant_id, creator_id);
+
+create index notices_resolver_agent
+  on murmur.notices(tenant_id, resolved_by_id)
+  where resolved_by_id is not null;
+
+create index notices_withdrawer_agent
+  on murmur.notices(tenant_id, withdrawn_by_id)
+  where withdrawn_by_id is not null;
+
 alter table murmur.notices enable row level security;
 alter table murmur.notices force row level security;
 

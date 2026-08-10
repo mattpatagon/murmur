@@ -54,11 +54,22 @@ export type PostNoticeResult = {
 export type ListNoticesQuery = {
   readonly actorId: AgentId;
   readonly branchName: BranchName | null;
+  readonly cursor: NoticeCursor | null;
   readonly kind: NoticeKind | null;
   readonly limit: number;
   readonly repositoryName: RepositoryName;
   readonly sessionKey: SessionKey | null;
   readonly state: NoticeState | "all";
+};
+
+export type NoticeCursor = {
+  readonly createdAt: Instant;
+  readonly noticeId: NoticeId;
+};
+
+export type ListNoticesResult = {
+  readonly nextCursor: NoticeCursor | null;
+  readonly notices: readonly Notice[];
 };
 
 export type ResolveNoticeCommand = {

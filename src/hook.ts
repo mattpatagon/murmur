@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import process from "node:process";
@@ -64,6 +64,7 @@ type EndRemoteSession = (
   identity: AgentIdentity,
   options: {
     readonly eventName: "SessionEnd" | "Stop";
+    readonly expectedGeneration: number;
     readonly sessionKey: string;
     readonly token: string;
     readonly timeoutMs: number;
@@ -141,6 +142,18 @@ function cachePath(cacheDirectory: string, identity: AgentIdentity): string {
   return join(cacheDirectory, `${identity.client}-${identityHash}.json`);
 }
 
+function sessionCachePath(
+  cacheDirectory: string,
+  identity: AgentIdentity,
+  sessionKey: string,
+): string {
+  const keyHash: string = createHash("sha256")
+    .update(`${identity.agentId}\u0000${sessionKey}`)
+    .digest("hex")
+    .slice(0, 24);
+  return join(cacheDirectory, `${identity.client}-${keyHash}.session.json`);
+}
+
 function readCache(path: string): HookCache {
   if (!existsSync(path)) return { lastCheckedAt: 0, lastNotifiedInboxVersion: 0 };
   try {
@@ -161,6 +174,30 @@ function writeCache(path: string, cache: HookCache): void {
   mkdirSync(dirname(path), { recursive: true });
   const temporaryPath: string = join(dirname(path), `.murmur-hook-${randomUUID()}.tmp`);
   writeFileSync(temporaryPath, `${JSON.stringify(cache)}\n`, { encoding: "utf8", mode: 0o600 });
+  renameSync(temporaryPath, path);
+}
+
+function readSessionGeneration(path: string): number | null {
+  if (!existsSync(path)) return null;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (!isRecord(parsed)) return null;
+    const generation: unknown = parsed["generation"];
+    return typeof generation === "number" && Number.isSafeInteger(generation) && generation > 0
+      ? generation
+      : null;
+  } catch (_error: unknown) {
+    return null;
+  }
+}
+
+function writeSessionGeneration(path: string, generation: number): void {
+  mkdirSync(dirname(path), { recursive: true });
+  const temporaryPath: string = join(dirname(path), `.murmur-hook-${randomUUID()}.tmp`);
+  writeFileSync(temporaryPath, `${JSON.stringify({ generation })}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
   renameSync(temporaryPath, path);
 }
 
@@ -247,20 +284,29 @@ export async function handleHook(
     options.timeoutMs ?? positiveInteger(environment["MURMUR_HOOK_TIMEOUT_MS"], DEFAULT_TIMEOUT_MS);
   const sessionKey: string = hookSessionKey(input.session_id);
   const url: string = options.url ?? environment["MURMUR_MCP_URL"] ?? DEFAULT_MURMUR_URL;
-  if (eventName === "Stop" || eventName === "SessionEnd") {
-    await (options.endSession ?? endRemoteAgentSession)(identity, {
-      eventName,
-      sessionKey,
-      timeoutMs,
-      token,
-      url,
-    });
-    return null;
-  }
   const cacheDirectory: string =
     options.cacheDirectory ??
     environmentPath(environment, "MURMUR_CACHE_DIR") ??
     defaultHookCacheDirectory(environment);
+  const hasNamedSession: boolean = input.session_id !== undefined && input.session_id.trim() !== "";
+  const generationPath: string = sessionCachePath(cacheDirectory, identity, sessionKey);
+  if (eventName === "Stop" || eventName === "SessionEnd") {
+    const expectedGeneration: number | null = hasNamedSession
+      ? readSessionGeneration(generationPath)
+      : null;
+    if (expectedGeneration !== null) {
+      await (options.endSession ?? endRemoteAgentSession)(identity, {
+        eventName,
+        expectedGeneration,
+        sessionKey,
+        timeoutMs,
+        token,
+        url,
+      });
+      rmSync(generationPath, { force: true });
+    }
+    return null;
+  }
   const path: string = cachePath(cacheDirectory, identity);
   const cache: HookCache = readCache(path);
   const now: number = options.now ?? Date.now();
@@ -280,6 +326,7 @@ export async function handleHook(
     token,
     url,
   });
+  if (hasNamedSession) writeSessionGeneration(generationPath, summary.agentGeneration);
   const hasSessionStartNotices: boolean =
     eventName === "SessionStart" && (summary.noticeCount ?? 0) > 0;
   const shouldNotify: boolean =

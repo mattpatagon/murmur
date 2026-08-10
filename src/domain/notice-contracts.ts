@@ -9,24 +9,56 @@ import {
   NoticeKindSchema,
   NoticeStateSchema,
   ResolutionNote,
+  SessionKeyInputSchema,
   SessionKey,
 } from "./lifecycle-values.js";
 import type {
   ListNoticesQuery,
+  ListNoticesResult,
   Notice,
+  NoticeCursor,
   PostNoticeCommand,
   ResolveNoticeCommand,
   WithdrawNoticeCommand,
 } from "./notice-models.js";
-import { AgentId, BranchName, IdempotencyKey, type RepositoryName } from "./value-objects.js";
+import {
+  AgentId,
+  BranchName,
+  IdempotencyKey,
+  Instant,
+  type RepositoryName,
+} from "./value-objects.js";
 
 const AgentIdTextSchema: z.ZodString = z.string().min(1).max(200);
 const InstantTextSchema: z.ZodISODateTime = z.iso.datetime({ offset: true });
-const SessionKeyTextSchema: z.ZodString = z
+const RepositoryNameTextSchema: z.ZodString = z
   .string()
-  .min(1)
-  .max(64)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u);
+  .min(3)
+  .max(500)
+  .regex(/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/u);
+const NoticeCursorPayloadSchema: z.ZodTuple<[z.ZodISODateTime, z.ZodString]> = z.tuple([
+  InstantTextSchema,
+  z.string().uuid(),
+]);
+
+function decodeNoticeCursor(value: string): NoticeCursor {
+  try {
+    const decoded: string = Buffer.from(value, "base64url").toString("utf8");
+    const payload: readonly [string, string, ...unknown[]] = NoticeCursorPayloadSchema.parse(
+      JSON.parse(decoded),
+    );
+    return { createdAt: Instant.parse(payload[0]), noticeId: NoticeId.parse(payload[1]) };
+  } catch (_error: unknown) {
+    throw new Error("Invalid notice cursor");
+  }
+}
+
+export function encodeNoticeCursor(cursor: NoticeCursor): string {
+  return Buffer.from(
+    JSON.stringify([cursor.createdAt.toISOString(), cursor.noticeId.value]),
+    "utf8",
+  ).toString("base64url");
+}
 
 export type NoticeDto = {
   readonly branch: string | null;
@@ -57,7 +89,7 @@ export const NoticeDtoSchema: z.ZodType<NoticeDto> = z.strictObject({
   expires_at: InstantTextSchema,
   kind: NoticeKindSchema,
   notice_id: z.string().uuid(),
-  repository: z.string().min(3).max(500),
+  repository: RepositoryNameTextSchema,
   resolution_note: z.string().min(1).max(2_000).nullable(),
   resolved_at: InstantTextSchema.nullable(),
   resolved_by_generation: z.number().int().positive().nullable(),
@@ -115,8 +147,8 @@ export const PostNoticeInputSchema: z.ZodType<PostNoticeInput> = z.strictObject(
     .default(NOTICE_DEFAULT_TTL_HOURS),
   idempotency_key: z.string().min(1).max(200).optional(),
   kind: NoticeKindSchema,
-  repository: z.string().min(3).max(500).optional(),
-  session_key: SessionKeyTextSchema.optional(),
+  repository: RepositoryNameTextSchema.optional(),
+  session_key: SessionKeyInputSchema.optional(),
 });
 
 export function postNoticeCommand(
@@ -140,6 +172,7 @@ export function postNoticeCommand(
 export type ListNoticesInput = {
   readonly actor_id: string;
   readonly branch?: string | undefined;
+  readonly cursor?: string | undefined;
   readonly kind?: "blocker" | "decision" | "handoff" | "ownership" | undefined;
   readonly limit: number;
   readonly repository?: string | undefined;
@@ -150,10 +183,11 @@ export type ListNoticesInput = {
 export const ListNoticesInputSchema: z.ZodType<ListNoticesInput> = z.strictObject({
   actor_id: AgentIdTextSchema,
   branch: z.string().trim().min(1).max(500).optional(),
+  cursor: z.string().min(1).max(500).optional(),
   kind: NoticeKindSchema.optional(),
   limit: z.number().int().min(1).max(500).default(100),
-  repository: z.string().min(3).max(500).optional(),
-  session_key: SessionKeyTextSchema.optional(),
+  repository: RepositoryNameTextSchema.optional(),
+  session_key: SessionKeyInputSchema.optional(),
   state: z.union([NoticeStateSchema, z.literal("all")]).default("open"),
 });
 
@@ -164,6 +198,7 @@ export function listNoticesQuery(
   return {
     actorId: AgentId.parse(input.actor_id),
     branchName: input.branch === undefined ? null : BranchName.parse(input.branch),
+    cursor: input.cursor === undefined ? null : decodeNoticeCursor(input.cursor),
     kind: input.kind === undefined ? null : NoticeKindSchema.parse(input.kind),
     limit: input.limit,
     repositoryName,
@@ -183,9 +218,9 @@ type ChangeNoticeInput = {
 const ChangeNoticeInputSchema: z.ZodType<ChangeNoticeInput> = z.strictObject({
   actor_id: AgentIdTextSchema,
   notice_id: z.string().uuid(),
-  repository: z.string().min(3).max(500).optional(),
+  repository: RepositoryNameTextSchema.optional(),
   resolution_note: z.string().trim().min(1).max(2_000),
-  session_key: SessionKeyTextSchema.optional(),
+  session_key: SessionKeyInputSchema.optional(),
 });
 
 export type ResolveNoticeInput = ChangeNoticeInput;
@@ -236,7 +271,18 @@ export const NoticeMutationOutputSchema: z.ZodType<NoticeMutationOutput> = z.str
   notice: NoticeDtoSchema,
 });
 
-export type ListNoticesOutput = Record<string, unknown> & { readonly notices: NoticeDto[] };
+export type ListNoticesOutput = Record<string, unknown> & {
+  readonly next_cursor: string | null;
+  readonly notices: NoticeDto[];
+};
 export const ListNoticesOutputSchema: z.ZodType<ListNoticesOutput> = z.strictObject({
+  next_cursor: z.string().min(1).max(500).nullable(),
   notices: z.array(NoticeDtoSchema),
 });
+
+export function toListNoticesOutput(result: ListNoticesResult): ListNoticesOutput {
+  return {
+    next_cursor: result.nextCursor === null ? null : encodeNoticeCursor(result.nextCursor),
+    notices: result.notices.map(toNoticeDto),
+  };
+}

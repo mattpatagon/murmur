@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { AgentGeneration, SessionKey } from "./lifecycle-values.js";
+import { AgentGeneration, SessionKey, SessionKeyInputSchema } from "./lifecycle-values.js";
 import type { Message } from "./models.js";
 import {
   AgentClient,
@@ -27,10 +27,12 @@ export {
   RegisterAgentInputSchema,
   RegisterAgentOutputSchema,
   closeAgentCommand,
+  encodeAgentCursor,
   endSessionCommand,
   listAgentsQuery,
   registerAgentCommand,
   toAgentDto,
+  toListAgentsOutput,
 } from "./agent-contracts.js";
 export type {
   AgentDto,
@@ -47,7 +49,6 @@ export type {
 } from "./agent-contracts.js";
 
 export const RETENTION_DAYS: number = 30;
-export const ACTIVE_AGENT_WINDOW_MINUTES: number = 60;
 
 const AgentIdTextSchema: z.ZodString = z.string().min(1).max(200);
 const MessageIdTextSchema: z.ZodString = z.string().uuid();
@@ -185,7 +186,7 @@ export const SendMessageInputSchema: z.ZodType<SendMessageInput> = z.strictObjec
   idempotency_key: z.string().min(1).max(200).optional(),
   recipient_id: AgentIdTextSchema,
   sender_id: AgentIdTextSchema,
-  session_key: z.string().min(1).max(64).optional(),
+  session_key: SessionKeyInputSchema.optional(),
   thread_id: ThreadIdTextSchema.optional(),
 });
 
@@ -200,7 +201,7 @@ export const BroadcastMessageInputSchema: z.ZodType<BroadcastMessageInput> = z.s
   context: MessageContextDtoSchema.optional(),
   idempotency_key: z.string().min(1).max(200).optional(),
   sender_id: AgentIdTextSchema,
-  session_key: z.string().min(1).max(64).optional(),
+  session_key: SessionKeyInputSchema.optional(),
   thread_id: ThreadIdTextSchema.optional(),
 });
 
@@ -208,7 +209,7 @@ export const GetMessagesInputSchema: z.ZodType<GetMessagesInput> = z.strictObjec
   after_sequence: SequenceNumberSchema.default(0),
   agent_id: AgentIdTextSchema,
   limit: z.number().int().min(1).max(500).default(100),
-  session_key: z.string().min(1).max(64).optional(),
+  session_key: SessionKeyInputSchema.optional(),
   thread_id: ThreadIdTextSchema.optional(),
   unread_only: z.boolean().default(false),
 });
@@ -216,14 +217,14 @@ export const GetMessagesInputSchema: z.ZodType<GetMessagesInput> = z.strictObjec
 export const WaitForMessagesInputSchema: z.ZodType<WaitForMessagesInput> = z.strictObject({
   after_sequence: SequenceNumberSchema.default(0),
   agent_id: AgentIdTextSchema,
-  session_key: z.string().min(1).max(64).optional(),
+  session_key: SessionKeyInputSchema.optional(),
   timeout_seconds: z.number().int().min(1).max(25).default(20),
 });
 
 export const MarkMessagesReadInputSchema: z.ZodType<MarkMessagesReadInput> = z.strictObject({
   agent_id: AgentIdTextSchema,
   message_ids: z.array(MessageIdTextSchema).min(1).max(500),
-  session_key: z.string().min(1).max(64).optional(),
+  session_key: SessionKeyInputSchema.optional(),
 });
 
 export type SendMessageOutput = Record<string, unknown> & {

@@ -8,14 +8,21 @@ import type {
   ListResourceTemplatesResult,
   MessageExtraInfo,
   ReadResourceResult,
+  ResourceListChangedNotification,
   ResourceUpdatedNotification,
 } from "@modelcontextprotocol/sdk/types.js";
-import { ResourceUpdatedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  ResourceListChangedNotificationSchema,
+  ResourceUpdatedNotificationSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 
 import {
   type InboxOutput,
+  CloseAgentOutputSchema,
+  EndSessionOutputSchema,
   InboxOutputSchema,
   RegisterAgentOutputSchema,
+  type RegisterAgentOutput,
   SendMessageOutputSchema,
   type WaitForMessagesOutput,
   WaitForMessagesOutputSchema,
@@ -161,6 +168,74 @@ test("MCP resources expose durable inboxes and validate subscription lifecycle",
     await expect(
       client.subscribeResource({ uri: "murmur://inbox/machine-a%3Aunknown" }),
     ).rejects.toThrow("Unknown agent");
+  } finally {
+    await client.close();
+    await connected.application.close();
+  }
+});
+
+test("reactivating known inactive and closed agents emits resource-list changes", async (): Promise<void> => {
+  const connected: ConnectedApplication = await connectApplication();
+  const client: Client = connected.client;
+  const agentId: string = "resource-reactivation-agent";
+  const nextListChange: () => Promise<ResourceListChangedNotification> =
+    (): Promise<ResourceListChangedNotification> =>
+      new Promise((resolve: (value: ResourceListChangedNotification) => void): void => {
+        client.setNotificationHandler(ResourceListChangedNotificationSchema, resolve);
+      });
+  try {
+    await callValidated(
+      client,
+      "register_agent",
+      { agent_id: agentId, session_key: "default" },
+      RegisterAgentOutputSchema,
+    );
+    let changed: Promise<ResourceListChangedNotification> = nextListChange();
+    await callValidated(
+      client,
+      "end_session",
+      {
+        agent_id: agentId,
+        end_default_session: false,
+        expected_generation: 1,
+        reason: "stop",
+        session_key: "default",
+      },
+      EndSessionOutputSchema,
+    );
+    await Promise.race([changed, notificationTimeout()]);
+    expect((await client.listResources()).resources).toHaveLength(0);
+
+    changed = nextListChange();
+    await callValidated(
+      client,
+      "register_agent",
+      { agent_id: agentId, session_key: "returned" },
+      RegisterAgentOutputSchema,
+    );
+    await Promise.race([changed, notificationTimeout()]);
+    expect((await client.listResources()).resources).toHaveLength(1);
+
+    changed = nextListChange();
+    await callValidated(
+      client,
+      "close_agent",
+      { agent_id: agentId, expected_generation: 1, reason: "manual" },
+      CloseAgentOutputSchema,
+    );
+    await Promise.race([changed, notificationTimeout()]);
+    expect((await client.listResources()).resources).toHaveLength(0);
+
+    changed = nextListChange();
+    const reopened: RegisterAgentOutput = await callValidated(
+      client,
+      "register_agent",
+      { agent_id: agentId, session_key: "reopened" },
+      RegisterAgentOutputSchema,
+    );
+    expect(reopened.agent.generation).toBe(2);
+    await Promise.race([changed, notificationTimeout()]);
+    expect((await client.listResources()).resources).toHaveLength(1);
   } finally {
     await client.close();
     await connected.application.close();

@@ -9,6 +9,7 @@ import {
 import { NOTICE_AUDIT_DAYS, NoticeId, SessionKey } from "../domain/lifecycle-values.js";
 import type {
   ListNoticesQuery,
+  ListNoticesResult,
   Notice,
   PostNoticeCommand,
   PostNoticeResult,
@@ -153,8 +154,8 @@ export async function listPostgresNotices(
   tenantId: TenantId,
   query: ListNoticesQuery,
   now: Instant,
-): Promise<readonly Notice[]> {
-  return await database.begin(async (transaction: TransactionSql): Promise<readonly Notice[]> => {
+): Promise<ListNoticesResult> {
+  return await database.begin(async (transaction: TransactionSql): Promise<ListNoticesResult> => {
     await setPostgresTenantContext(transaction, tenantId);
     if (query.sessionKey !== null) {
       await renewPostgresSessionInTransaction(
@@ -177,6 +178,10 @@ export async function listPostgresNotices(
     }
     const branch: string | null = query.branchName === null ? null : query.branchName.value;
     const kind: string | null = query.kind;
+    const cursorCreatedAt: string | null =
+      query.cursor === null ? null : query.cursor.createdAt.toISOString();
+    const cursorNoticeId: string | null =
+      query.cursor === null ? null : query.cursor.noticeId.value;
     const raw: unknown = await transaction`
       SELECT notice_id::text AS notice_id, kind, creator_id, creator_generation,
         repository_name, branch_name, content, idempotency_key,
@@ -203,11 +208,27 @@ export async function listPostgresNotices(
           OR (${query.state} = 'expired' AND resolved_at IS NULL AND withdrawn_at IS NULL
               AND expires_at <= ${now.toISOString()}::timestamptz)
         )
+        AND (
+          ${cursorCreatedAt}::timestamptz IS NULL
+          OR created_at < ${cursorCreatedAt}::timestamptz
+          OR (created_at = ${cursorCreatedAt}::timestamptz
+            AND notice_id > ${cursorNoticeId}::uuid)
+        )
       ORDER BY created_at DESC, notice_id ASC
-      LIMIT ${query.limit}
+      LIMIT ${query.limit + 1}
     `;
     const rows: NoticeRow[] = z.array(NoticeRowSchema).parse(raw);
-    return rows.map((row: NoticeRow): Notice => mapNoticeRow(row, now));
+    const notices: Notice[] = rows
+      .slice(0, query.limit)
+      .map((row: NoticeRow): Notice => mapNoticeRow(row, now));
+    const last: Notice | undefined = notices.at(-1);
+    return {
+      nextCursor:
+        rows.length > query.limit && last !== undefined
+          ? { createdAt: last.createdAt, noticeId: last.noticeId }
+          : null,
+      notices,
+    };
   });
 }
 

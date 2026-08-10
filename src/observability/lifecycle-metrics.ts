@@ -1,11 +1,9 @@
-import { type Counter, type Meter, metrics } from "@opentelemetry/api";
+import type { LogFields } from "./structured-logger.js";
 
-const meter: Meter = metrics.getMeter("murmur.agent-lifecycle");
-const repositoryDivergenceCounter: Counter = meter.createCounter(
-  "murmur.agent.repository_divergence",
-  { description: "Agent registrations whose repository differs while another session is live" },
-);
+export type LifecycleEventSink = {
+  info(event: string, fields: LogFields): void;
+};
 
-export function recordRepositoryDivergence(): void {
-  repositoryDivergenceCounter.add(1);
+export function recordRepositoryDivergence(sink: LifecycleEventSink): void {
+  sink.info("agent.repository_divergence", {});
 }

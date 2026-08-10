@@ -14,12 +14,15 @@ All notable changes to Murmur are documented in this file.
 
 - Broadcast only to recipients with a live lease; continue accepting durable direct messages for inactive recipients and reject closed recipients until registration reopens them.
 - Default agent discovery to active identities and expose explicit filters for open, inactive, closed, or all lifecycle states.
-- Bound each tenant to 1,000 open identities, each identity to eight live and 64 retained sessions, and notice storage to 10,000 records and 64 MiB of content.
+- Bound each tenant to 1,000 open and 10,000 retained identities, each identity to eight live and 64 retained sessions, and notice storage to 10,000 records and 64 MiB of content.
+- Require current-generation guards for session ending and identity closure, and cursor-paginate agent and notice discovery.
 
 ### Fixed
 
 - Close dormant identities after 30 days and garbage-collect unreferenced lifecycle state after its audit window, preventing dead workspaces and abandoned sessions from remaining discoverable forever.
+- Preserve monotonic identity lineage while notice audit rows refer to an actor, and serialize dormant pruning with concurrent registration and delivery.
 - Preserve generation foreign keys, resource accounting, forced RLS, and safe quota errors across fresh and populated PostgreSQL upgrades.
+- Split lifecycle upgrades into independently replayable migration phases and drain superseded Cloud Run revisions before mixed lifecycle writers can persist stale generations.
 
 ### Security
 

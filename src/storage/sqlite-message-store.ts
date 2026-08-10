@@ -13,6 +13,7 @@ import type {
   EndSessionResult,
   GetMessagesQuery,
   ListAgentsQuery,
+  ListAgentsResult,
   MarkMessagesReadCommand,
   MarkMessagesReadResult,
   Message,
@@ -23,7 +24,7 @@ import type {
 } from "../domain/models.js";
 import type {
   ListNoticesQuery,
-  Notice,
+  ListNoticesResult,
   PostNoticeCommand,
   PostNoticeResult,
   ResolveNoticeCommand,
@@ -176,7 +177,7 @@ export class SqliteMessageStore implements MessageStore {
     return known === null ? null : sqliteAgent(this.database, agentId, this.clock.now());
   }
 
-  public listAgents(query: ListAgentsQuery): readonly Agent[] {
+  public listAgents(query: ListAgentsQuery): ListAgentsResult {
     this.ensureOpen();
     this.pruneExpired(this.clock.now());
     return listSqliteAgents(this.database, query, this.clock.now());
@@ -287,7 +288,7 @@ export class SqliteMessageStore implements MessageStore {
     return postSqliteNotice(this.database, command, now);
   }
 
-  public listNotices(query: ListNoticesQuery): readonly Notice[] {
+  public listNotices(query: ListNoticesQuery): ListNoticesResult {
     this.ensureOpen();
     const now: Instant = this.clock.now();
     this.pruneExpired(now);

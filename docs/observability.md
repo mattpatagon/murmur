@@ -66,10 +66,10 @@ correlation, attach work to another tenant's trace, or suppress sampling through
 Attributes mirror the safe completion fields under the `murmur.*` namespace plus standard HTTP
 method, route, status, service, version, and deployment environment attributes.
 
-Lifecycle registration also emits the monotonic counter
-`murmur.agent.repository_divergence` when one stable identity reports a different repository while
-another session is still live. Alert on a sustained increase and inspect the registering clients;
-the metric contains no repository, agent, tenant, session, or message attributes.
+Lifecycle registration also emits the structured `agent.repository_divergence` event when one
+stable identity reports a different repository while another session is still live. Alert on a
+sustained increase and inspect the registering clients; the event contains no repository, agent,
+tenant, session, message, or other caller-derived fields.
 
 The exporter queue holds at most 1,024 spans, batches at most 256, and schedules at five-second
 intervals. Span attributes, values, events, and links have explicit limits. Provider shutdown is

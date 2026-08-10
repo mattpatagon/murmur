@@ -7,6 +7,7 @@ import {
   AgentStateSchema,
   ExplicitAgentCloseReasonSchema,
   SessionEndReasonSchema,
+  SessionKeyInputSchema,
   SessionKey,
 } from "./lifecycle-values.js";
 import type {
@@ -14,6 +15,7 @@ import type {
   CloseAgentCommand,
   EndSessionCommand,
   ListAgentsQuery,
+  ListAgentsResult,
   RegisterAgentCommand,
 } from "./models.js";
 import {
@@ -28,11 +30,6 @@ const AgentIdTextSchema: z.ZodString = z.string().min(1).max(200);
 const DisplayNameTextSchema: z.ZodString = z.string().min(1).max(200);
 const InstantTextSchema: z.ZodISODateTime = z.iso.datetime({ offset: true });
 const GenerationNumberSchema: z.ZodNumber = z.number().int().positive().safe();
-const SessionKeyTextSchema: z.ZodString = z
-  .string()
-  .min(1)
-  .max(64)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u);
 
 export type AgentDto = {
   readonly agent_id: string;
@@ -89,7 +86,7 @@ export const RegisterAgentInputSchema: z.ZodType<RegisterAgentInput> = z.strictO
   agent_id: AgentIdTextSchema,
   display_name: DisplayNameTextSchema.optional(),
   metadata: BoundedJsonObjectSchema.optional(),
-  session_key: SessionKeyTextSchema.optional(),
+  session_key: SessionKeyInputSchema.optional(),
 });
 
 export function registerAgentCommand(input: RegisterAgentInput): RegisterAgentCommand {
@@ -115,15 +112,36 @@ export const GetAgentOutputSchema: z.ZodType<GetAgentOutput> = z.strictObject({
 });
 
 export type ListAgentsInput = {
+  readonly cursor?: string | undefined;
+  readonly limit: number;
   readonly state: "active" | "all" | "closed" | "inactive" | "open";
 };
 
 export const ListAgentsInputSchema: z.ZodType<ListAgentsInput> = z.strictObject({
+  cursor: z.string().min(1).max(500).optional(),
+  limit: z.number().int().min(1).max(1_000).default(1_000),
   state: AgentListStateSchema.default("active"),
 });
 
+function decodeAgentCursor(value: string): AgentId {
+  try {
+    const decoded: string = Buffer.from(value, "base64url").toString("utf8");
+    return AgentId.parse(z.tuple([AgentIdTextSchema]).parse(JSON.parse(decoded))[0]);
+  } catch (_error: unknown) {
+    throw new Error("Invalid agent cursor");
+  }
+}
+
+export function encodeAgentCursor(agentId: AgentId): string {
+  return Buffer.from(JSON.stringify([agentId.value]), "utf8").toString("base64url");
+}
+
 export function listAgentsQuery(input: ListAgentsInput): ListAgentsQuery {
-  return { state: AgentListStateSchema.parse(input.state) };
+  return {
+    cursor: input.cursor === undefined ? null : decodeAgentCursor(input.cursor),
+    limit: input.limit,
+    state: AgentListStateSchema.parse(input.state),
+  };
 }
 
 export type RegisterAgentOutput = Record<string, unknown> & {
@@ -144,15 +162,26 @@ export const RegisterAgentOutputSchema: z.ZodType<RegisterAgentOutput> = z.stric
   retention_days: z.number().int().positive(),
 });
 
-export type ListAgentsOutput = Record<string, unknown> & { readonly agents: AgentDto[] };
+export type ListAgentsOutput = Record<string, unknown> & {
+  readonly agents: AgentDto[];
+  readonly next_cursor: string | null;
+};
 export const ListAgentsOutputSchema: z.ZodType<ListAgentsOutput> = z.strictObject({
   agents: z.array(AgentDtoSchema),
+  next_cursor: z.string().min(1).max(500).nullable(),
 });
+
+export function toListAgentsOutput(result: ListAgentsResult): ListAgentsOutput {
+  return {
+    agents: result.agents.map(toAgentDto),
+    next_cursor: result.nextCursor === null ? null : encodeAgentCursor(result.nextCursor),
+  };
+}
 
 export type EndSessionInput = {
   readonly agent_id: string;
   readonly end_default_session: boolean;
-  readonly expected_generation?: number | undefined;
+  readonly expected_generation: number;
   readonly reason: "session_end" | "stop";
   readonly session_key?: string | undefined;
 };
@@ -160,9 +189,9 @@ export type EndSessionInput = {
 export const EndSessionInputSchema: z.ZodType<EndSessionInput> = z.strictObject({
   agent_id: AgentIdTextSchema,
   end_default_session: z.boolean().default(false),
-  expected_generation: GenerationNumberSchema.optional(),
+  expected_generation: GenerationNumberSchema,
   reason: z.enum(["stop", "session_end"]).default("stop"),
-  session_key: SessionKeyTextSchema.optional(),
+  session_key: SessionKeyInputSchema.optional(),
 });
 
 export function endSessionCommand(input: EndSessionInput): EndSessionCommand {
@@ -170,10 +199,7 @@ export function endSessionCommand(input: EndSessionInput): EndSessionCommand {
     agentId: AgentId.parse(input.agent_id),
     endDefaultSession: input.end_default_session,
     endReason: SessionEndReasonSchema.parse(input.reason),
-    expectedGeneration:
-      input.expected_generation === undefined
-        ? null
-        : AgentGeneration.parse(input.expected_generation),
+    expectedGeneration: AgentGeneration.parse(input.expected_generation),
     sessionKey:
       input.session_key === undefined ? SessionKey.default() : SessionKey.parse(input.session_key),
   };
@@ -191,13 +217,13 @@ export const EndSessionOutputSchema: z.ZodType<EndSessionOutput> = z.strictObjec
 
 export type CloseAgentInput = {
   readonly agent_id: string;
-  readonly expected_generation?: number | undefined;
+  readonly expected_generation: number;
   readonly reason: "completed" | "manual" | "superseded" | "workspace_deleted";
 };
 
 export const CloseAgentInputSchema: z.ZodType<CloseAgentInput> = z.strictObject({
   agent_id: AgentIdTextSchema,
-  expected_generation: GenerationNumberSchema.optional(),
+  expected_generation: GenerationNumberSchema,
   reason: ExplicitAgentCloseReasonSchema,
 });
 
@@ -205,10 +231,7 @@ export function closeAgentCommand(input: CloseAgentInput): CloseAgentCommand {
   return {
     agentId: AgentId.parse(input.agent_id),
     closeReason: ExplicitAgentCloseReasonSchema.parse(input.reason),
-    expectedGeneration:
-      input.expected_generation === undefined
-        ? null
-        : AgentGeneration.parse(input.expected_generation),
+    expectedGeneration: AgentGeneration.parse(input.expected_generation),
   };
 }
 

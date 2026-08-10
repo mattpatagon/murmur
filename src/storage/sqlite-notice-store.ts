@@ -14,6 +14,7 @@ import {
 } from "../domain/lifecycle-values.js";
 import type {
   ListNoticesQuery,
+  ListNoticesResult,
   Notice,
   PostNoticeCommand,
   PostNoticeResult,
@@ -159,13 +160,16 @@ export function listSqliteNotices(
   database: Database,
   query: ListNoticesQuery,
   now: Instant,
-): readonly Notice[] {
+): ListNoticesResult {
   sqliteAgent(database, query.actorId, now);
   if (query.sessionKey !== null) {
     renewSqliteSession(database, query.actorId, query.sessionKey, now, false);
   }
   const branch: string | null = query.branchName === null ? null : query.branchName.value;
   const kind: string | null = query.kind;
+  const cursorCreatedAt: string | null =
+    query.cursor === null ? null : query.cursor.createdAt.toISOString();
+  const cursorNoticeId: string | null = query.cursor === null ? null : query.cursor.noticeId.value;
   const rows: unknown[] = database
     .query<
       unknown,
@@ -182,6 +186,10 @@ export function listSqliteNotices(
         string,
         string,
         string,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
         number,
       ]
     >(`
@@ -195,6 +203,9 @@ export function listSqliteNotices(
           OR (? = 'withdrawn' AND withdrawn_at IS NOT NULL)
           OR (? = 'open' AND resolved_at IS NULL AND withdrawn_at IS NULL AND expires_at > ?)
           OR (? = 'expired' AND resolved_at IS NULL AND withdrawn_at IS NULL AND expires_at <= ?)
+        )
+        AND (
+          ? IS NULL OR created_at < ? OR (created_at = ? AND notice_id > ?)
         )
       ORDER BY created_at DESC, notice_id ASC
       LIMIT ?
@@ -212,9 +223,22 @@ export function listSqliteNotices(
       now.toISOString(),
       query.state,
       now.toISOString(),
-      query.limit,
+      cursorCreatedAt,
+      cursorCreatedAt,
+      cursorCreatedAt,
+      cursorNoticeId,
+      query.limit + 1,
     );
-  return rows.map((row: unknown): Notice => mapNoticeRow(row, now));
+  const pageRows: unknown[] = rows.slice(0, query.limit);
+  const notices: Notice[] = pageRows.map((row: unknown): Notice => mapNoticeRow(row, now));
+  const last: Notice | undefined = notices.at(-1);
+  return {
+    nextCursor:
+      rows.length > query.limit && last !== undefined
+        ? { createdAt: last.createdAt, noticeId: last.noticeId }
+        : null,
+    notices,
+  };
 }
 
 function requireNotice(database: Database, noticeId: NoticeId): NoticeRow {

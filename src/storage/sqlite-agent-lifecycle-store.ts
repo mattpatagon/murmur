@@ -12,6 +12,7 @@ import {
   DEFAULT_SESSION_KEY,
   MAX_LIVE_SESSIONS_PER_AGENT,
   MAX_OPEN_AGENTS,
+  MAX_RETAINED_AGENTS,
   type SessionEndReason,
   SessionKey,
 } from "../domain/lifecycle-values.js";
@@ -22,11 +23,12 @@ import type {
   EndSessionCommand,
   EndSessionResult,
   ListAgentsQuery,
+  ListAgentsResult,
   RegisterAgentCommand,
   RegisterAgentResult,
 } from "../domain/models.js";
 import {
-  AgentId,
+  type AgentId,
   type Instant,
   type JsonObject,
   JsonObjectSchema,
@@ -97,6 +99,16 @@ function ensureOpenCapacity(database: Database): void {
     throw new Error("Agent count is invalid");
   }
   if (Number(count) >= MAX_OPEN_AGENTS) throw new AgentCapacityError();
+}
+
+function ensureRetainedCapacity(database: Database): void {
+  const row: unknown = database.query<unknown, []>("SELECT COUNT(*) AS count FROM agents").get();
+  if (row === null || typeof row !== "object") throw new Error("Agent count is invalid");
+  const count: unknown = Reflect.get(row, "count");
+  if (typeof count !== "number" && typeof count !== "bigint") {
+    throw new Error("Agent count is invalid");
+  }
+  if (Number(count) >= MAX_RETAINED_AGENTS) throw new AgentCapacityError();
 }
 
 function supersedeSessions(
@@ -243,6 +255,7 @@ export function registerSqliteAgent(
     let reopened: boolean = false;
     let repositoryDiverged: boolean = false;
     if (existing === null) {
+      ensureRetainedCapacity(database);
       ensureOpenCapacity(database);
       database
         .query<unknown, [string, string, string, string, string]>(`
@@ -327,21 +340,64 @@ export function listSqliteAgents(
   database: Database,
   query: ListAgentsQuery,
   now: Instant,
-): readonly Agent[] {
+): ListAgentsResult {
   endExpiredSqliteSessions(database, now);
-  const ids: unknown[] = database
-    .query<unknown, []>("SELECT agent_id FROM agents ORDER BY last_seen_at DESC, agent_id ASC")
-    .all();
-  return ids
-    .map((row: unknown): Agent => {
-      if (typeof row !== "object" || row === null) throw new Error("Agent row is invalid");
-      return sqliteAgent(database, AgentId.parse(Reflect.get(row, "agent_id")), now);
-    })
-    .filter((agent: Agent): boolean => {
-      if (query.state === "all") return true;
-      if (query.state === "open") return agent.state !== "closed";
-      return agent.state === query.state;
-    });
+  const timestamp: string = now.toISOString();
+  const cursor: string | null = query.cursor === null ? null : query.cursor.value;
+  const rows: unknown[] = database
+    .query<
+      unknown,
+      [string, string, string, string, string, string, string | null, string | null, number]
+    >(`
+      WITH projected AS (
+        SELECT
+          agent.*,
+          (SELECT COUNT(*) FROM agent_sessions AS session WHERE session.agent_id = agent.agent_id
+              AND session.generation = agent.generation
+              AND session.ended_at IS NULL
+              AND session.lease_expires_at > ?) AS live_session_count,
+          (SELECT MAX(session.lease_expires_at) FROM agent_sessions AS session WHERE session.agent_id = agent.agent_id
+              AND session.generation = agent.generation
+              AND session.ended_at IS NULL
+              AND session.lease_expires_at > ?) AS lease_expires_at,
+          CASE
+            WHEN agent.closed_at IS NOT NULL THEN 'closed'
+            WHEN EXISTS (
+              SELECT 1 FROM agent_sessions AS session
+              WHERE session.agent_id = agent.agent_id
+                AND session.generation = agent.generation
+                AND session.ended_at IS NULL
+                AND session.lease_expires_at > ?
+            ) THEN 'active'
+            ELSE 'inactive'
+          END AS state
+        FROM agents AS agent
+      )
+      SELECT * FROM projected
+      WHERE (? = 'all' OR (? = 'open' AND state != 'closed') OR state = ?)
+        AND (? IS NULL OR agent_id > ?)
+      ORDER BY agent_id ASC
+      LIMIT ?
+    `)
+    .all(
+      timestamp,
+      timestamp,
+      timestamp,
+      query.state,
+      query.state,
+      query.state,
+      cursor,
+      cursor,
+      query.limit + 1,
+    );
+  const agents: Agent[] = rows.slice(0, query.limit).map(mapAgentRow);
+  let nextCursor: AgentId | null = null;
+  if (rows.length > query.limit) {
+    const lastAgent: Agent | undefined = agents.at(-1);
+    if (lastAgent === undefined) throw new Error("Agent page unexpectedly has no cursor row");
+    nextCursor = lastAgent.agentId;
+  }
+  return { agents, nextCursor };
 }
 
 export function endSqliteSession(
@@ -357,7 +413,7 @@ export function endSqliteSession(
       return { ended: 0, generation: null };
     }
     const generation: AgentGeneration = AgentGeneration.parse(row.generation);
-    if (command.expectedGeneration !== null && !generation.equals(command.expectedGeneration)) {
+    if (!generation.equals(command.expectedGeneration)) {
       throw new StaleAgentGenerationError(command.agentId.value);
     }
     const keys: string[] = [command.sessionKey.value];
@@ -400,7 +456,7 @@ export function closeSqliteAgent(
     const row: StoredAgentRow | null = storedAgent(database, command.agentId);
     if (row === null) throw new UnknownAgentError(command.agentId.value);
     const generation: AgentGeneration = AgentGeneration.parse(row.generation);
-    if (command.expectedGeneration !== null && !generation.equals(command.expectedGeneration)) {
+    if (!generation.equals(command.expectedGeneration)) {
       throw new StaleAgentGenerationError(command.agentId.value);
     }
     const alreadyClosed: boolean = row.closed_at !== null;

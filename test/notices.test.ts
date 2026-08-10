@@ -5,12 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  type AgentGeneration,
+  AgentGeneration,
   NoticeContent,
   ResolutionNote,
   SessionKey,
 } from "../src/domain/lifecycle-values.js";
 import type {
+  ListNoticesQuery,
+  ListNoticesResult,
   Notice,
   PostNoticeCommand,
   PostNoticeResult,
@@ -82,12 +84,13 @@ function list(
   return store.listNotices({
     actorId: AgentId.parse("bob"),
     branchName: null,
+    cursor: null,
     kind: null,
     limit,
     repositoryName: RepositoryName.parse("mattpatagon/murmur"),
     sessionKey: null,
     state,
-  });
+  }).notices;
 }
 
 function requireNotice(notices: readonly Notice[]): Notice {
@@ -173,7 +176,7 @@ test("any actor resolves, only the stable creator withdraws, and generation bump
     store.closeAgent({
       agentId: AgentId.parse("alice"),
       closeReason: "completed",
-      expectedGeneration: null,
+      expectedGeneration: AgentGeneration.parse(1),
     });
     const reopened: RegisterAgentResult = store.registerAgent({
       agentId: AgentId.parse("alice"),
@@ -222,6 +225,37 @@ test("state filtering happens before pagination", (): void => {
     const page: readonly Notice[] = list(store, "open", 1);
     expect(page).toHaveLength(1);
     expect(requireNotice(page).noticeId.value).toBe(olderOpen.notice.noticeId.value);
+  });
+});
+
+test("notice keyset cursors traverse filtered pages without gaps or duplicates", (): void => {
+  withNotices(({ store }: NoticeFixture): void => {
+    for (const key of ["cursor-a", "cursor-b", "cursor-c"]) {
+      store.postNotice(postCommand(key, key, "decision"));
+    }
+    const query: ListNoticesQuery = {
+      actorId: AgentId.parse("bob"),
+      branchName: null,
+      cursor: null,
+      kind: "decision",
+      limit: 2,
+      repositoryName: RepositoryName.parse("mattpatagon/murmur"),
+      sessionKey: null,
+      state: "open",
+    };
+    const first: ListNoticesResult = store.listNotices(query);
+    expect(first.notices).toHaveLength(2);
+    expect(first.nextCursor).not.toBeNull();
+    const second: ListNoticesResult = store.listNotices({
+      ...query,
+      cursor: first.nextCursor,
+    });
+    expect(second.notices).toHaveLength(1);
+    expect(second.nextCursor).toBeNull();
+    const ids: string[] = [...first.notices, ...second.notices].map(
+      (notice: Notice): string => notice.noticeId.value,
+    );
+    expect(new Set(ids).size).toBe(3);
   });
 });
 

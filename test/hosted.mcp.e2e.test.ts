@@ -19,6 +19,7 @@ import {
   verifyHostedAgentLifecycleProtocol,
   verifyHostedAgentLifecycleStorage,
 } from "./scenarios/hosted-agent-lifecycle.js";
+import { verifyHostedAgentLifecycleHardening } from "./scenarios/hosted-agent-lifecycle-hardening.js";
 import { verifyHostedTenantLifecycle } from "./scenarios/hosted-tenant-lifecycle.js";
 import { verifyHostedTenantMessaging } from "./scenarios/hosted-tenant-messaging.js";
 import {
@@ -364,6 +365,7 @@ test.skipIf(
       await verifyHostedAgentLifecycleProtocol(scenario);
       await verifyHostedTenantLifecycle(scenario);
       await verifyHostedAgentLifecycleStorage(scenario);
+      await verifyHostedAgentLifecycleHardening(scenario);
     } finally {
       await server.stop();
     }

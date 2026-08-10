@@ -179,8 +179,14 @@ the tenant-qualified revision or a later compatible revision may be deployed.
 
 The lifecycle expansion assigns existing agents and messages to generation 1, creates a 60-minute
 compatibility lease for every agent seen within the preceding hour, and installs generation snapshot
-triggers before the new application handles traffic. The message-history index is built
-concurrently, and schema lock waits fail after five seconds instead of blocking production work.
+triggers before the new application handles traffic. Constraints are added before being validated in
+separate transactions. Message-history and lifecycle cleanup indexes are built concurrently, and
+schema lock waits fail after five seconds instead of blocking production work.
+
+Concurrent index creation can leave a same-named `INVALID` index after an interrupted rollout. The
+forward migrations inspect `pg_index`, drop only an invalid same-named artifact, and retry the
+concurrent build; a valid index is preserved. Rerun the unchanged migration. Do not manually drop a
+valid production index or edit an applied migration.
 
 Do not leave a pre-lifecycle revision serving traffic after the compatibility leases can expire.
 Older writers do not renew named leases and use the former broadcast audience rule. The automated

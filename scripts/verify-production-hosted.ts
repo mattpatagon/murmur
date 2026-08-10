@@ -188,6 +188,7 @@ async function main(): Promise<void> {
 
     const ended: Record<string, unknown> = await call(receiver, "end_session", {
       agent_id: receiverId,
+      expected_generation: receiverAgent["generation"],
       reason: "stop",
     });
     assert(ended["ended"] === 1, "Receiver default session did not end");
@@ -210,7 +211,7 @@ async function main(): Promise<void> {
     );
     const closedAgent: Record<string, unknown> = await call(receiver, "close_agent", {
       agent_id: receiverId,
-      expected_generation: 1,
+      expected_generation: receiverAgent["generation"],
       reason: "completed",
     });
     assert(

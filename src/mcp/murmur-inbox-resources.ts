@@ -168,7 +168,7 @@ export class MurmurInboxResources {
       async (): Promise<ListResourcesResult> => ({
         resources: (this.store === null
           ? []
-          : await this.store.listAgents({ state: "active" })
+          : (await this.store.listAgents({ cursor: null, limit: 1_000, state: "active" })).agents
         ).map(
           (agent: Agent): ListedResource => ({
             description: `Durable inbox for ${agent.agentId.value}`,

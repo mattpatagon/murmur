@@ -15,13 +15,14 @@ import {
   ResolveNoticeInputSchema,
   resolveNoticeCommand,
   toNoticeDto,
+  toListNoticesOutput,
   type WithdrawNoticeInput,
   WithdrawNoticeInputSchema,
   withdrawNoticeCommand,
 } from "../domain/notice-contracts.js";
 import { RepositoryName } from "../domain/value-objects.js";
 import type {
-  Notice,
+  ListNoticesResult,
   PostNoticeResult,
   ResolveNoticeResult,
   WithdrawNoticeResult,
@@ -66,12 +67,10 @@ export async function callNoticeTool(
   }
   if (name === "list_notices") {
     const input: ListNoticesInput = ListNoticesInputSchema.parse(argumentsValue);
-    const notices: readonly Notice[] = await store.listNotices(
+    const result: ListNoticesResult = await store.listNotices(
       listNoticesQuery(input, repository(input.repository, repositoryName)),
     );
-    const output: ListNoticesOutput = ListNoticesOutputSchema.parse({
-      notices: notices.map(toNoticeDto),
-    });
+    const output: ListNoticesOutput = ListNoticesOutputSchema.parse(toListNoticesOutput(result));
     return toolResult(output);
   }
   if (name === "resolve_notice") {

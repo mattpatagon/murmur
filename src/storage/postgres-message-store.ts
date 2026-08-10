@@ -11,6 +11,7 @@ import type {
   EndSessionResult,
   GetMessagesQuery,
   ListAgentsQuery,
+  ListAgentsResult,
   MarkMessagesReadCommand,
   MarkMessagesReadResult,
   Message,
@@ -21,7 +22,7 @@ import type {
 } from "../domain/models.js";
 import type {
   ListNoticesQuery,
-  Notice,
+  ListNoticesResult,
   PostNoticeCommand,
   PostNoticeResult,
   ResolveNoticeCommand,
@@ -286,7 +287,7 @@ export class PostgresMessageStore implements MessageStore {
     return await getPostgresAgent(this.database, this.tenantId, agentId, this.clock.now());
   }
 
-  public async listAgents(query: ListAgentsQuery): Promise<readonly Agent[]> {
+  public async listAgents(query: ListAgentsQuery): Promise<ListAgentsResult> {
     this.ensureOpen();
     await this.pruneExpired(this.clock.now());
     return await listPostgresAgents(this.database, this.tenantId, query, this.clock.now());
@@ -353,7 +354,7 @@ export class PostgresMessageStore implements MessageStore {
     }
   }
 
-  public async listNotices(query: ListNoticesQuery): Promise<readonly Notice[]> {
+  public async listNotices(query: ListNoticesQuery): Promise<ListNoticesResult> {
     this.ensureOpen();
     const now: Instant = this.clock.now();
     await this.pruneExpired(now);
@@ -436,7 +437,7 @@ export class PostgresMessageStore implements MessageStore {
       await this.database.begin(async (transaction: TransactionSql): Promise<void> => {
         await this.setTenantContext(transaction);
         await prunePostgresNotices(transaction, this.tenantId, now);
-        await prunePostgresLifecycle(transaction, this.tenantId, now);
+        await prunePostgresLifecycle(this.database, transaction, this.tenantId, now);
       });
       return messageChanges;
     } catch (error: unknown) {

@@ -249,7 +249,3 @@ export function mapMessageRow(input: unknown): Message {
     throw new StorageCorruptionError("message", error);
   }
 }
-
-export function minutesBefore(instant: Instant, minutes: number): Instant {
-  return Instant.fromDate(new Date(instant.toEpochMilliseconds() - minutes * 60 * 1000));
-}

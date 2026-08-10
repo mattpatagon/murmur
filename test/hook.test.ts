@@ -101,6 +101,7 @@ test("checks, debounces, and notifies again only for a newer inbox version", asy
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-hook-"));
   let checks: number = 0;
   let summary: InboxSummary = {
+    agentGeneration: 1,
     inboxVersion: 1,
     messageCount: 1,
     senderIds: ["mac:claude:other"],
@@ -135,7 +136,12 @@ test("checks, debounces, and notifies again only for a newer inbox version", asy
       { cacheDirectory: directory, checkInbox, environment, now: 40_000 },
     );
     expect(unchanged).toEqual({});
-    summary = { inboxVersion: 2, messageCount: 2, senderIds: ["mac:claude:other"] };
+    summary = {
+      agentGeneration: 1,
+      inboxVersion: 2,
+      messageCount: 2,
+      senderIds: ["mac:claude:other"],
+    };
     const newer: HookOutput | null = await handleHook(
       { cwd: "/work/repo", hook_event_name: "PostToolUse" },
       "codex",
@@ -218,7 +224,12 @@ test("checks a real Streamable HTTP Murmur inbox", async (): Promise<void> => {
       token,
       url: server.mcpUrl.toString(),
     });
-    expect(summary).toEqual({ inboxVersion: 0, messageCount: 0, senderIds: [] });
+    expect(summary).toEqual({
+      agentGeneration: 1,
+      inboxVersion: 0,
+      messageCount: 0,
+      senderIds: [],
+    });
     const verificationStore: SqliteMessageStore = new SqliteMessageStore(databasePath);
     try {
       const registeredAgent: Agent | null = verificationStore.getAgent(
@@ -293,7 +304,7 @@ test("SessionStart bypasses debounce but unchanged inbox versions do not notify"
   let checks: number = 0;
   const checkInbox: () => Promise<InboxSummary> = async (): Promise<InboxSummary> => {
     checks += 1;
-    return { inboxVersion: 0, messageCount: 0, senderIds: [] };
+    return { agentGeneration: 1, inboxVersion: 0, messageCount: 0, senderIds: [] };
   };
   const environment: NodeJS.ProcessEnv = {
     HOME: directory,
@@ -337,7 +348,7 @@ test("recovers from corrupt hook cache and uses safe numeric environment fallbac
     options: { readonly timeoutMs: number },
   ): Promise<InboxSummary> => {
     receivedTimeout = options.timeoutMs;
-    return { inboxVersion: 1, messageCount: 1, senderIds: [] };
+    return { agentGeneration: 1, inboxVersion: 1, messageCount: 1, senderIds: [] };
   };
   try {
     await handleHook({ cwd: "/work/repo", hook_event_name: "PostToolUse" }, "codex", {
@@ -372,6 +383,7 @@ test("deduplicates sender IDs in hook notification text", async (): Promise<void
       {
         cacheDirectory: directory,
         checkInbox: async (): Promise<InboxSummary> => ({
+          agentGeneration: 1,
           inboxVersion: 2,
           messageCount: 2,
           senderIds: ["sender-a"],
@@ -407,8 +419,8 @@ test("advances the notification watermark one fetched page at a time", async ():
   ): Promise<InboxSummary> => {
     afterSequences.push(options.afterSequence);
     return options.afterSequence === 0
-      ? { inboxVersion: 100, messageCount: 100, senderIds: ["sender-a"] }
-      : { inboxVersion: 101, messageCount: 1, senderIds: ["sender-b"] };
+      ? { agentGeneration: 1, inboxVersion: 100, messageCount: 100, senderIds: ["sender-a"] }
+      : { agentGeneration: 1, inboxVersion: 101, messageCount: 1, senderIds: ["sender-b"] };
   };
   const environment: NodeJS.ProcessEnv = {
     HOME: directory,

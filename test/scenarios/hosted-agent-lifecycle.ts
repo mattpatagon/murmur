@@ -101,7 +101,7 @@ async function verifyMcpLifecycle(scenario: HostedTenantScenario): Promise<void>
     scenario.agentASession,
     504,
     "end_session",
-    { agent_id: `unknown-${scenario.unique}`, reason: "session_end" },
+    { agent_id: `unknown-${scenario.unique}`, expected_generation: 1, reason: "session_end" },
     EndSessionOutputSchema,
   );
   expect(unknownEnd).toEqual({ ended: 0, generation: null });

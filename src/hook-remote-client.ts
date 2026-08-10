@@ -1,6 +1,7 @@
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 
 import { InboxOutputSchema, type InboxOutput } from "./domain/contracts.js";
+import { type RegisterAgentOutput, RegisterAgentOutputSchema } from "./domain/agent-contracts.js";
 import { type ListNoticesOutput, ListNoticesOutputSchema } from "./domain/notice-contracts.js";
 import type { AgentIdentity, InboxSummary, JsonRpcExchange } from "./hook-types.js";
 import {
@@ -75,7 +76,11 @@ export async function checkRemoteInbox(
       timeoutMs: remainingTimeoutMs(deadline),
       url: options.url,
     });
-    rpcResult(registration.body);
+    const registrationResult: unknown = rpcResult(registration.body);
+    if (!isRecord(registrationResult)) throw new Error("Murmur returned an invalid tool result");
+    const registered: RegisterAgentOutput = RegisterAgentOutputSchema.parse(
+      registrationResult["structuredContent"],
+    );
     const inboxResponse: JsonRpcExchange = await postJsonRpc({
       body: {
         jsonrpc: "2.0",
@@ -102,6 +107,7 @@ export async function checkRemoteInbox(
     const noticeCount: number = await openNoticeCount(identity, options, headers, deadline);
     const lastMessage: InboxOutput["messages"][number] | undefined = inbox.messages.at(-1);
     return {
+      agentGeneration: registered.agent.generation,
       inboxVersion: lastMessage === undefined ? afterSequence : lastMessage.sequence,
       messageCount: inbox.messages.length,
       ...(options.includeNotices === true ? { noticeCount } : {}),
@@ -167,6 +173,7 @@ export async function endRemoteAgentSession(
   identity: AgentIdentity,
   options: {
     readonly eventName: "SessionEnd" | "Stop";
+    readonly expectedGeneration: number;
     readonly sessionKey: string;
     readonly token: string;
     readonly timeoutMs: number;
@@ -210,6 +217,7 @@ export async function endRemoteAgentSession(
           arguments: {
             agent_id: identity.agentId,
             end_default_session: true,
+            expected_generation: options.expectedGeneration,
             reason: options.eventName === "Stop" ? "stop" : "session_end",
             session_key: options.sessionKey,
           },

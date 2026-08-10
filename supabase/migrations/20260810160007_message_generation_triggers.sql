@@ -2,24 +2,6 @@ begin;
 
 set local lock_timeout = '5s';
 
-alter table murmur.messages
-  add column sender_generation integer not null default 1,
-  add column recipient_generation integer not null default 1,
-  add constraint messages_sender_generation_positive check (sender_generation >= 1) not valid,
-  add constraint messages_recipient_generation_positive
-    check (recipient_generation >= 1) not valid;
-
-alter table murmur.broadcasts
-  add column sender_generation integer not null default 1,
-  add constraint broadcasts_sender_generation_positive check (sender_generation >= 1) not valid;
-
-alter table murmur.messages
-  validate constraint messages_sender_generation_positive;
-alter table murmur.messages
-  validate constraint messages_recipient_generation_positive;
-alter table murmur.broadcasts
-  validate constraint broadcasts_sender_generation_positive;
-
 create function murmur.snapshot_message_generations()
 returns trigger
 language plpgsql
@@ -34,16 +16,20 @@ begin
   into resolved_sender_generation
   from murmur.agents as agent
   where agent.tenant_id = new.tenant_id
-    and agent.agent_id = new.sender_id;
+    and agent.agent_id = new.sender_id
+    and agent.closed_at is null
+  for share;
 
   select agent.generation
   into resolved_recipient_generation
   from murmur.agents as agent
   where agent.tenant_id = new.tenant_id
-    and agent.agent_id = new.recipient_id;
+    and agent.agent_id = new.recipient_id
+    and agent.closed_at is null
+  for share;
 
   if resolved_sender_generation is null or resolved_recipient_generation is null then
-    raise exception 'message generation snapshot references an unknown agent'
+    raise exception 'message generation snapshot references an unknown or closed agent'
       using errcode = '23503';
   end if;
 
@@ -66,10 +52,12 @@ begin
   into resolved_sender_generation
   from murmur.agents as agent
   where agent.tenant_id = new.tenant_id
-    and agent.agent_id = new.sender_id;
+    and agent.agent_id = new.sender_id
+    and agent.closed_at is null
+  for share;
 
   if resolved_sender_generation is null then
-    raise exception 'broadcast generation snapshot references an unknown agent'
+    raise exception 'broadcast generation snapshot references an unknown or closed agent'
       using errcode = '23503';
   end if;
 

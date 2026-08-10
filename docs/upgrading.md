@@ -57,6 +57,12 @@ expire, then verify lifecycle, history, and notice behavior through the hosted s
 do not renew named leases, and a pre-v0.6 application must not be restored after any identity has
 advanced beyond generation 1; use a forward fix instead.
 
+The expansion separates column/constraint installation, constraint validation, backfill, trigger
+installation, and concurrent index creation so production locks remain bounded. If a concurrent
+index build is interrupted, rerun the unchanged migration: it removes only a same-named index marked
+`INVALID` in `pg_index` before rebuilding it, while preserving a valid index. The hosted verifier
+asserts that no lifecycle index remains invalid and exercises both empty and populated upgrades.
+
 ## Release and rollback
 
 A release owner updates `VERSION`, `package.json`, and `CHANGELOG.md` in one commit after all prior

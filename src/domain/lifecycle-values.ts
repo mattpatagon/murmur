@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 const GenerationValueSchema: z.ZodNumber = z.number().int().positive().safe();
-const SessionKeyValueSchema: z.ZodString = z
+export const SessionKeyInputSchema: z.ZodString = z
   .string()
   .trim()
   .min(1)
@@ -17,6 +17,7 @@ export const AGENT_LEASE_MINUTES: number = 60;
 export const AGENT_DORMANCY_DAYS: number = 30;
 export const AGENT_GC_DAYS: number = 30;
 export const MAX_OPEN_AGENTS: number = 1_000;
+export const MAX_RETAINED_AGENTS: number = 10_000;
 export const MAX_LIVE_SESSIONS_PER_AGENT: number = 8;
 export const MAX_RETAINED_SESSIONS_PER_AGENT: number = 64;
 export const DEFAULT_SESSION_KEY: string = "default";
@@ -113,7 +114,7 @@ export class SessionKey {
   }
 
   public static parse(input: unknown): SessionKey {
-    return new SessionKey(SessionKeyValueSchema.parse(input));
+    return new SessionKey(SessionKeyInputSchema.parse(input));
   }
 
   public static default(): SessionKey {

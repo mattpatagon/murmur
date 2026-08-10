@@ -75,14 +75,21 @@ export type RegisterAgentResult = {
 };
 
 export type ListAgentsQuery = {
+  readonly cursor: AgentId | null;
+  readonly limit: number;
   readonly state: AgentListState;
+};
+
+export type ListAgentsResult = {
+  readonly agents: readonly Agent[];
+  readonly nextCursor: AgentId | null;
 };
 
 export type EndSessionCommand = {
   readonly agentId: AgentId;
   readonly endDefaultSession: boolean;
   readonly endReason: SessionEndReason;
-  readonly expectedGeneration: AgentGeneration | null;
+  readonly expectedGeneration: AgentGeneration;
   readonly sessionKey: SessionKey;
 };
 
@@ -94,7 +101,7 @@ export type EndSessionResult = {
 export type CloseAgentCommand = {
   readonly agentId: AgentId;
   readonly closeReason: ExplicitAgentCloseReason;
-  readonly expectedGeneration: AgentGeneration | null;
+  readonly expectedGeneration: AgentGeneration;
 };
 
 export type CloseAgentResult = {

@@ -7,12 +7,14 @@ import { join } from "node:path";
 import {
   AgentGeneration,
   MAX_RETAINED_SESSIONS_PER_AGENT,
+  NoticeContent,
   SessionKey,
 } from "../src/domain/lifecycle-values.js";
 import type {
   Agent,
   CloseAgentResult,
   EndSessionResult,
+  ListAgentsResult,
   Message,
   RegisterAgentResult,
   SendMessageCommand,
@@ -101,9 +103,13 @@ test("session leases expire at the exact boundary and observer reads never creat
       unreadOnly: false,
     });
     clock.set(Instant.parse("2026-01-01T01:00:00.000Z"));
-    expect(store.listAgents({ state: "active" })).toHaveLength(0);
+    expect(store.listAgents({ cursor: null, limit: 1_000, state: "active" }).agents).toHaveLength(
+      0,
+    );
     expect(
-      store.listAgents({ state: "inactive" }).map((agent: Agent): string => agent.agentId.value),
+      store
+        .listAgents({ cursor: null, limit: 1_000, state: "inactive" })
+        .agents.map((agent: Agent): string => agent.agentId.value),
     ).toEqual(["alice"]);
   });
 });
@@ -117,7 +123,7 @@ test("Stop ends its hashed and default leases while another pane remains active"
       agentId: AgentId.parse("alice"),
       endDefaultSession: true,
       endReason: "stop",
-      expectedGeneration: null,
+      expectedGeneration: AgentGeneration.parse(1),
       sessionKey: SessionKey.parse("hook-pane-a"),
     });
     expect(ended.ended).toBe(2);
@@ -126,7 +132,7 @@ test("Stop ends its hashed and default leases while another pane remains active"
       agentId: AgentId.parse("alice"),
       endDefaultSession: false,
       endReason: "stop",
-      expectedGeneration: null,
+      expectedGeneration: AgentGeneration.parse(1),
       sessionKey: SessionKey.parse("hook-pane-b"),
     });
     expect(requireAgent(store, "alice").state).toBe("inactive");
@@ -143,14 +149,14 @@ test("a ninth live session deterministically supersedes only the oldest lease", 
       agentId: AgentId.parse("alice"),
       endDefaultSession: false,
       endReason: "stop",
-      expectedGeneration: null,
+      expectedGeneration: AgentGeneration.parse(1),
       sessionKey: SessionKey.parse("pane-1"),
     });
     expect(oldest.ended).toBe(0);
     const closed: CloseAgentResult = store.closeAgent({
       agentId: AgentId.parse("alice"),
       closeReason: "completed",
-      expectedGeneration: null,
+      expectedGeneration: AgentGeneration.parse(1),
     });
     expect(closed.endedSessions).toBe(8);
   });
@@ -239,6 +245,70 @@ test("explicit closure isolates generations but stable idempotent retries return
     expect(history.map((message: Message): string => message.messageId.value)).toEqual([
       sent.message.messageId.value,
     ]);
+    expect(
+      (): CloseAgentResult =>
+        store.closeAgent({
+          agentId: AgentId.parse("bob"),
+          closeReason: "manual",
+          expectedGeneration: AgentGeneration.parse(1),
+        }),
+    ).toThrow("changed generation");
+    expect(
+      (): EndSessionResult =>
+        store.endSession({
+          agentId: AgentId.parse("bob"),
+          endDefaultSession: false,
+          endReason: "stop",
+          expectedGeneration: AgentGeneration.parse(1),
+          sessionKey: SessionKey.parse("new-pane"),
+        }),
+    ).toThrow("changed generation");
+  });
+});
+
+test("notice audit retention preserves monotonic generations until the audit row is collectible", (): void => {
+  withLifecycle(({ clock, store }: LifecycleFixture): void => {
+    register(store, "alice", "mattpatagon/murmur", "generation-one");
+    store.closeAgent({
+      agentId: AgentId.parse("alice"),
+      closeReason: "manual",
+      expectedGeneration: AgentGeneration.parse(1),
+    });
+    expect(
+      register(store, "alice", "mattpatagon/murmur", "generation-two").agent.generation.value,
+    ).toBe(2);
+    store.postNotice({
+      actorId: AgentId.parse("alice"),
+      branchName: BranchName.parse("feature/lifecycle"),
+      content: NoticeContent.parse("retain creator lineage"),
+      expiresInHours: 90 * 24,
+      idempotencyKey: IdempotencyKey.parse("retain-lineage"),
+      kind: "decision",
+      repositoryName: RepositoryName.parse("mattpatagon/murmur"),
+      sessionKey: SessionKey.parse("generation-two"),
+    });
+    store.closeAgent({
+      agentId: AgentId.parse("alice"),
+      closeReason: "manual",
+      expectedGeneration: AgentGeneration.parse(2),
+    });
+    clock.set(clock.now().addDays(31));
+    store.pruneExpired(clock.now());
+    const third: RegisterAgentResult = register(
+      store,
+      "alice",
+      "mattpatagon/murmur",
+      "generation-three",
+    );
+    expect(third.agent.generation.value).toBe(3);
+    store.closeAgent({
+      agentId: AgentId.parse("alice"),
+      closeReason: "manual",
+      expectedGeneration: AgentGeneration.parse(3),
+    });
+    clock.set(clock.now().addDays(91));
+    store.pruneExpired(clock.now());
+    expect(store.getAgent(AgentId.parse("alice"))).toBeNull();
   });
 });
 
@@ -297,9 +367,53 @@ test("SQLite enforces the 1000-open-agent quota and closed rows release capacity
       reopened.closeAgent({
         agentId: AgentId.parse("seed-0"),
         closeReason: "manual",
-        expectedGeneration: null,
+        expectedGeneration: AgentGeneration.parse(1),
       });
       expect(register(reopened, "replacement", "owner/repo").agent.state).toBe("active");
+    } finally {
+      reopened.close();
+    }
+  });
+});
+
+test("SQLite cursor-paginates every retained agent, then GC releases retained capacity", (): void => {
+  withLifecycle(({ clock, path, store }: LifecycleFixture): void => {
+    store.close();
+    const database: Database = new Database(path);
+    database.exec(`
+      WITH RECURSIVE sequence(value) AS (
+        SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 10000
+      )
+      INSERT INTO agents(
+        agent_id, display_name, metadata_json, created_at, last_seen_at,
+        generation, closed_at, close_reason
+      ) SELECT
+        printf('retained-%05d', value), printf('retained-%05d', value), '{}',
+        '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', 1,
+        '2026-01-01T00:00:00.000Z', 'manual'
+      FROM sequence
+    `);
+    database.close();
+    const reopened: SqliteMessageStore = new SqliteMessageStore(path, clock);
+    try {
+      const agentIds: string[] = [];
+      let cursor: AgentId | null = null;
+      do {
+        const page: ListAgentsResult = reopened.listAgents({ cursor, limit: 777, state: "closed" });
+        agentIds.push(...page.agents.map((agent: Agent): string => agent.agentId.value));
+        cursor = page.nextCursor;
+      } while (cursor !== null);
+      expect(agentIds).toHaveLength(10_000);
+      expect(new Set(agentIds).size).toBe(10_000);
+      expect(agentIds).toEqual([...agentIds].sort());
+      expect(agentIds.at(0)).toBe("retained-00001");
+      expect(agentIds.at(-1)).toBe("retained-10000");
+      expect(
+        (): RegisterAgentResult => register(reopened, "retained-overflow", "owner/repo"),
+      ).toThrow("capacity");
+      clock.set(clock.now().addDays(31));
+      reopened.pruneExpired(clock.now());
+      expect(register(reopened, "retained-replacement", "owner/repo").agent.state).toBe("active");
     } finally {
       reopened.close();
     }

@@ -246,6 +246,22 @@ test("workflow resumes runtime credentials through the reachable admin database"
   expect(deployPosition).toBeGreaterThan(applyPosition);
 });
 
+test("workflow always drains pre-lifecycle Cloud Run revisions", async (): Promise<void> => {
+  const workflow: string = await Bun.file(".github/workflows/deploy.yml").text();
+  const drainPosition: number = workflow.indexOf("Drain superseded Cloud Run revisions");
+  const finalizePosition: number = workflow.indexOf(
+    "Finalize tenant-qualified database keys",
+    drainPosition,
+  );
+  expect(drainPosition).toBeGreaterThan(-1);
+  expect(finalizePosition).toBeGreaterThan(drainPosition);
+  const drainStep: string = workflow.slice(drainPosition, finalizePosition);
+  expect(drainStep).toContain("gcloud run services update-traffic");
+  expect(drainStep).toContain("gcloud run revisions delete");
+  expect(drainStep).not.toContain("ADOPTION_REQUIRED");
+  expect(drainStep).not.toContain("TENANT_CONTRACT_FINALIZE_REQUIRED");
+});
+
 test("production smoke masks privileged credentials before live isolation checks", async (): Promise<void> => {
   const workflow: string = await Bun.file(".github/workflows/production-smoke.yml").text();
   expect(workflow).toContain("workflow_dispatch:");

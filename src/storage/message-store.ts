@@ -8,6 +8,7 @@ import type {
   EndSessionResult,
   GetMessagesQuery,
   ListAgentsQuery,
+  ListAgentsResult,
   MarkMessagesReadCommand,
   MarkMessagesReadResult,
   Message,
@@ -18,7 +19,7 @@ import type {
 } from "../domain/models.js";
 import type {
   ListNoticesQuery,
-  Notice,
+  ListNoticesResult,
   PostNoticeCommand,
   PostNoticeResult,
   ResolveNoticeCommand,
@@ -41,7 +42,7 @@ export interface MessageStore {
   scope(tenantId: TenantId): MessageStore;
   registerAgent(command: RegisterAgentCommand): Awaitable<RegisterAgentResult>;
   getAgent(agentId: AgentId): Awaitable<Agent | null>;
-  listAgents(query: ListAgentsQuery): Awaitable<readonly Agent[]>;
+  listAgents(query: ListAgentsQuery): Awaitable<ListAgentsResult>;
   endSession(command: EndSessionCommand): Awaitable<EndSessionResult>;
   closeAgent(command: CloseAgentCommand): Awaitable<CloseAgentResult>;
   broadcastMessage(command: BroadcastMessageCommand): Awaitable<BroadcastMessageResult>;
@@ -49,7 +50,7 @@ export interface MessageStore {
   getMessages(query: GetMessagesQuery): Awaitable<readonly Message[]>;
   markMessagesRead(command: MarkMessagesReadCommand): Awaitable<MarkMessagesReadResult>;
   postNotice(command: PostNoticeCommand): Awaitable<PostNoticeResult>;
-  listNotices(query: ListNoticesQuery): Awaitable<readonly Notice[]>;
+  listNotices(query: ListNoticesQuery): Awaitable<ListNoticesResult>;
   resolveNotice(command: ResolveNoticeCommand): Awaitable<ResolveNoticeResult>;
   withdrawNotice(command: WithdrawNoticeCommand): Awaitable<WithdrawNoticeResult>;
   getInboxVersion(agentId: AgentId, generation?: AgentGeneration | null): Awaitable<Sequence>;

@@ -152,26 +152,26 @@ function dataTools(): Tool[] {
     toolDefinition(
       "get_messages",
       "Read agent inbox",
-      "Read an agent's durable inbox. Reading does not mark messages as read.",
+      "Read an agent's durable inbox. Reading does not mark messages as read; supplying session_key renews that named lease.",
       GetMessagesInputSchema,
       InboxOutputSchema,
       {
         destructiveHint: false,
-        idempotentHint: true,
-        readOnlyHint: true,
+        idempotentHint: false,
+        readOnlyHint: false,
         title: "Read agent inbox",
       },
     ),
     toolDefinition(
       "wait_for_messages",
       "Wait for agent messages",
-      "Compatibility fallback for hosts that do not surface resource subscriptions. Wait for inbox messages for up to 25 seconds.",
+      "Compatibility fallback for hosts that do not surface resource subscriptions. Wait for inbox messages for up to 25 seconds; supplying session_key renews that named lease.",
       WaitForMessagesInputSchema,
       WaitForMessagesOutputSchema,
       {
         destructiveHint: false,
-        idempotentHint: true,
-        readOnlyHint: true,
+        idempotentHint: false,
+        readOnlyHint: false,
         title: "Wait for agent messages",
       },
     ),
@@ -204,7 +204,7 @@ function dataTools(): Tool[] {
     toolDefinition(
       "end_session",
       "End agent session",
-      "End one session lease. Stop hooks also end the compatibility default lease atomically.",
+      "End one session lease in an explicitly expected agent generation. Stop hooks also end the compatibility default lease atomically.",
       EndSessionInputSchema,
       EndSessionOutputSchema,
       {
@@ -217,7 +217,7 @@ function dataTools(): Tool[] {
     toolDefinition(
       "close_agent",
       "Close agent",
-      "Explicitly close an agent generation and all of its live sessions.",
+      "Explicitly close an expected agent generation and all of its live sessions.",
       CloseAgentInputSchema,
       CloseAgentOutputSchema,
       { destructiveHint: true, idempotentHint: true, readOnlyHint: false, title: "Close agent" },
@@ -238,13 +238,13 @@ function dataTools(): Tool[] {
     toolDefinition(
       "list_notices",
       "List coordination notices",
-      "List repository-scoped coordination notices. Reading never creates or renews a default session.",
+      "List one cursor-paginated page of repository notices. Reading never creates a default lease; supplying session_key renews that named lease.",
       ListNoticesInputSchema,
       ListNoticesOutputSchema,
       {
         destructiveHint: false,
-        idempotentHint: true,
-        readOnlyHint: true,
+        idempotentHint: false,
+        readOnlyHint: false,
         title: "List coordination notices",
       },
     ),

@@ -35,6 +35,7 @@ export type MurmurApplicationDependencies = {
   readonly legacyCredentialHash?: Buffer | null;
   readonly onTenantSuspended?: ((tenantId: TenantId) => Promise<void>) | undefined;
   readonly onTokenRevoked?: ((tokenId: string) => Promise<void>) | undefined;
+  readonly onRepositoryDivergence?: (() => void) | undefined;
   readonly principal?: HostedPrincipal | null;
   readonly repositoryName: RepositoryName | null;
   readonly store: MessageStore | null;
@@ -50,6 +51,7 @@ export class MurmurApplication {
   private readonly legacyCredentialHash: Buffer | null;
   private readonly onTenantSuspended: ((tenantId: TenantId) => Promise<void>) | null;
   private readonly onTokenRevoked: ((tokenId: string) => Promise<void>) | null;
+  private readonly onRepositoryDivergence: () => void;
   private readonly principal: HostedPrincipal | null;
   private readonly repositoryName: RepositoryName | null;
   private readonly resources: MurmurInboxResources;
@@ -69,6 +71,7 @@ export class MurmurApplication {
     this.legacyCredentialHash = dependencies.legacyCredentialHash ?? null;
     this.onTenantSuspended = dependencies.onTenantSuspended ?? null;
     this.onTokenRevoked = dependencies.onTokenRevoked ?? null;
+    this.onRepositoryDivergence = dependencies.onRepositoryDivergence ?? ((): void => undefined);
     this.principal = dependencies.principal ?? null;
     this.repositoryName = dependencies.repositoryName;
     this.store = dependencies.store;
@@ -132,6 +135,7 @@ export class MurmurApplication {
         client: this.client,
         notifyResourceListChanged: async (): Promise<void> =>
           await this.server.sendResourceListChanged(),
+        recordRepositoryDivergence: this.onRepositoryDivergence,
         repositoryName: this.repositoryName,
         store: this.store,
       };
