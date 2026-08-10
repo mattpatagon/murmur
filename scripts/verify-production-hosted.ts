@@ -31,6 +31,7 @@ async function main(): Promise<void> {
   const receiverId: string = `live-canary-receiver-${unique}`;
   const messageContent: string = `live canary direct ${unique}`;
   const broadcastContent: string = `live canary organization broadcast ${unique}`;
+  const inactiveContent: string = `live canary inactive direct ${unique}`;
   const harnesses: Harness[] = [];
   let operator: Harness | null = null;
   let founding: Harness | null = null;
@@ -105,10 +106,19 @@ async function main(): Promise<void> {
       agent_id: senderId,
       display_name: "Live canary sender",
     });
-    await call(receiver, "register_agent", {
+    const receiverRegistration: Record<string, unknown> = await call(receiver, "register_agent", {
       agent_id: receiverId,
       display_name: "Live canary receiver",
     });
+    const receiverAgent: Record<string, unknown> = record(receiverRegistration["agent"], "agent");
+    assert(receiverAgent["generation"] === 1, "New receiver did not start at generation 1");
+    const activeAgent: Record<string, unknown> = await call(receiver, "get_agent", {
+      agent_id: receiverId,
+    });
+    assert(
+      record(activeAgent["agent"], "agent")["state"] === "active",
+      "Registered receiver is not active",
+    );
     await call(sender, "send_message", {
       content: messageContent,
       idempotency_key: `live-direct-${unique}`,
@@ -145,6 +155,106 @@ async function main(): Promise<void> {
         stringField(record(message, "message"), "message_id"),
       ),
     });
+
+    const postedNotice: Record<string, unknown> = await call(sender, "post_notice", {
+      actor_id: senderId,
+      content: `Production lifecycle handoff ${unique}`,
+      idempotency_key: `live-notice-${unique}`,
+      kind: "handoff",
+    });
+    const noticeId: string = stringField(record(postedNotice["notice"], "notice"), "notice_id");
+    const openNotices: Record<string, unknown> = await call(receiver, "list_notices", {
+      actor_id: receiverId,
+      state: "open",
+    });
+    const notices: unknown = openNotices["notices"];
+    assert(
+      Array.isArray(notices) &&
+        notices.some(
+          (notice: unknown): boolean =>
+            stringField(record(notice, "notice"), "notice_id") === noticeId,
+        ),
+      "Repository notice was not listed",
+    );
+    const resolvedNotice: Record<string, unknown> = await call(receiver, "resolve_notice", {
+      actor_id: receiverId,
+      notice_id: noticeId,
+      resolution_note: "Production canary verified",
+    });
+    assert(
+      record(resolvedNotice["notice"], "notice")["state"] === "resolved",
+      "Repository notice did not resolve",
+    );
+
+    const ended: Record<string, unknown> = await call(receiver, "end_session", {
+      agent_id: receiverId,
+      reason: "stop",
+    });
+    assert(ended["ended"] === 1, "Receiver default session did not end");
+    const inactiveAgent: Record<string, unknown> = await call(receiver, "get_agent", {
+      agent_id: receiverId,
+    });
+    assert(
+      record(inactiveAgent["agent"], "agent")["state"] === "inactive",
+      "Ended receiver session did not become inactive",
+    );
+    const inactiveDelivery: Record<string, unknown> = await call(sender, "send_message", {
+      content: inactiveContent,
+      idempotency_key: `live-inactive-${unique}`,
+      recipient_id: receiverId,
+      sender_id: senderId,
+    });
+    assert(
+      inactiveDelivery["recipient_state"] === "inactive",
+      "Inactive direct delivery did not report recipient state",
+    );
+    const closedAgent: Record<string, unknown> = await call(receiver, "close_agent", {
+      agent_id: receiverId,
+      expected_generation: 1,
+      reason: "completed",
+    });
+    assert(
+      record(closedAgent["agent"], "agent")["state"] === "closed" &&
+        closedAgent["unread_count"] === 1,
+      "Receiver did not close with its durable unread work preserved",
+    );
+    const closedSend: string = await callExpectingError(sender, "send_message", {
+      content: "must not reach a closed production canary",
+      recipient_id: receiverId,
+      sender_id: senderId,
+    });
+    assert(closedSend.includes("is closed"), "Closed receiver accepted new work");
+    const history: Record<string, unknown> = await call(receiver, "get_message_history", {
+      agent_id: receiverId,
+      generation: 1,
+    });
+    const historicalMessages: unknown = history["messages"];
+    assert(
+      Array.isArray(historicalMessages) &&
+        historicalMessages.some(
+          (message: unknown): boolean =>
+            stringField(record(message, "historical message"), "content") === inactiveContent,
+        ),
+      "Closed generation history omitted inactive delivery",
+    );
+    const reopenedAgent: Record<string, unknown> = await call(receiver, "register_agent", {
+      agent_id: receiverId,
+      display_name: "Live canary receiver",
+      session_key: "production-generation-two",
+    });
+    assert(
+      record(reopenedAgent["agent"], "agent")["generation"] === 2,
+      "Explicitly closed receiver did not advance generation",
+    );
+    const currentInbox: Record<string, unknown> = await call(receiver, "get_messages", {
+      agent_id: receiverId,
+      limit: 100,
+      unread_only: false,
+    });
+    assert(
+      Array.isArray(currentInbox["messages"]) && currentInbox["messages"].length === 0,
+      "Reopened generation inherited historical messages",
+    );
 
     const mintedFounding: Record<string, unknown> = await call(
       operator,
@@ -318,9 +428,12 @@ async function main(): Promise<void> {
     process.stdout.write(
       `${JSON.stringify({
         audit_verified: true,
+        agent_lifecycle: true,
         cross_tenant_denials: true,
         direct_message: true,
+        generation_history: true,
         organization_broadcast: true,
+        repository_notices: true,
         session_binding: true,
         suspended_cleanup: true,
         tenant_id: tenantId,

@@ -104,6 +104,16 @@ export function registerAgentCommand(input: RegisterAgentInput): RegisterAgentCo
   };
 }
 
+export type GetAgentInput = { readonly agent_id: string };
+export const GetAgentInputSchema: z.ZodType<GetAgentInput> = z.strictObject({
+  agent_id: AgentIdTextSchema,
+});
+
+export type GetAgentOutput = Record<string, unknown> & { readonly agent: AgentDto };
+export const GetAgentOutputSchema: z.ZodType<GetAgentOutput> = z.strictObject({
+  agent: AgentDtoSchema,
+});
+
 export type ListAgentsInput = {
   readonly state: "active" | "all" | "closed" | "inactive" | "open";
 };

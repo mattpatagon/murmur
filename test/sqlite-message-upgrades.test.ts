@@ -4,7 +4,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { Agent, Message, SendMessageCommand, SendMessageResult } from "../src/domain/models.js";
+import type {
+  Agent,
+  Message,
+  SendMessageCommand,
+  SendMessageResult,
+} from "../src/domain/models.js";
 import {
   AgentId,
   DisplayName,

@@ -9,6 +9,8 @@ import {
   CloseAgentOutputSchema,
   EndSessionInputSchema,
   EndSessionOutputSchema,
+  GetAgentInputSchema,
+  GetAgentOutputSchema,
   GetMessagesInputSchema,
   InboxOutputSchema,
   ListAgentsInputSchema,
@@ -112,6 +114,14 @@ function dataTools(): Tool[] {
       ListAgentsInputSchema,
       ListAgentsOutputSchema,
       { destructiveHint: false, idempotentHint: true, readOnlyHint: true, title: "List agents" },
+    ),
+    toolDefinition(
+      "get_agent",
+      "Get agent",
+      "Read one registered agent's current lifecycle state without renewing a session.",
+      GetAgentInputSchema,
+      GetAgentOutputSchema,
+      { destructiveHint: false, idempotentHint: true, readOnlyHint: true, title: "Get agent" },
     ),
     toolDefinition(
       "send_message",

@@ -9,6 +9,7 @@ const DATA_TOOLS: readonly string[] = [
   "broadcast_message",
   "close_agent",
   "end_session",
+  "get_agent",
   "get_message_history",
   "get_messages",
   "list_agents",

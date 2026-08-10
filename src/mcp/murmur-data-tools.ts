@@ -10,6 +10,10 @@ import {
   broadcastAudienceFromInput,
   type GetMessagesInput,
   GetMessagesInputSchema,
+  type GetAgentInput,
+  GetAgentInputSchema,
+  type GetAgentOutput,
+  GetAgentOutputSchema,
   type InboxOutput,
   InboxOutputSchema,
   type ListAgentsInput,
@@ -47,7 +51,9 @@ import {
   WaitForMessagesOutputSchema,
 } from "../domain/contracts.js";
 import { AGENT_LEASE_MINUTES, SessionKey } from "../domain/lifecycle-values.js";
+import { UnknownAgentError } from "../domain/errors.js";
 import type {
+  Agent,
   BroadcastMessageCommand,
   BroadcastMessageResult,
   GetMessagesQuery,
@@ -93,6 +99,7 @@ const DATA_TOOL_NAMES: ReadonlySet<string> = new Set<string>([
   "broadcast_message",
   "close_agent",
   "end_session",
+  "get_agent",
   "get_message_history",
   "get_messages",
   "list_agents",
@@ -268,6 +275,13 @@ export async function callDataTool(
       const output: ListAgentsOutput = ListAgentsOutputSchema.parse({
         agents: (await store.listAgents(listAgentsQuery(input))).map(toAgentDto),
       });
+      return toolResult(output);
+    }
+    case "get_agent": {
+      const input: GetAgentInput = GetAgentInputSchema.parse(argumentsValue);
+      const agent: Agent | null = await store.getAgent(AgentId.parse(input.agent_id));
+      if (agent === null) throw new UnknownAgentError(input.agent_id);
+      const output: GetAgentOutput = GetAgentOutputSchema.parse({ agent: toAgentDto(agent) });
       return toolResult(output);
     }
     case "send_message": {
