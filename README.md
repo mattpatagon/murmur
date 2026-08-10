@@ -46,7 +46,9 @@ signal never loses a message.
 
 The repository and CI support Linux/Ubuntu, macOS, and Windows. PostgreSQL and
 deployment gates run on Linux; client configuration and local SQLite behavior
-are exercised on all three operating systems.
+are exercised on all three operating systems. See the
+[platform support contract](docs/platform-support.md) for the exact portable
+surface and Linux-only operator tooling.
 
 ## Quick start
 
@@ -72,7 +74,8 @@ For a repository checkout:
 ```bash
 bun install --frozen-lockfile
 bun run verify
-bun test
+bun run test:portability
+bun run test:coverage
 ```
 
 Committed project configurations live in `.mcp.json` and
@@ -81,12 +84,18 @@ user-specific paths or secrets.
 
 ## Local stdio mode
 
-The `murmur-mcp` launcher selects storage in this order:
+The repository's POSIX `scripts/murmur-mcp` convenience launcher selects
+storage in this order:
 
 1. `MURMUR_DATABASE_URL`
 2. macOS Keychain service `murmur-cloud-database-url`
 3. `MURMUR_DB_PATH`
 4. `.murmur/messages.db`
+
+Installed package commands invoke the portable Bun entry point directly and
+work on Windows without a POSIX shell. Set `MURMUR_DATABASE_URL` or
+`MURMUR_DB_PATH` explicitly when the repository launcher's macOS Keychain and
+checkout-relative defaults are unavailable.
 
 Configure a generic MCP host with:
 
@@ -154,10 +163,13 @@ deployment, break-glass, TLS, and tuning contracts.
 
 ## Quality contract
 
-`bun run verify` enforces strict TypeScript, explicit types, Biome linting and
+`bun run verify` enforces strict TypeScript, explicit types, all recommended
+Biome rules plus project security rules with zero warnings, deterministic
 formatting, and bans `any`, assertions, non-null assertions, optional chaining,
-and suppression comments. Runtime schemas validate MCP payloads, environment
-configuration, database rows, and notification envelopes.
+and suppression comments. It also rejects authored files over 500 lines,
+mutable dependency versions, license drift, and a dependency quarantine other
+than 72 hours. Runtime schemas validate MCP payloads, environment configuration,
+database rows, and notification envelopes.
 
 `bun test` covers SQLite and PostgreSQL storage contracts, idempotency, expiry,
 broadcast snapshots, process-to-process delivery, hosted role boundaries,
@@ -174,8 +186,17 @@ Dependencies are exact-pinned, installs use the frozen Bun lockfile, and
 - [Owner-only operator recovery](docs/operator-recovery.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
+- [Support policy](SUPPORT.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
 - [Architecture](docs/architecture.md)
 - [Observability](docs/observability.md)
 - [Upgrade policy](docs/upgrading.md)
+- [Platform support](docs/platform-support.md)
 
-Murmur is licensed under the Elastic License 2.0. See [LICENSE](LICENSE).
+## License
+
+Murmur is source-available under the Elastic License 2.0. ELv2 permits use,
+copying, distribution, and modification subject to its limitations, including
+the restriction on offering a substantial set of Murmur's functionality as a
+hosted or managed service. It is not an OSI-approved open-source license. Read
+the complete [LICENSE](LICENSE) before using or redistributing the software.

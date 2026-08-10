@@ -30,6 +30,7 @@ export const OVERSIZED_FILE_EXCEPTIONS: ReadonlyMap<string, OversizedFileExcepti
     "supabase/migrations/20260808224428_hosted_control_plane.sql",
     {
       reason: "immutable migration already applied to production",
+      // biome-ignore lint/security/noSecrets: This is a public SHA-256 integrity digest.
       sha256: "75a52409a330687f4b0003e65ee84b9727664bcd904ac84446c77fdf84043750",
     },
   ],

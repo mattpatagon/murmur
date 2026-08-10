@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Private security report
+    url: https://github.com/mattpatagon/murmur/security/advisories/new
+    about: Report suspected vulnerabilities privately.
+  - name: Support policy
+    url: https://github.com/mattpatagon/murmur/blob/main/SUPPORT.md
+    about: Read supported channels and the information required for help.

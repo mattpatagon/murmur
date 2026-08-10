@@ -2,6 +2,26 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Add strict source coverage, per-file coverage, 500-line, dependency pinning, ELv2 metadata, and 72-hour package quarantine gates.
+- Add structured redacted request-completion logs and optional bounded OTLP HTTP/protobuf tracing with server-owned correlation.
+- Add Linux, macOS, and Windows verification, portable tests, and production-entry-point build coverage.
+- Add contributor, security, support, architecture, observability, platform, upgrade, agent, pull-request, and issue documentation.
+
+### Changed
+
+- Split storage, hosted control-plane, MCP, HTTP admission, lifecycle, deployment, and integration-test responsibilities into focused modules under 500 lines.
+- Promote all Biome warnings to failures and enable additional security, correctness, performance, and mutation-safety rules.
+- Make path discovery, configuration writes, coverage paths, package entry points, and test harnesses deterministic across operating systems.
+
+### Security
+
+- Redact hosted token formats, database URLs, sessions, message bodies, and exception text from logs and traces while recording orthogonal authentication, admission, capacity, rate, and session outcomes.
+- Ignore untrusted inbound trace context and generate root request spans so clients cannot forge audit correlation or remote sampling decisions.
+
 ## [0.4.4.0] - 2026-08-10
 
 ### Added

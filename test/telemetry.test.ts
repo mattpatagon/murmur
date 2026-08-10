@@ -114,6 +114,7 @@ test("enabled telemetry exports bounded protobuf spans without request secrets",
 
     expect(telemetry.enabled).toBe(true);
     expect(trace.traceId).toMatch(/^[a-f0-9]{32}$/u);
+    // biome-ignore lint/security/noSecrets: This is W3C's public example trace ID, not a credential.
     expect(trace.traceId).not.toBe("4bf92f3577b34da6a3ce929d0e0e4736");
     expect(paths).toEqual(["/v1/traces"]);
     expect(contentTypes).toEqual(["application/x-protobuf"]);

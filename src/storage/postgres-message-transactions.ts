@@ -4,6 +4,7 @@ import { z } from "zod";
 import { UnknownAgentError } from "../domain/errors.js";
 import type { AgentId, TenantId } from "../domain/value-objects.js";
 
+// biome-ignore lint/security/noSecrets: This public constant namespaces a Postgres advisory lock.
 export const POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED: string = "671255459461899938";
 
 export async function setPostgresTenantContext(

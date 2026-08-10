@@ -97,3 +97,15 @@ test("the package exposes a location-independent MCP executable", (): void => {
   expect(manifest.bin["murmur-mcp"]).toBe("./src/server.ts");
   expect(manifest.engines.bun).toBe(">=1.3.11");
 });
+
+test("CI enforces the portable contract on Linux, macOS, and Windows", (): void => {
+  const workflow: string = readWorkspaceFile(".github/workflows/ci.yml");
+  expect(workflow).toContain("ubuntu-latest");
+  expect(workflow).toContain("macos-latest");
+  expect(workflow).toContain("windows-latest");
+  expect(workflow).toContain("bun install --frozen-lockfile");
+  expect(workflow).toContain("bun run verify");
+  expect(workflow).toContain("bun run test:portability");
+  expect(workflow).toContain("bun run build\n");
+  expect(workflow).toContain("bun run build:http");
+});

@@ -89,6 +89,7 @@ test("rejects exactly ninety percent and untracked source records", (): void => 
       functionsHit: 9,
       linesFound: 10,
       linesHit: 9,
+      // biome-ignore lint/security/noSecrets: This synthetic Windows path exercises normalization.
       source: "C:\\WORKSPACE\\src\\tracked.ts",
     }) +
     record({

@@ -21,16 +21,35 @@
     "rules": {
       "preset": "recommended",
       "complexity": {
+        "noBannedTypes": "error",
         "useLiteralKeys": "off",
         "useOptionalChain": "off"
       },
+      "correctness": {
+        "noUnusedFunctionParameters": "error"
+      },
+      "performance": {
+        "noAccumulatingSpread": "error",
+        "noDelete": "error"
+      },
+      "security": {
+        "noDangerouslySetInnerHtml": "error",
+        "noGlobalEval": "error",
+        "noSecrets": "error"
+      },
       "style": {
+        "noCommonJs": "error",
         "noInferrableTypes": "off",
+        "noNamespace": "error",
         "noNonNullAssertion": "error",
+        "noParameterAssign": "error",
+        "noRestrictedGlobals": "error",
+        "useReadonlyClassProperties": "error",
         "useConst": "error"
       },
       "suspicious": {
-        "noExplicitAny": "error"
+        "noExplicitAny": "error",
+        "noShadowRestrictedNames": "error"
       }
     }
   }
