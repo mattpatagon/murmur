@@ -31,8 +31,9 @@ release describe the actual streaming lifecycle. `/health` is logged but not tra
 Logs and spans never include authorization headers, token material, database URLs, request or
 response bodies, message content, arbitrary query values, raw session IDs, or exception messages.
 Validated sessions are represented by a one-way truncated SHA-256 correlation hash. Routes are from
-a closed set, error classes are allowlisted, and all string fields pass through credential and URL
-redaction before output and again before trace export.
+a closed set, error classes are allowlisted, and operational failures retain only a fixed context
+plus that class. String fields pass through credential and URL redaction before output and again
+before trace export as defense in depth.
 
 Do not add free-form user input as a field. New values must have a bounded format and cardinality,
 a documented diagnostic purpose, a test proving redaction, and the same safe representation in logs
@@ -61,7 +62,9 @@ method, route, status, service, version, and deployment environment attributes.
 
 The exporter queue holds at most 1,024 spans, batches at most 256, and schedules at five-second
 intervals. Span attributes, values, events, and links have explicit limits. Provider shutdown is
-bounded by the configured export timeout plus 250 milliseconds.
+bounded by the configured export timeout plus 250 milliseconds. A flush failure emits the safe
+`telemetry.shutdown.failed` event but does not turn an otherwise graceful service shutdown into an
+abnormal exit.
 
 ## Deployment context
 

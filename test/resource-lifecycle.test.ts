@@ -92,7 +92,9 @@ test("resource cleanup continues after failure and redacts logged credentials", 
     console.error = originalConsoleError;
   }
   expect(events).toEqual(["first", "second", "third"]);
-  expect(logs.join("\n")).toContain("postgresql://[redacted]@database.example/murmur");
+  expect(logs.join("\n")).toContain('"event":"operation.failed"');
+  expect(logs.join("\n")).toContain('"context":"second cleanup"');
+  expect(logs.join("\n")).not.toContain("database.example");
   expect(logs.join("\n")).not.toContain(sentinel);
 });
 

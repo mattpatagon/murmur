@@ -137,7 +137,7 @@ export class RequestObservation {
       this.tenantId = principal.tenantId.value;
       this.tenantRole = principal.role;
     } else {
-      this.tenantRole = principal.kind;
+      this.tenantRole = null;
     }
   }
 
@@ -229,7 +229,11 @@ export function createHttpObservability(
     observe: (request: Request): RequestObservation =>
       new RequestObservation(request, logger, telemetry, time),
     shutdown: async (): Promise<void> => {
-      await telemetry.shutdown();
+      try {
+        await telemetry.shutdown();
+      } catch (error: unknown) {
+        logger.error("telemetry.shutdown.failed", { error_class: errorClass(error) });
+      }
     },
   };
 }

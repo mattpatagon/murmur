@@ -35,7 +35,7 @@ hosted verifier creates isolated roles and databases; never aim it at production
 | --- | --- |
 | `bun run verify` | Strict types, zero-warning Biome, safety AST, 500-line, dependency, and format gates |
 | `bun run test:portability` | Platform-safe unit and integration suite used on Linux, macOS, and Windows |
-| `bun run test:coverage` | Local source coverage with global >90% and per-file >80% floors |
+| `bun run test:coverage` | Local source coverage with global >90% and per-file line coverage >80% |
 | `MURMUR_VERIFY_COVERAGE=1 bash scripts/verify-hosted-postgres.sh` | Authoritative PostgreSQL 17, RLS, upgrade, and hosted coverage gate |
 | `bun run build` | Bundles the stdio MCP entry point |
 | `bun run build:http` | Bundles the hosted HTTP entry point |

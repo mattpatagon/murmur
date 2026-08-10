@@ -16,6 +16,15 @@ const JsonRpcEnvelopeSchema: z.ZodObject<{ result: z.ZodType<unknown> }> = z.obj
   result: z.unknown(),
 });
 
+class LegacyTokenFormatError extends Error {
+  public constructor() {
+    super(
+      "MURMUR_LEGACY_TOKEN cannot be adopted because strict authentication does not accept its format",
+    );
+    this.name = "LegacyTokenFormatError";
+  }
+}
+
 function requiredEnvironment(name: string): string {
   const value: string | undefined = process.env[name];
   if (value === undefined || value === "") throw new Error(`${name} is required`);
@@ -119,9 +128,7 @@ async function main(): Promise<void> {
   const operatorToken: string = requiredEnvironment("MURMUR_INITIAL_OPERATOR_TOKEN");
   const legacyToken: string = requiredEnvironment("MURMUR_LEGACY_TOKEN");
   if (!DatabaseCredentialPattern.test(legacyToken)) {
-    throw new Error(
-      "MURMUR_LEGACY_TOKEN cannot be adopted because strict authentication does not accept its format",
-    );
+    throw new LegacyTokenFormatError();
   }
   if (bootstrapToken !== undefined && bootstrapToken !== "") {
     const bootstrapSession: string = await initialize(url, bootstrapToken, "production-bootstrap");

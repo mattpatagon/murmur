@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 
+import { compareText } from "./lib/deterministic-order.js";
+
 export const MINIMUM_COVERAGE_PERCENT: number = 90;
 export const MINIMUM_FILE_LINE_COVERAGE_PERCENT: number = 80;
 
@@ -158,7 +160,7 @@ export function auditCoverage(
   const normalizedTrackedSources: string[] = trackedSources
     .map((source: string): string => normalizeSource(source, workspace))
     .filter((source: string): boolean => source.startsWith("src/") && source.endsWith(".ts"))
-    .sort((left: string, right: string): number => left.localeCompare(right));
+    .sort(compareText);
   const uniqueTrackedSources: Set<string> = new Set<string>(normalizedTrackedSources);
   if (uniqueTrackedSources.size !== normalizedTrackedSources.length) {
     throw new Error("Tracked source census contains duplicate paths");

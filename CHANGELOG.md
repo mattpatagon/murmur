@@ -6,7 +6,7 @@ All notable changes to Murmur are documented in this file.
 
 ### Added
 
-- Add strict source coverage, per-file coverage, 500-line, dependency pinning, ELv2 metadata, and 72-hour package quarantine gates.
+- Add strict source coverage, per-file line coverage, 500-line, dependency pinning, ELv2 metadata, and 72-hour package quarantine gates.
 - Add structured redacted request-completion logs and optional bounded OTLP HTTP/protobuf tracing with server-owned correlation.
 - Add Linux, macOS, and Windows verification, portable tests, and production-entry-point build coverage.
 - Add contributor, security, support, architecture, observability, platform, upgrade, agent, pull-request, and issue documentation.
@@ -19,7 +19,7 @@ All notable changes to Murmur are documented in this file.
 
 ### Security
 
-- Redact hosted token formats, database URLs, sessions, message bodies, and exception text from logs and traces while recording orthogonal authentication, admission, capacity, rate, and session outcomes.
+- Exclude hosted token formats, database URLs, sessions, message bodies, and exception text from logs and traces while recording orthogonal authentication, admission, capacity, rate, and session outcomes.
 - Ignore untrusted inbound trace context and generate root request spans so clients cannot forge audit correlation or remote sampling decisions.
 
 ## [0.4.4.0] - 2026-08-10

@@ -30,7 +30,9 @@ test("malformed MURMUR_DATABASE_URL never exposes its password", async (): Promi
   const exitCode: number = await child.exited;
   const stderr: string = await new Response(child.stderr).text();
   expect(exitCode).not.toBe(0);
-  expect(stderr).toContain("The configured Postgres database URL is invalid");
+  expect(stderr).toContain('"context":"Murmur HTTP startup failed"');
+  // biome-ignore lint/security/noSecrets: This is an error class, not credential material.
+  expect(stderr).toContain('"error_class":"InvalidDatabaseUrlError"');
   expect(stderr).not.toContain(sentinel);
 });
 
@@ -56,7 +58,9 @@ test("safe error logging initializes lazily under unrelated log-level values", a
   const stderr: string = await new Response(child.stderr).text();
   expect(exitCode).toBe(0);
   expect(stderr).toContain('"severity":"ERROR"');
-  expect(stderr).toContain('"message":"lazy logger: expected failure"');
+  expect(stderr).toContain('"message":"operation.failed"');
+  expect(stderr).toContain('"context":"lazy logger"');
+  expect(stderr).not.toContain("expected failure");
 });
 
 test("safe errors redact Postgres URL credentials", (): void => {

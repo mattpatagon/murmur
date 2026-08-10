@@ -71,6 +71,19 @@ class CapturingTelemetry implements Telemetry {
   }
 }
 
+class FailingTelemetry implements Telemetry {
+  public readonly enabled: boolean = true;
+  public readonly trace: CapturingTrace = new CapturingTrace();
+
+  public async shutdown(): Promise<void> {
+    throw new Error("COLLECTOR_FAILURE_SENTINEL");
+  }
+
+  public startRequest(_request: Request, _requestId: string, _route: string): RequestTrace {
+    return this.trace;
+  }
+}
+
 class SequenceClock implements ObservationClock {
   private readonly values: number[];
 
@@ -248,6 +261,46 @@ test("stream cancellation completes observation and telemetry shutdown exactly o
   expect(output.infos).toHaveLength(1);
   expect(telemetry.trace.finishes).toBe(1);
   expect(telemetry.shutdowns).toBe(1);
+});
+
+test("telemetry flush failure is logged safely without failing graceful shutdown", async (): Promise<void> => {
+  const output: CapturingOutput = new CapturingOutput();
+  const logger: StructuredLogger = new StructuredLogger(loggerEnvironment(), output);
+  const observability: ReturnType<typeof createHttpObservability> = createHttpObservability(
+    logger,
+    new FailingTelemetry(),
+  );
+
+  await expect(observability.shutdown()).resolves.toBeUndefined();
+  expect(output.errors).toHaveLength(1);
+  expect(output.errors[0]).toContain('"event":"telemetry.shutdown.failed"');
+  expect(output.errors[0]).toContain('"error_class":"Error"');
+  expect(output.errors[0]).not.toContain("COLLECTOR_FAILURE_SENTINEL");
+});
+
+test("non-tenant principals never populate tenant identity fields", async (): Promise<void> => {
+  const output: CapturingOutput = new CapturingOutput();
+  const logger: StructuredLogger = new StructuredLogger(loggerEnvironment(), output);
+  const telemetry: CapturingTelemetry = new CapturingTelemetry();
+  const observation: RequestObservation = new RequestObservation(
+    new Request("https://murmur.example/mcp", { method: "POST" }),
+    logger,
+    telemetry,
+    new SequenceClock([4_000, 4_001]),
+  );
+  observation.recordPrincipal({
+    credentialHash: Buffer.alloc(32),
+    keyId: "operator-key",
+    kind: "operator",
+    tokenId: "operator-token",
+  });
+  const response: Response = observation.track(new Response(null));
+  await response.arrayBuffer();
+
+  expect(output.infos).toHaveLength(1);
+  expect(output.infos[0]).toContain('"principal_kind":"operator"');
+  expect(output.infos[0]).toContain('"tenant_id":null');
+  expect(output.infos[0]).toContain('"tenant_role":null');
 });
 
 test("HTTP router converts handler failures to correlated sanitized responses", async (): Promise<void> => {

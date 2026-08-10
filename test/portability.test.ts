@@ -4,6 +4,8 @@ import { join, resolve } from "node:path";
 import { expect, test } from "bun:test";
 import { z } from "zod";
 
+import { validateCrossPlatformTestEnvironment } from "../scripts/require-cross-platform-test.js";
+
 const projectRoot: string = resolve(".");
 
 const ClaudeConfigurationSchema: z.ZodType<{
@@ -100,6 +102,8 @@ test("the package exposes a location-independent MCP executable", (): void => {
 
 test("CI enforces the portable contract on Linux, macOS, and Windows", (): void => {
   const workflow: string = readWorkspaceFile(".github/workflows/ci.yml");
+  const attributes: string = readWorkspaceFile(".gitattributes");
+  expect(attributes).toContain("* text=auto eol=lf");
   expect(workflow).toContain("ubuntu-latest");
   expect(workflow).toContain("macos-latest");
   expect(workflow).toContain("windows-latest");
@@ -108,4 +112,28 @@ test("CI enforces the portable contract on Linux, macOS, and Windows", (): void 
   expect(workflow).toContain("bun run test:portability");
   expect(workflow).toContain("bun run build\n");
   expect(workflow).toContain("bun run build:http");
+});
+
+test("the Linux-container command cannot silently skip its required environment", (): void => {
+  expect((): void => validateCrossPlatformTestEnvironment({}, "/usr/bin/docker")).toThrow(
+    "MURMUR_TEST_DATABASE_URL is required",
+  );
+  expect((): void =>
+    validateCrossPlatformTestEnvironment(
+      { MURMUR_TEST_DATABASE_URL: "sqlite:///tmp/murmur.db" },
+      "/usr/bin/docker",
+    ),
+  ).toThrow("must use postgres: or postgresql:");
+  expect((): void =>
+    validateCrossPlatformTestEnvironment(
+      { MURMUR_TEST_DATABASE_URL: "postgresql://database.example/murmur" },
+      null,
+    ),
+  ).toThrow("Docker is required");
+  expect((): void =>
+    validateCrossPlatformTestEnvironment(
+      { MURMUR_TEST_DATABASE_URL: "postgresql://database.example/murmur" },
+      "/usr/bin/docker",
+    ),
+  ).not.toThrow();
 });

@@ -48,7 +48,9 @@ test("production adoption rejects a legacy token that strict auth cannot parse",
   const exitCode: number = await child.exited;
   const stderr: string = await new Response(child.stderr).text();
   expect(exitCode).not.toBe(0);
-  expect(stderr).toContain("strict authentication does not accept its format");
+  expect(stderr).toContain('"context":"Murmur production bootstrap failed"');
+  expect(stderr).toContain('"error_class":"LegacyTokenFormatError"');
+  expect(stderr).not.toContain("legacy-token-with-an-unsupported-wire-format");
 });
 
 test("operator token parsing preserves base64url key identifiers", (): void => {

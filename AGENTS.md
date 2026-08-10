@@ -36,7 +36,8 @@ Run `bun run verify` before requesting review. It enforces:
 
 Run `bun run test:coverage` for local source coverage. The authoritative hosted gate is
 `bash scripts/verify-hosted-postgres.sh` with `MURMUR_VERIFY_COVERAGE=1`; every metric must exceed
-90%, every included source file must exceed 80%, and no source file may disappear from the report.
+90%, every included source file's line coverage must exceed 80%, and no source file may disappear
+from the report.
 Run `bun run test:portability` when changing paths, configuration, storage, entry points, or HTTP
 behavior. See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete command table.
 
@@ -64,7 +65,9 @@ Read [docs/architecture.md](docs/architecture.md) before changing data flow or t
 - Prefer small modules with one reason to change. Split a file before it approaches 500 lines.
 - Model invalid states out of the type system with branded values and discriminated unions.
 - Narrow `unknown` explicitly. Use Zod at untrusted runtime boundaries.
-- Do not use `as`, angle-bracket assertions, `!`, optional chaining, `any`, or suppression comments.
+- Do not use `as`, angle-bracket assertions, `!`, optional chaining, `any`, or TypeScript suppression
+  directives. A narrow `biome-ignore` is allowed only for a demonstrated false positive and must
+  state why the flagged value is safe.
 - Keep side effects at composition boundaries. Pass clocks, stores, transports, log sinks, and
   capacity policies into logic that must be deterministic in tests.
 - Use absolute deadlines for potentially blocking work. Bound queues and cleanup operations.

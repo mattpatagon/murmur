@@ -3,6 +3,8 @@ import process from "node:process";
 
 import { z } from "zod";
 
+import { compareText } from "./lib/deterministic-order.js";
+
 const REQUIRED_MINIMUM_RELEASE_AGE_SECONDS: number = 259_200;
 const EXACT_SEMVER: RegExp =
   /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?$/u;
@@ -40,7 +42,7 @@ function auditVersions(
 ): void {
   Object.entries(dependencies)
     .sort((left: [string, string], right: [string, string]): number =>
-      left[0].localeCompare(right[0]),
+      compareText(left[0], right[0]),
     )
     .forEach((entry: [string, string]): void => {
       if (!EXACT_SEMVER.test(entry[1])) {
@@ -123,7 +125,7 @@ export function auditDependencyPolicy(
     auditVersions("peerDependencies", sections.peerDependencies, errors);
   }
   auditBunConfiguration(bunfigText, errors);
-  return errors.sort((left: string, right: string): number => left.localeCompare(right));
+  return errors.sort(compareText);
 }
 
 function main(): void {

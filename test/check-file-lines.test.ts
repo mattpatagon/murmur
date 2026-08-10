@@ -30,6 +30,15 @@ test("accepts exactly five hundred lines and rejects five hundred one", (): void
   ]);
 });
 
+test("exempts Bun's generated lockfile without exempting authored files", (): void => {
+  const generated: FileCandidate = candidate("bun.lock", "lock\n".repeat(501));
+  const authored: FileCandidate = candidate("src/authored.ts", "code\n".repeat(501));
+  const audit: FileLineAudit = auditFileLines([generated, authored], new Map());
+  expect(audit.errors).toEqual([
+    "src/authored.ts has 501 lines; authored text files may contain at most 500",
+  ]);
+});
+
 test("ignores binary files without creating a file-size bypass for text", (): void => {
   const binary: FileCandidate = {
     content: Uint8Array.from([137, 80, 78, 71, 0, 255]),

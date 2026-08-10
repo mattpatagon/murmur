@@ -2,12 +2,15 @@ import type { HttpServerConfig } from "./http-config.js";
 
 export type TimeSource = {
   now(): number;
-  sleep(milliseconds: number): Promise<void>;
+  schedule(milliseconds: number, wake: () => void): () => void;
 };
 
 export const SYSTEM_TIME_SOURCE: TimeSource = {
   now: (): number => Date.now(),
-  sleep: async (milliseconds: number): Promise<void> => await Bun.sleep(milliseconds),
+  schedule: (milliseconds: number, wake: () => void): (() => void) => {
+    const timeout: ReturnType<typeof setTimeout> = setTimeout(wake, milliseconds);
+    return (): void => clearTimeout(timeout);
+  },
 };
 
 export class HttpCapacityController {
@@ -151,11 +154,16 @@ export class HttpCapacityController {
 
   private async waitForAuthenticationCapacity(timeoutMs: number): Promise<void> {
     let wake: (() => void) | null = null;
+    let cancelTimeout: () => void = (): void => {};
     const capacityChanged: Promise<void> = new Promise((resolve: () => void): void => {
       wake = resolve;
       this.authenticationWaiters.add(resolve);
     });
-    await Promise.race([capacityChanged, this.time.sleep(timeoutMs)]);
+    const elapsed: Promise<void> = new Promise((resolve: () => void): void => {
+      cancelTimeout = this.time.schedule(timeoutMs, resolve);
+    });
+    await Promise.race([capacityChanged, elapsed]);
+    cancelTimeout();
     if (wake !== null) this.authenticationWaiters.delete(wake);
   }
 

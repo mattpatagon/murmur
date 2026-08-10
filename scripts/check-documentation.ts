@@ -4,6 +4,7 @@ import { posix } from "node:path";
 import { z } from "zod";
 
 import { repositoryFileCandidates, type FileCandidate } from "./check-file-lines.js";
+import { compareText } from "./lib/deterministic-order.js";
 
 const REQUIRED_FILES: readonly string[] = [
   "AGENTS.md",
@@ -17,6 +18,7 @@ const REQUIRED_FILES: readonly string[] = [
   "SUPPORT.md",
   "VERSION",
   ".env.example",
+  ".gitattributes",
   ".github/CODEOWNERS",
   ".github/pull_request_template.md",
   ".github/ISSUE_TEMPLATE/bug.yml",
@@ -110,7 +112,7 @@ export function auditDocumentation(files: ReadonlyMap<string, string>): readonly
     } catch (error: unknown) {
       const detail: string = error instanceof Error ? error.message : String(error);
       errors.push(`package.json is not valid JSON: ${detail}`);
-      return errors.sort((left: string, right: string): number => left.localeCompare(right));
+      return errors.sort(compareText);
     }
     const parsed: ReturnType<typeof PackageVersionSchema.safeParse> =
       PackageVersionSchema.safeParse(rawManifest);
@@ -127,7 +129,7 @@ export function auditDocumentation(files: ReadonlyMap<string, string>): readonly
     }
   }
 
-  return errors.sort((left: string, right: string): number => left.localeCompare(right));
+  return errors.sort(compareText);
 }
 
 function documentationFiles(candidates: readonly FileCandidate[]): ReadonlyMap<string, string> {
@@ -140,6 +142,7 @@ function documentationFiles(candidates: readonly FileCandidate[]): ReadonlyMap<s
       if (REQUIRED_FILES.includes(candidate.path) || candidate.path.endsWith(".md")) {
         throw new Error(`Documentation file is not valid UTF-8: ${candidate.path}`);
       }
+      files.set(candidate.path, "[binary file]");
     }
   });
   return files;

@@ -21,10 +21,16 @@ class FakeTimeSource implements TimeSource {
     return this.current;
   }
 
-  public sleep(milliseconds: number): Promise<void> {
-    return new Promise<void>((resolve: () => void): void => {
-      this.sleepers.push({ deadline: this.current + milliseconds, resolve });
-    });
+  public schedule(milliseconds: number, wake: () => void): () => void {
+    const sleeper: Sleeper = { deadline: this.current + milliseconds, resolve: wake };
+    this.sleepers.push(sleeper);
+    return (): void => {
+      this.sleepers = this.sleepers.filter((candidate: Sleeper): boolean => candidate !== sleeper);
+    };
+  }
+
+  public pendingSleeps(): number {
+    return this.sleepers.length;
   }
 
   public advance(milliseconds: number): void {
@@ -105,6 +111,7 @@ describe("HTTP capacity controller", (): void => {
 
     releaseFirst();
     const releaseSecond: () => void = requiredRelease(await waiting);
+    expect(time.pendingSleeps()).toBe(0);
     releaseSecond();
   });
 

@@ -166,7 +166,7 @@ deployment, break-glass, TLS, and tuning contracts.
 `bun run verify` enforces strict TypeScript, explicit types, all recommended
 Biome rules plus project security rules with zero warnings, deterministic
 formatting, and bans `any`, assertions, non-null assertions, optional chaining,
-and suppression comments. It also rejects authored files over 500 lines,
+and TypeScript suppression directives. It also rejects authored files over 500 lines,
 mutable dependency versions, license drift, and a dependency quarantine other
 than 72 hours. Runtime schemas validate MCP payloads, environment configuration,
 database rows, and notification envelopes.
