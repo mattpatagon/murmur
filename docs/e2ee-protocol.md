@@ -1,127 +1,234 @@
-# End-to-end encryption protocol
+# Murmur end-to-end encryption protocol
 
-Murmur E2E uses a local process as the cryptographic endpoint. The hosted service may route,
-authorize, retain, quota, and notify about encrypted records, but it never needs message plaintext
-or private key material. This document is the independent interoperability contract for protocol
-version `murmur-e2ee-v1`.
+Status: `murmur-e2ee-v1`. This document is the interoperability contract for clients and
+independent verifiers. It describes cryptographic bytes, trust decisions, and server-visible
+metadata. Wire-tool schemas and storage transitions are documented separately.
 
 ## Security boundary
 
-The local OS account, MCP host, proxy, and intended agent can see plaintext. Hosted Murmur,
-PostgreSQL, backups, logs, traces, and network intermediaries see routing fields, timestamps,
-recipient sets, ciphertext, and a padded size bucket. Repository, branch, and client are signed
-sender assertions, not external attestations. Credential-derived authority is checked by an honest
-server but is not independently attested against a malicious server unless an authority certificate
-is added by the orchestration contract.
+The local `murmur-e2ee-proxy` is the encryption endpoint. It receives plaintext from the local MCP
+host, stores private key material in an owner-only SQLite vault, and sends only ciphertext, public
+key material, and bounded routing metadata to hosted Murmur. The recipient proxy verifies and
+decrypts before returning plaintext to its local MCP host.
 
-Strict verification requires a root fingerprint obtained out of band or through a separately
-verified organization trust file. A first root learned from Murmur alone is TOFU and must be labeled
-unverified. A malicious server can censor or tail-withhold messages. Pair counters can reveal a
-replay, reorder, or an observable middle gap; a gap means server-withheld or sender-abandoned.
+The protocol protects message content from hosted Murmur, its database, operators, network
+observers under TLS termination, logs, traces, and notifications. It does not hide routing metadata,
+timing, ciphertext size buckets, or traffic volume. It does not protect plaintext from the intended
+local agent, its MCP host, its OS account, or a compromised endpoint.
 
-## Dependency decision
+Hosted delivery remains authoritative. Notifications are hints to reread the durable ciphertext
+inbox. The unsigned hosted inbox sequence and mutable `read_at` state are not cryptographic proof
+that the server returned a complete tail.
 
-The runtime pins `libsodium-wrappers` 0.8.4 exactly. Registry evidence checked on 2026-08-10:
+## Algorithms and identifiers
 
-- license: ISC;
-- published: 2026-04-19T11:26:26.616Z;
-- unpacked size: 550,010 bytes;
-- integrity:
-  `sha512-mu8aAWucZjTB5O/BtGXtW4e1agy7uHxNYG7zPthmmD1jU43LCDmSWZLN4JhflbdPXj3yDO4lxM1O9hLDgIOXDw==`;
-- direct dependency: `libsodium` with Bun resolving the exact 0.8.4 tarball in `bun.lock`.
+- Root and agent signing keys: Ed25519.
+- Recipient prekeys and per-envelope ephemeral keys: X25519-compatible libsodium box keys.
+- Authenticated encryption: XSalsa20-Poly1305 through `crypto_box_easy`.
+- Signatures: detached Ed25519.
+- Key identifiers: BLAKE2b-256 of the exact 32-byte public key, base64url without padding, prefixed
+  with `mrk_` for installation roots, `mak_` for agent signing keys, or `mpk_` for prekeys.
+- Binary integers: unsigned big-endian. Values represented in JavaScript must also be safe
+  integers.
+- Binary strings: fatal UTF-8, prefixed by a four-byte unsigned byte length.
+- Binary byte strings: prefixed by a four-byte unsigned byte length.
+- Nullable strings: the four-byte marker `0xffffffff` means null; non-null strings use the normal
+  length-prefixed encoding.
+- Public wire bytes: canonical base64url without padding.
 
-It provides audited high-level X25519/XSalsa20-Poly1305 boxes, Ed25519 signatures, BLAKE2b,
-constant-time comparison, secure randomness, and byte-buffer wiping in a portable JS/Wasm package.
-`@signalapp/libsignal-client` was rejected because outside use is unsupported, its package is native
-and much larger, and its licensing/runtime surface is disproportionate for bounded inbox delivery.
-Removal requires replacing every primitive and reproducing the public vectors; there is no hosted
-vendor state. Wiping is best effort for `Uint8Array` values. JavaScript string erasure is not
-claimed.
+Every canonical field is at most 65,536 UTF-8 bytes. Decoders reject truncation, noncanonical
+base64url, wrong key lengths, unknown algorithms, inconsistent provenance, and trailing structure
+where the enclosing schema does not allow it.
 
-## Key hierarchy
-
-1. An Ed25519 installation root identifies one local installation/profile.
-2. Every agent has an Ed25519 signing key certified by that root.
-3. Every recipient publishes an agent-signed rotating X25519 fallback prekey and bounded one-time
-   X25519 prekeys.
-4. Key IDs are the full URL-safe, unpadded base64 form of a 32-byte BLAKE2b public-key digest,
-   prefixed `mrk_`, `mak_`, or `mpk_`.
-
-An agent certificate signs this canonical order: domain, root key ID, agent ID, signing key ID,
-signing public key, creation time, expiry time. A prekey certificate signs: domain, agent ID, agent
-signing key ID, prekey ID, prekey class, public key, creation time, expiry time. Verification checks
-the derived key IDs, identity, validity interval, key lengths, and signature.
-
-## Canonical encoding
-
-Every variable byte/string field is prefixed by an unsigned 32-bit big-endian length. Null uses the
-reserved length `0xffffffff`; empty is length zero and differs from null. Counters are unsigned
-64-bit big-endian integers restricted to JavaScript's nonnegative safe range. UTF-8 decoding is
-fatal. Field order is fixed below and never depends on JSON ordering.
-
-The signed, server-visible outer header order is:
-
-1. domain `murmur-e2ee-v1/outer`;
-2. protocol and cipher suite;
-3. tenant UUID, message UUID, client idempotency key, nullable broadcast UUID;
-4. sender-recipient pair counter;
-5. sender ID, recipient ID, opaque thread ID;
-6. nullable repository, branch, and client;
-7. sender-proposed creation and expiry timestamps;
-8. sender authority, message kind, nullable orchestrator policy UUID;
-9. recipient root, agent-signing, prekey IDs, and prekey class;
-10. sender root and agent-signing key IDs;
-11. padded inner length and padding scheme.
-
-`tenant_sequence` is an unsigned transport cursor allocated only when the hosted row becomes
-visible. It and mutable `read_at` are not signed.
-
-The encrypted inner value contains domain `murmur-e2ee-v1/inner`, an exact byte copy of the outer
-header, then the exact plaintext bytes. Random bytes extend the complete inner value to the smallest
-power-of-two bucket from 512 through 524,288 bytes. Exact plaintext length is therefore
-confidential. The recipient verifies the outer signature before decrypting, then constant-time
-compares the encrypted outer copy before releasing UTF-8 plaintext.
-
-The signature input contains domain `murmur-e2ee-v1/signature`, outer header bytes, ephemeral
-X25519 public key, 24-byte nonce, and ciphertext. All are length-prefixed. Encryption uses a fresh
-ephemeral X25519 key and `crypto_box_easy`; signing uses the sender agent's Ed25519 key.
-
-## Fixed vector
-
-`test-vectors/e2ee-v1-header.json` is the machine-readable first public vector. Its key IDs use the
-production prefix plus full 32-byte-digest shape. With a padded length of 1,024, the canonical outer
-header is 708 bytes and has BLAKE2b-256 digest:
+The fixed suite values are:
 
 ```text
-feac7159f60e1f6760d2c2e589b19fd221279b71e12d226feda484d4ec2cd95a
+protocol       = murmur-e2ee-v1
+cipher_suite   = x25519-xsalsa20-poly1305+ed25519
+padding_scheme = power-of-two-v1
 ```
 
-Implementations must reproduce this digest before attempting envelope interoperability. Runtime
-encryption chooses a larger bucket when the outer copy plus plaintext cannot fit in 512 bytes.
+## Key hierarchy and certificates
 
-`scripts/e2ee-independent-verifier.ts` independently reimplements the canonical encoder and public
-certificate/signature checks without importing runtime E2E modules. Run its bounded CLI with:
+An installation creates one Ed25519 root locally. The root private key never leaves the vault. It
+certifies one or more agent signing generations. An agent signing generation certifies X25519
+prekeys.
 
-```sh
-bun run scripts/verify-e2ee-capture.ts CAPTURE.json 2026-08-10T18:00:00.000Z
+The canonical agent-certificate fields, in order, are:
+
+```text
+string  "murmur-e2ee-v1/agent-certificate"
+string  root_key_id
+string  agent_id
+string  signing_key_id
+bytes   signing_public_key
+string  created_at
+string  expires_at
 ```
 
-The capture contains the public sender/recipient chains and the encrypted envelope only. A passing
-result proves integrity relative to those public roots and reports their full fingerprints; it does
-not make a self-presented root trusted. Compare the sender root fingerprint with an out-of-band pin
-or verified organization policy before treating the sender identity as verified.
+The root signs those bytes with Ed25519. A verifier derives both key IDs from the public keys,
+requires the expected agent identity, checks the validity window, and verifies the signature.
 
-## Required receiver order
+The canonical prekey-certificate fields, in order, are:
 
-1. Validate all wire shapes, decoded lengths, enums, UUIDs, timestamps, and local bounds.
-2. Re-encode the canonical outer header.
-3. Verify the pinned root, agent certificate, prekey certificate, and envelope signature.
-4. Check replay/pair-counter state and expected tenant/recipient/context.
-5. Decrypt with the claimed local prekey.
-6. Compare the confidential outer copy with the server-visible outer bytes.
-7. Decode plaintext, then atomically cache it, record replay state, and delete a consumed one-time
-   private prekey.
-8. Only then expose plaintext to the agent.
+```text
+string  "murmur-e2ee-v1/prekey-certificate"
+string  agent_id
+string  agent_signing_key_id
+string  prekey_id
+string  prekey_class             # one_time or fallback
+bytes   prekey_public_key
+string  created_at
+string  expires_at
+```
 
-Any failure returns a fixed verification error. Implementations must not expose library errors,
-keys, raw envelope internals, plaintext, credentials, database identifiers, or session IDs.
+The current agent signing key signs those bytes. A verifier derives `prekey_id`, checks the agent
+and signing generation, checks the validity window, and verifies the signature.
+
+One-time prekey private material is deleted atomically after the first verified decryption and
+replay-ledger update. A fallback private prekey may decrypt multiple messages and therefore gives a
+weaker forward-secrecy class. Its validity covers message retention plus clock and rotation grace.
+There is never a plaintext fallback.
+
+## Envelope header
+
+The signed outer header contains these logical fields:
+
+| Field | Meaning |
+| --- | --- |
+| `tenant_id` | Tenant derived from the authenticated hosted credential |
+| `message_id` | UUID for this exact delivery |
+| `idempotency_key` | Logical operation identity bound to exact content |
+| `broadcast_id` | Broadcast UUID or null for direct delivery |
+| `pair_counter` | Strictly positive sender-recipient counter |
+| `sender_id`, `recipient_id` | Exact endpoint identities |
+| `thread_id` | Durable conversation identity |
+| `repository_name`, `branch_name`, `client` | Nullable sender-asserted context |
+| `created_at`, `expires_at` | Sender-proposed bounded UTC instants |
+| `sender_authority` | `peer` or `orchestrator` |
+| `message_kind` | `message` or `orchestration_request` |
+| `orchestrator_policy_id` | Policy UUID for orchestration, otherwise null |
+| recipient key IDs/class | Root, agent, and claimed prekey binding |
+| sender key IDs | Root and agent signing-generation binding |
+| `padded_length` | Exact padded inner byte count |
+
+Provenance is a closed consistency rule. A normal message is
+`peer / message / null`. An orchestrated request is
+`orchestrator / orchestration_request / non-null-policy-UUID`. Every other combination is invalid.
+
+Hosted `tenant_sequence` and `read_at` are intentionally excluded: the sequence is allocated only
+when a row becomes visible at commit, and read state is mutable. Both remain validated transport
+metadata.
+
+## Canonical outer header
+
+The canonical outer bytes contain these values in this exact order:
+
+```text
+string           "murmur-e2ee-v1/outer"
+string           protocol
+string           cipher_suite
+string           tenant_id
+string           message_id
+string           idempotency_key
+nullable-string  broadcast_id
+u64              pair_counter
+string           sender_id
+string           recipient_id
+string           thread_id
+nullable-string  repository_name
+nullable-string  branch_name
+nullable-string  client
+string           created_at
+string           expires_at
+string           sender_authority
+string           message_kind
+nullable-string  orchestrator_policy_id
+string           recipient_root_key_id
+string           recipient_agent_key_id
+string           recipient_prekey_id
+string           recipient_prekey_class
+string           sender_root_key_id
+string           sender_agent_key_id
+u32              padded_length
+string           padding_scheme
+```
+
+Changing any listed field changes signed bytes. JSON member order is irrelevant because JSON is
+parsed and re-encoded into this canonical sequence before verification.
+
+## Encryption and signature
+
+The unpadded inner bytes are:
+
+```text
+string  "murmur-e2ee-v1/inner"
+bytes   canonical_outer_header
+bytes   plaintext_utf8
+```
+
+Choose the smallest power-of-two bucket from 512 through 524,288 bytes that can hold the inner
+bytes. Fill the rest with cryptographically random bytes. The chosen size becomes
+`header.padded_length`; then rebuild the outer header and inner bytes with that final value before
+encryption. A decoder recomputes the canonical bucket from the decoded inner structure and rejects
+another bucket.
+
+Generate a new ephemeral X25519 key pair and a 24-byte nonce for every envelope. Encrypt the padded
+inner bytes with `crypto_box_easy(padded_inner, nonce, recipient_prekey_public_key,
+ephemeral_private_key)`. Ciphertext length must equal `padded_length + 16`.
+
+The Ed25519 signature input is:
+
+```text
+string  "murmur-e2ee-v1/signature"
+bytes   canonical_outer_header
+bytes   ephemeral_public_key       # 32 bytes
+bytes   nonce                      # 24 bytes
+bytes   ciphertext
+```
+
+The current sender agent signing key signs those bytes. Verification must occur before decryption.
+After authenticated decryption, decode the embedded outer bytes and compare them in constant time
+with the visible canonical outer header. A mismatch, bad signature, bad box authentication, wrong
+length, malformed UTF-8, or noncanonical padding produces the same fixed verification failure.
+
+## Trust and rotation
+
+Strict mode requires an exact full root fingerprint expectation or a valid signed organization
+trust policy before first contact. Successful verification pins the peer root per tenant and agent.
+An unknown or changed root fails closed. Explicit trust-on-first-use is weaker and every affected
+result remains labeled `tofu` until independently verified.
+
+Organization trust policies have a separately verified issuer fingerprint, monotonically
+increasing version, validity window, exact agent/root bindings, and cumulative revocations. An
+update cannot change its issuer, roll back its version, remove a revocation, or rotate a bound root
+without revoking the prior root.
+
+Agent signing keys rotate under the stable installation root. Old generations and their public
+certificates remain verifiable for retained messages while valid. Private prekeys are retained only
+for their required decryption window. Revocation rejects new claims and new messages but does not
+rewrite signed provenance on retained ciphertext.
+
+## Direct and broadcast atomicity
+
+A direct sender first claims one recipient prekey. It durably stores the exact encrypted envelope
+in its local outbox before the hosted write. A retry under the same idempotency key must resend the
+same bytes. If an uncommitted claim expires, the sender retires it, advances the pair counter, and
+encrypts under a fresh claim. Counters are never reused.
+
+A broadcast snapshots and sorts its exact audience, claims a prekey per recipient, and creates a
+distinct ciphertext per recipient. Deliveries remain invisible until every snapshot member has one
+valid upload and the hosted commit transaction allocates inbox sequences. Cancellation or expiry
+releases pending claims; a partial broadcast never becomes visible.
+
+## Independent verification
+
+`scripts/e2ee-independent-verifier.ts` intentionally does not import runtime envelope or
+certificate code. Given a captured public chain and ciphertext envelope, it independently derives
+key IDs, verifies certificate signatures and identity links, encodes the header described above,
+checks ciphertext dimensions and provenance, and verifies the detached envelope signature. The
+public vector in `test-vectors/e2ee-v1-header.json` pins canonical header bytes and their
+BLAKE2b-256 digest across implementations.
+
+Independent signature verification proves public authenticity and immutable context; it does not
+decrypt content or prove that hosted Murmur returned every retained message.
