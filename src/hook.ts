@@ -6,16 +6,16 @@ import { hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import process from "node:process";
 
-import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
-
 import { detectBranchName, detectRepositoryName } from "./context/repository-context.js";
-import { InboxOutputSchema, type InboxOutput } from "./domain/contracts.js";
+import { checkRemoteInbox } from "./hook-remote-inbox.js";
 import { defaultHookCacheDirectory, environmentPath, positiveInteger } from "./platform-paths.js";
 import {
   DEFAULT_MURMUR_URL,
   MURMUR_TOKEN_ENV,
   type MurmurClient,
 } from "./setup/user-configuration.js";
+
+export { checkRemoteInbox } from "./hook-remote-inbox.js";
 
 const DEFAULT_DEBOUNCE_MS: number = 10_000;
 const DEFAULT_TIMEOUT_MS: number = 4_000;
@@ -63,16 +63,12 @@ type CheckInbox = (
   identity: AgentIdentity,
   options: {
     readonly afterSequence: number;
+    readonly e2ee: boolean;
     readonly token: string;
     readonly timeoutMs: number;
     readonly url: string;
   },
 ) => Promise<InboxSummary>;
-
-type JsonRpcExchange = {
-  readonly body: unknown;
-  readonly response: Response;
-};
 
 type HandleHookOptions = {
   readonly cacheDirectory?: string | undefined;
@@ -233,178 +229,6 @@ function missingTokenOutput(
   return output;
 }
 
-function rpcResult(response: unknown): unknown {
-  if (!isRecord(response)) throw new Error("Murmur returned an invalid JSON-RPC response");
-  if (response["error"] !== undefined) {
-    const error: unknown = response["error"];
-    const message: string =
-      isRecord(error) && typeof error["message"] === "string"
-        ? error["message"]
-        : "Murmur JSON-RPC request failed";
-    throw new Error(message);
-  }
-  if (!("result" in response)) throw new Error("Murmur JSON-RPC response has no result");
-  return response["result"];
-}
-
-async function responseBody(response: Response): Promise<unknown> {
-  const content: string = await response.text();
-  if (!response.ok) {
-    throw new Error(`Murmur HTTP ${response.status}: ${content.slice(0, 300)}`);
-  }
-  if (content.trim() === "") return null;
-  const contentType: string = response.headers.get("content-type") ?? "";
-  if (!contentType.includes("text/event-stream")) return JSON.parse(content);
-
-  const data: string[] = [];
-  for (const line of content.split(/\r?\n/gu)) {
-    if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
-  }
-  if (data.length === 0) throw new Error("Murmur returned an empty event stream");
-  const lastEvent: string | undefined = data.at(-1);
-  if (lastEvent === undefined) throw new Error("Murmur returned an empty event stream");
-  return JSON.parse(lastEvent);
-}
-
-function requestHeaders(identity: AgentIdentity, token: string, sessionId: string | null): Headers {
-  const headers: Headers = new Headers({
-    Accept: "application/json, text/event-stream",
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
-    "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-    "X-Murmur-Client": identity.client,
-  });
-  if (identity.branch !== null) headers.set("X-Murmur-Branch", identity.branch);
-  if (identity.repository !== null) {
-    headers.set("X-Murmur-Repository", identity.repository);
-  }
-  if (sessionId !== null) headers.set("Mcp-Session-Id", sessionId);
-  return headers;
-}
-
-async function postJsonRpc(options: {
-  readonly body: Record<string, unknown>;
-  readonly headers: Headers;
-  readonly timeoutMs: number;
-  readonly url: string;
-}): Promise<JsonRpcExchange> {
-  const response: Response = await fetch(options.url, {
-    body: JSON.stringify(options.body),
-    headers: options.headers,
-    method: "POST",
-    signal: AbortSignal.timeout(options.timeoutMs),
-  });
-  return { body: await responseBody(response), response };
-}
-
-function remainingTimeoutMs(deadline: number): number {
-  return Math.max(1, deadline - Date.now());
-}
-
-export async function checkRemoteInbox(
-  identity: AgentIdentity,
-  options: {
-    readonly afterSequence?: number | undefined;
-    readonly token: string;
-    readonly timeoutMs: number;
-    readonly url: string;
-  },
-): Promise<InboxSummary> {
-  const afterSequence: number = options.afterSequence ?? 0;
-  const deadline: number = Date.now() + options.timeoutMs;
-  const initialize: JsonRpcExchange = await postJsonRpc({
-    body: {
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        capabilities: {},
-        clientInfo: { name: "murmur-hook", version: "0.1.0" },
-        protocolVersion: LATEST_PROTOCOL_VERSION,
-      },
-    },
-    headers: requestHeaders(identity, options.token, null),
-    timeoutMs: remainingTimeoutMs(deadline),
-    url: options.url,
-  });
-  rpcResult(initialize.body);
-  const sessionId: string | null = initialize.response.headers.get("mcp-session-id");
-  if (sessionId === null) throw new Error("Murmur did not create an MCP session");
-  const headers: Headers = requestHeaders(identity, options.token, sessionId);
-  try {
-    await postJsonRpc({
-      body: { jsonrpc: "2.0", method: "notifications/initialized", params: {} },
-      headers,
-      timeoutMs: remainingTimeoutMs(deadline),
-      url: options.url,
-    });
-    const registration: JsonRpcExchange = await postJsonRpc({
-      body: {
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/call",
-        params: {
-          name: "register_agent",
-          arguments: {
-            agent_id: identity.agentId,
-            display_name: identity.displayName,
-            metadata: {
-              client: identity.client,
-              machine: identity.machine,
-              ...(identity.repository === null ? {} : { repository: identity.repository }),
-              workspace: identity.workspace,
-            },
-          },
-        },
-      },
-      headers,
-      timeoutMs: remainingTimeoutMs(deadline),
-      url: options.url,
-    });
-    rpcResult(registration.body);
-    const inboxResponse: JsonRpcExchange = await postJsonRpc({
-      body: {
-        jsonrpc: "2.0",
-        id: 3,
-        method: "tools/call",
-        params: {
-          name: "get_messages",
-          arguments: {
-            after_sequence: afterSequence,
-            agent_id: identity.agentId,
-            limit: 100,
-            unread_only: true,
-          },
-        },
-      },
-      headers,
-      timeoutMs: remainingTimeoutMs(deadline),
-      url: options.url,
-    });
-    const toolResult: unknown = rpcResult(inboxResponse.body);
-    if (!isRecord(toolResult)) throw new Error("Murmur returned an invalid tool result");
-    const inbox: InboxOutput = InboxOutputSchema.parse(toolResult["structuredContent"]);
-    const lastMessage: InboxOutput["messages"][number] | undefined = inbox.messages.at(-1);
-    return {
-      inboxVersion: lastMessage === undefined ? afterSequence : lastMessage.sequence,
-      messageCount: inbox.messages.length,
-      senderIds: [
-        ...new Set(
-          inbox.messages.map(
-            (message: InboxOutput["messages"][number]): string => message.sender_id,
-          ),
-        ),
-      ].slice(0, 5),
-    };
-  } finally {
-    await fetch(options.url, {
-      headers,
-      method: "DELETE",
-      signal: AbortSignal.timeout(remainingTimeoutMs(deadline)),
-    }).catch((): void => undefined);
-  }
-}
-
 export async function handleHook(
   input: HookInput,
   client: MurmurClient,
@@ -439,6 +263,7 @@ export async function handleHook(
     options.timeoutMs ?? positiveInteger(environment["MURMUR_HOOK_TIMEOUT_MS"], DEFAULT_TIMEOUT_MS);
   const summary: InboxSummary = await (options.checkInbox ?? checkRemoteInbox)(identity, {
     afterSequence: eventName === "SessionStart" ? 0 : cache.lastNotifiedInboxVersion,
+    e2ee: environment["MURMUR_E2EE"] === "1",
     token,
     timeoutMs,
     url: options.url ?? environment["MURMUR_MCP_URL"] ?? DEFAULT_MURMUR_URL,
