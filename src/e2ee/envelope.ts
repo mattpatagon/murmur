@@ -112,36 +112,12 @@ export async function decryptEnvelope(
   recipientPrekeyPrivateKey: Uint8Array,
 ): Promise<string> {
   await sodium.ready;
-  requireLength(senderSigningPublicKey, sodium.crypto_sign_PUBLICKEYBYTES, "Sender signing key");
-  requireLength(recipientPrekeyPrivateKey, sodium.crypto_box_SECRETKEYBYTES, "Recipient prekey");
-  requireLength(envelope.ephemeralPublicKey, sodium.crypto_box_PUBLICKEYBYTES, "Ephemeral key");
-  requireLength(envelope.nonce, sodium.crypto_box_NONCEBYTES, "Nonce");
-  requireLength(envelope.signature, sodium.crypto_sign_BYTES, "Signature");
-  if (
-    envelope.ciphertext.byteLength !==
-    envelope.header.paddedLength + sodium.crypto_box_MACBYTES
-  ) {
-    throw new Error("Encrypted message verification failed");
-  }
-
-  const outerHeaderBytes: Uint8Array = encodeEnvelopeHeader(envelope.header);
-  const signatureInput: Uint8Array = encodeSignatureInput(
-    outerHeaderBytes,
-    envelope.ephemeralPublicKey,
-    envelope.nonce,
-    envelope.ciphertext,
-  );
-  const validSignature: boolean = sodium.crypto_sign_verify_detached(
-    envelope.signature,
-    signatureInput,
-    senderSigningPublicKey,
-  );
-  sodium.memzero(signatureInput);
-  if (!validSignature) throw new Error("Encrypted message verification failed");
-
   let paddedInner: Uint8Array | null = null;
   let decoded: DecodedInnerCore | null = null;
   try {
+    requireLength(recipientPrekeyPrivateKey, sodium.crypto_box_SECRETKEYBYTES, "Recipient prekey");
+    await verifyEnvelopeSignature(envelope, senderSigningPublicKey);
+    const outerHeaderBytes: Uint8Array = encodeEnvelopeHeader(envelope.header);
     try {
       paddedInner = sodium.crypto_box_open_easy(
         envelope.ciphertext,
@@ -168,5 +144,40 @@ export async function decryptEnvelope(
       sodium.memzero(decoded.outerHeaderBytes);
       sodium.memzero(decoded.plaintextBytes);
     }
+  }
+}
+
+export async function verifyEnvelopeSignature(
+  envelope: EncryptedEnvelope,
+  senderSigningPublicKey: Uint8Array,
+): Promise<void> {
+  await sodium.ready;
+  try {
+    requireLength(senderSigningPublicKey, sodium.crypto_sign_PUBLICKEYBYTES, "Sender signing key");
+    requireLength(envelope.ephemeralPublicKey, sodium.crypto_box_PUBLICKEYBYTES, "Ephemeral key");
+    requireLength(envelope.nonce, sodium.crypto_box_NONCEBYTES, "Nonce");
+    requireLength(envelope.signature, sodium.crypto_sign_BYTES, "Signature");
+    if (
+      envelope.ciphertext.byteLength !==
+      envelope.header.paddedLength + sodium.crypto_box_MACBYTES
+    ) {
+      throw new Error("ciphertext length");
+    }
+    const outerHeaderBytes: Uint8Array = encodeEnvelopeHeader(envelope.header);
+    const signatureInput: Uint8Array = encodeSignatureInput(
+      outerHeaderBytes,
+      envelope.ephemeralPublicKey,
+      envelope.nonce,
+      envelope.ciphertext,
+    );
+    const valid: boolean = sodium.crypto_sign_verify_detached(
+      envelope.signature,
+      signatureInput,
+      senderSigningPublicKey,
+    );
+    sodium.memzero(signatureInput);
+    if (!valid) throw new Error("signature");
+  } catch (_error: unknown) {
+    throw new Error("Encrypted message verification failed");
   }
 }
