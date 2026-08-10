@@ -146,8 +146,8 @@ export class SqliteMessageStore implements MessageStore {
       strict: true,
     });
     this.database.exec("PRAGMA foreign_keys = ON");
-    this.database.exec("PRAGMA journal_mode = WAL");
     this.database.exec("PRAGMA busy_timeout = 5000");
+    this.database.exec("PRAGMA journal_mode = WAL");
     migrateSqliteDatabase(this.database);
     this.pruneExpired(this.clock.now());
   }

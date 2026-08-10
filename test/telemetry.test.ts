@@ -147,9 +147,14 @@ test("enabled telemetry exports bounded protobuf spans without request secrets",
 });
 
 test("telemetry shutdown stays inside the configured exporter deadline", async (): Promise<void> => {
+  const collectorRequest: { release: (() => void) | null } = { release: null };
   const collector: Bun.Server<undefined> = Bun.serve({
     fetch: async (_request: Request): Promise<Response> =>
-      await new Promise<Response>((_resolve: (response: Response) => void): void => {}),
+      await new Promise<Response>((resolve: (response: Response) => void): void => {
+        collectorRequest.release = (): void => {
+          resolve(new Response(null, { status: 503 }));
+        };
+      }),
     hostname: "127.0.0.1",
     port: 0,
   });
@@ -170,6 +175,8 @@ test("telemetry shutdown stays inside the configured exporter deadline", async (
   try {
     await expect(telemetry.shutdown()).rejects.toThrow("Timeout");
   } finally {
+    const releaseRequest: (() => void) | null = collectorRequest.release;
+    if (releaseRequest !== null) releaseRequest();
     await collector.stop(true);
   }
   expect(performance.now() - startedAt).toBeLessThan(1_000);
