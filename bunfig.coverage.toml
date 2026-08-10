@@ -3,4 +3,4 @@ coverage = true
 coverageDir = "coverage"
 coverageReporter = ["text", "lcov"]
 coverageSkipTestFiles = true
-coverageThreshold = { lines = 0.900001, functions = 0.900001, statements = 0.900001 }
+# scripts/check-coverage.ts applies the strict tracked-source census and thresholds.

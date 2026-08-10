@@ -4,6 +4,7 @@ import { join } from "node:path";
 import process from "node:process";
 
 export const MINIMUM_COVERAGE_PERCENT: number = 90;
+export const MINIMUM_FILE_LINE_COVERAGE_PERCENT: number = 80;
 
 type MutableCoverageRecord = {
   functionsFound: number | null;
@@ -132,9 +133,19 @@ export function auditCoverage(
   lcovContent: string,
   workspace: string,
   minimumPercent: number = MINIMUM_COVERAGE_PERCENT,
+  minimumFileLinePercent: number = MINIMUM_FILE_LINE_COVERAGE_PERCENT,
 ): CoverageAudit {
   if (!Number.isFinite(minimumPercent) || minimumPercent < 0 || minimumPercent >= 100) {
     throw new Error("Coverage minimum must be a finite percentage from 0 through 99.999...");
+  }
+  if (
+    !Number.isFinite(minimumFileLinePercent) ||
+    minimumFileLinePercent < 0 ||
+    minimumFileLinePercent >= 100
+  ) {
+    throw new Error(
+      "Per-file coverage minimum must be a finite percentage from 0 through 99.999...",
+    );
   }
   const unsupportedTrackedSources: string[] = trackedSources.filter(
     (source: string): boolean => source.startsWith("src/") && !source.endsWith(".ts"),
@@ -190,6 +201,13 @@ export function auditCoverage(
   for (const source of normalizedTrackedSources) {
     const record: CoverageRecord | undefined = sourceRecords.get(source);
     if (record === undefined) continue;
+    const fileLineMetric: CoverageMetric = metric(record.linesFound, record.linesHit);
+    const fileLineError: string | null = metricError(
+      `${source} line`,
+      fileLineMetric,
+      minimumFileLinePercent,
+    );
+    if (fileLineError !== null) errors.push(fileLineError);
     functionsFound += record.functionsFound;
     functionsHit += record.functionsHit;
     linesFound += record.linesFound;
@@ -264,7 +282,8 @@ function main(): void {
       return;
     }
     process.stdout.write(
-      `Coverage gate passed for ${audit.trackedSources} tracked runtime source files.\n`,
+      `Coverage gate passed for ${audit.trackedSources} tracked runtime source files ` +
+        `with every file's line coverage above ${MINIMUM_FILE_LINE_COVERAGE_PERCENT.toFixed(1)}%.\n`,
     );
   } catch (error: unknown) {
     const message: string = error instanceof Error ? error.message : String(error);

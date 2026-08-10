@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { auditCoverage, hasRuntimeCode, type CoverageAudit } from "../scripts/check-coverage.js";
+import { auditCoverage, type CoverageAudit, hasRuntimeCode } from "../scripts/check-coverage.js";
 
 function record(options: {
   readonly functionsFound: number;
@@ -102,6 +102,28 @@ test("rejects exactly ninety percent and untracked source records", (): void => 
   expect(audit.errors).toContain("Untracked source files present in LCOV: src/untracked.ts");
   expect(audit.errors).toContain("Function coverage must be >90.0%; received 90.00% (9/10)");
   expect(audit.errors).toContain("Line coverage must be >90.0%; received 90.00% (9/10)");
+});
+
+test("rejects a source file at the per-file floor even when aggregate coverage passes", (): void => {
+  const lcov: string =
+    record({
+      functionsFound: 5,
+      functionsHit: 4,
+      linesFound: 5,
+      linesHit: 4,
+      source: "src/weak.ts",
+    }) +
+    record({
+      functionsFound: 95,
+      functionsHit: 95,
+      linesFound: 95,
+      linesHit: 95,
+      source: "src/strong.ts",
+    });
+  const audit: CoverageAudit = auditCoverage(["src/weak.ts", "src/strong.ts"], lcov, "/workspace");
+  expect(audit.functions.percent).toBe(99);
+  expect(audit.lines.percent).toBe(99);
+  expect(audit.errors).toContain("src/weak.ts line coverage must be >80.0%; received 80.00% (4/5)");
 });
 
 test("rejects malformed or duplicate lcov records", (): void => {

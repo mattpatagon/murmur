@@ -33,6 +33,11 @@ function runBun(arguments_: readonly string[], workspace: string): boolean {
 function main(): void {
   try {
     const workspace: string = process.cwd();
+    const arguments_: readonly string[] = process.argv.slice(2);
+    const deferAudit: boolean = arguments_.length === 1 && arguments_[0] === "--defer-audit";
+    if (arguments_.length > 0 && !deferAudit) {
+      throw new Error(`Unknown coverage option: ${arguments_.join(" ")}`);
+    }
     resetCoverageDirectory(workspace);
     const configurationPath: string = join(workspace, "bunfig.coverage.toml");
     const testsPassed: boolean = runBun([`--config=${configurationPath}`, "test"], workspace);
@@ -40,6 +45,7 @@ function main(): void {
       process.exitCode = 1;
       return;
     }
+    if (deferAudit) return;
     const auditPassed: boolean = runBun(["run", "scripts/check-coverage.ts"], workspace);
     if (!auditPassed) process.exitCode = 1;
   } catch (error: unknown) {
