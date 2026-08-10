@@ -39,6 +39,9 @@ const WorkerResultSchema: z.ZodDiscriminatedUnion<
 ]);
 
 type WorkerResult = z.infer<typeof WorkerResultSchema>;
+type RaceWorker = Bun.Subprocess<"ignore", "ignore", "pipe">;
+
+const WORKER_READY_TIMEOUT_MS: number = 30_000;
 
 function requiredEnvironment(name: string): string {
   const value: string | undefined = process.env[name];
@@ -60,9 +63,30 @@ function messageCommand(content: string): SendMessageCommand {
 }
 
 async function waitForFile(path: string): Promise<void> {
-  const deadline: number = Date.now() + 15_000;
+  const deadline: number = Date.now() + WORKER_READY_TIMEOUT_MS;
   while (!existsSync(path)) {
     if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${path}`);
+    await Bun.sleep(10);
+  }
+}
+
+async function waitForWorkerReady(path: string, worker: RaceWorker): Promise<void> {
+  const deadline: number = Date.now() + WORKER_READY_TIMEOUT_MS;
+  while (!existsSync(path)) {
+    if (worker.exitCode !== null) {
+      const stderr: string = await new Response(worker.stderr).text();
+      throw new Error(
+        `SQLite race worker exited with code ${worker.exitCode} before readiness: ${stderr.trim()}`,
+      );
+    }
+    if (Date.now() >= deadline) {
+      worker.kill();
+      const exitCode: number = await worker.exited;
+      const stderr: string = await new Response(worker.stderr).text();
+      throw new Error(
+        `Timed out waiting for SQLite race worker readiness; exit code ${exitCode}; stderr: ${stderr.trim()}`,
+      );
+    }
     await Bun.sleep(10);
   }
 }
@@ -131,7 +155,7 @@ function spawnWorker(
   readyPath: string,
   resultPath: string,
   content: string,
-): Bun.Subprocess<"ignore", "ignore", "pipe"> {
+): RaceWorker {
   return Bun.spawn([process.execPath, "run", import.meta.path], {
     env: {
       MURMUR_SQLITE_RACE_CONTENT: content,
@@ -163,26 +187,21 @@ async function runConcurrentSends(
     join(directory, "result-2.json"),
   ];
   initializeDatabase(databasePath);
-  const workers: readonly [
-    Bun.Subprocess<"ignore", "ignore", "pipe">,
-    Bun.Subprocess<"ignore", "ignore", "pipe">,
-  ] = [
+  const workers: readonly [RaceWorker, RaceWorker] = [
     spawnWorker(databasePath, goPath, readyPaths[0], resultPaths[0], contents[0]),
     spawnWorker(databasePath, goPath, readyPaths[1], resultPaths[1], contents[1]),
   ];
   try {
-    await Promise.all(readyPaths.map((path: string): Promise<void> => waitForFile(path)));
+    await Promise.all([
+      waitForWorkerReady(readyPaths[0], workers[0]),
+      waitForWorkerReady(readyPaths[1], workers[1]),
+    ]);
     writeFileSync(goPath, "go\n");
     const exitCodes: readonly number[] = await Promise.all(
-      workers.map(
-        (worker: Bun.Subprocess<"ignore", "ignore", "pipe">): Promise<number> => worker.exited,
-      ),
+      workers.map((worker: RaceWorker): Promise<number> => worker.exited),
     );
     const errors: readonly string[] = await Promise.all(
-      workers.map(
-        (worker: Bun.Subprocess<"ignore", "ignore", "pipe">): Promise<string> =>
-          new Response(worker.stderr).text(),
-      ),
+      workers.map((worker: RaceWorker): Promise<string> => new Response(worker.stderr).text()),
     );
     expect(exitCodes).toEqual([0, 0]);
     expect(errors).toEqual(["", ""]);
@@ -191,14 +210,10 @@ async function runConcurrentSends(
         WorkerResultSchema.parse(JSON.parse(readFileSync(path, "utf8"))),
     );
   } finally {
-    workers.forEach((worker: Bun.Subprocess<"ignore", "ignore", "pipe">): void => {
+    workers.forEach((worker: RaceWorker): void => {
       if (worker.exitCode === null) worker.kill();
     });
-    await Promise.all(
-      workers.map(
-        (worker: Bun.Subprocess<"ignore", "ignore", "pipe">): Promise<number> => worker.exited,
-      ),
-    );
+    await Promise.all(workers.map((worker: RaceWorker): Promise<number> => worker.exited));
     rmSync(directory, { force: true, recursive: true });
   }
 }
@@ -237,6 +252,34 @@ function expectConflictingRetryResults(conflicts: readonly WorkerResult[]): void
 if (process.env["MURMUR_SQLITE_RACE_WORKER"] === "1") {
   await runWorker();
 } else {
+  test("reports SQLite race worker startup exits immediately", async (): Promise<void> => {
+    const directory: string = mkdtempSync(join(tmpdir(), "murmur-sqlite-startup-"));
+    const worker: RaceWorker = spawnWorker(
+      directory,
+      join(directory, "go"),
+      join(directory, "ready"),
+      join(directory, "result.json"),
+      "Startup failure probe",
+    );
+    const startedAt: number = Date.now();
+    try {
+      let startupError: unknown = null;
+      try {
+        await waitForWorkerReady(join(directory, "ready"), worker);
+      } catch (error: unknown) {
+        startupError = error;
+      }
+      expect(startupError).toBeInstanceOf(Error);
+      if (!(startupError instanceof Error)) throw new Error("Expected a worker startup error");
+      expect(startupError.message).toContain("exited with code");
+      expect(Date.now() - startedAt).toBeLessThan(WORKER_READY_TIMEOUT_MS);
+    } finally {
+      if (worker.exitCode === null) worker.kill();
+      await worker.exited;
+      rmSync(directory, { force: true, recursive: true });
+    }
+  }, 40_000);
+
   test("resolves concurrent cross-process idempotent sends through the stored winner", async (): Promise<void> => {
     let attempt: number = 0;
     while (attempt < 5) {
@@ -252,5 +295,5 @@ if (process.env["MURMUR_SQLITE_RACE_WORKER"] === "1") {
       expectConflictingRetryResults(conflicts);
       attempt += 1;
     }
-  }, 60_000);
+  }, 120_000);
 }
