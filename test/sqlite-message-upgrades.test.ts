@@ -4,7 +4,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { Message, SendMessageCommand, SendMessageResult } from "../src/domain/models.js";
+import type {
+  Agent,
+  Message,
+  SendMessageCommand,
+  SendMessageResult,
+} from "../src/domain/models.js";
 import {
   AgentId,
   DisplayName,
@@ -163,6 +168,73 @@ test("upgrades a SQLite v2 message while preserving repository context", (): voi
     expect(legacyMessage.branchName).toBeNull();
     expect(legacyMessage.client).toBeNull();
     expect(legacyMessage.createdAt.toISOString()).toBe("2026-08-04T11:45:00.000Z");
+  } finally {
+    store.close();
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("upgrades a populated SQLite v4 agent with a live compatibility lease", (): void => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-store-v4-"));
+  const databasePath: string = join(directory, "messages.db");
+  const legacyDatabase: Database = new Database(databasePath, { create: true });
+  legacyDatabase.exec(`
+    CREATE TABLE agents (
+      agent_id TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL
+    );
+    CREATE TABLE broadcasts (
+      broadcast_id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL REFERENCES agents(agent_id),
+      content TEXT NOT NULL,
+      repository_name TEXT NOT NULL,
+      branch_name TEXT NOT NULL,
+      client_name TEXT NOT NULL CHECK(client_name IN ('claude', 'codex')),
+      audience_repository_name TEXT,
+      audience_machine_name TEXT,
+      idempotency_key TEXT,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      UNIQUE(sender_id, idempotency_key)
+    );
+    CREATE TABLE messages (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id TEXT NOT NULL UNIQUE,
+      thread_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL REFERENCES agents(agent_id),
+      recipient_id TEXT NOT NULL REFERENCES agents(agent_id),
+      broadcast_id TEXT REFERENCES broadcasts(broadcast_id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      repository_name TEXT,
+      branch_name TEXT CHECK(branch_name IS NULL OR length(branch_name) BETWEEN 1 AND 500),
+      client_name TEXT CHECK(client_name IS NULL OR client_name IN ('claude', 'codex')),
+      idempotency_key TEXT,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      read_at TEXT,
+      UNIQUE(sender_id, idempotency_key)
+    );
+    INSERT INTO agents(agent_id, display_name, metadata_json, created_at, last_seen_at)
+    VALUES (
+      'legacy-active', 'Legacy active', '{"repository":"mattpatagon/murmur"}',
+      strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day'),
+      strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 minutes')
+    );
+    PRAGMA user_version = 4;
+  `);
+  legacyDatabase.close();
+
+  const store: SqliteMessageStore = new SqliteMessageStore(databasePath);
+  try {
+    const agent: Agent | null = store.getAgent(AgentId.parse("legacy-active"));
+    if (agent === null) throw new Error("Expected migrated agent");
+    expect(agent.generation.value).toBe(1);
+    expect(agent.state).toBe("active");
+    expect(agent.liveSessionCount).toBe(1);
   } finally {
     store.close();
     rmSync(directory, { force: true, recursive: true });

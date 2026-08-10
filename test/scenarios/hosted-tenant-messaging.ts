@@ -3,6 +3,8 @@ import { expect } from "bun:test";
 import {
   type BroadcastMessageOutput,
   BroadcastMessageOutputSchema,
+  type GetAgentOutput,
+  GetAgentOutputSchema,
   type InboxOutput,
   InboxOutputSchema,
   type ListAgentsOutput,
@@ -22,6 +24,27 @@ import {
 import type { HostedTenantScenario } from "./hosted-tenant-provisioning.js";
 
 export async function verifyHostedTenantMessaging(scenario: HostedTenantScenario): Promise<void> {
+  const currentAgent: GetAgentOutput = await callTool(
+    scenario.server.mcpUrl,
+    scenario.agentAToken.token.secret,
+    scenario.agentASession,
+    522,
+    "get_agent",
+    { agent_id: scenario.senderA },
+    GetAgentOutputSchema,
+  );
+  expect(currentAgent.agent.state).toBe("active");
+  expect(currentAgent.agent.generation).toBe(1);
+  expect(
+    await callToolExpectingError(
+      scenario.server.mcpUrl,
+      scenario.agentAToken.token.secret,
+      scenario.agentASession,
+      523,
+      "get_agent",
+      { agent_id: `unknown-${scenario.unique}` },
+    ),
+  ).toContain("Unknown agent");
   const receiverAUri: string = `murmur://inbox/${scenario.receiverA}`;
   const receiverBUri: string = `murmur://inbox/${scenario.receiverB}`;
   await subscribeInbox(

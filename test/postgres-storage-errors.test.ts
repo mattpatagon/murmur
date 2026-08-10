@@ -1,0 +1,43 @@
+import { expect, test } from "bun:test";
+
+import {
+  AgentCapacityError,
+  NoticeCapacityError,
+  StorageCorruptionError,
+} from "../src/domain/errors.js";
+import { normalizePostgresStorageError } from "../src/storage/postgres-storage-errors.js";
+
+function postgresError(code: string, message: string, constraintName?: string): Error {
+  const error: Error = new Error(message);
+  Reflect.set(error, "code", code);
+  if (constraintName !== undefined) Reflect.set(error, "constraint_name", constraintName);
+  return error;
+}
+
+test("Postgres quota and accounting failures become stable domain errors", (): void => {
+  expect(
+    normalizePostgresStorageError(postgresError("54000", "tenant agent quota exceeded")),
+  ).toBeInstanceOf(AgentCapacityError);
+  expect(
+    normalizePostgresStorageError(postgresError("54000", "tenant retained-notice quota exceeded")),
+  ).toBeInstanceOf(NoticeCapacityError);
+  expect(
+    normalizePostgresStorageError(
+      postgresError("XX001", "tenant notice quota accounting inconsistent"),
+    ),
+  ).toBeInstanceOf(StorageCorruptionError);
+});
+
+test("new lifecycle constraints never expose schema names while unrelated errors survive", (): void => {
+  const constraint: unknown = normalizePostgresStorageError(
+    postgresError("23514", "raw database detail", "notices_expiry_bounds"),
+  );
+  expect(constraint).toBeInstanceOf(StorageCorruptionError);
+  expect(constraint).toHaveProperty(
+    "message",
+    "Stored agent lifecycle data failed runtime validation",
+  );
+
+  const unrelated: Error = postgresError("23505", "existing compatibility error");
+  expect(normalizePostgresStorageError(unrelated)).toBe(unrelated);
+});

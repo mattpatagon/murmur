@@ -50,6 +50,19 @@ MCP changes are additive when possible. Preserve existing tool names, required f
 meanings, idempotency behavior, resource URIs, and message retention semantics. A breaking change
 requires an explicit compatibility plan, versioned contract, migration path, and release note.
 
+The v0.6 lifecycle expansion backfills existing agents and messages into generation 1 and creates a
+60-minute compatibility lease for agents seen during the preceding hour. Apply its migrations before
+the matching application, complete traffic cutover and drain older writers before those leases can
+expire, then verify lifecycle, history, and notice behavior through the hosted suite. Older writers
+do not renew named leases, and a pre-v0.6 application must not be restored after any identity has
+advanced beyond generation 1; use a forward fix instead.
+
+The expansion separates column/constraint installation, constraint validation, backfill, trigger
+installation, and concurrent index creation so production locks remain bounded. If a concurrent
+index build is interrupted, rerun the unchanged migration: it removes only a same-named index marked
+`INVALID` in `pg_index` before rebuilding it, while preserving a valid index. The hosted verifier
+asserts that no lifecycle index remains invalid and exercises both empty and populated upgrades.
+
 ## Release and rollback
 
 A release owner updates `VERSION`, `package.json`, and `CHANGELOG.md` in one commit after all prior

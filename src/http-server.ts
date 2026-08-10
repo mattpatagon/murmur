@@ -51,6 +51,7 @@ import {
   type HttpObservability,
   type RequestObservation,
 } from "./observability/request-observation.js";
+import { recordRepositoryDivergence } from "./observability/lifecycle-metrics.js";
 import { logSafeError } from "./safe-errors.js";
 import { createStore } from "./storage/create-store.js";
 import type { MessageStore } from "./storage/message-store.js";
@@ -361,6 +362,7 @@ export async function startHttpServer(
             legacyCredentialHash: authenticator.legacyCredentialHash(principal),
             onTenantSuspended: scheduleCloseSessionsForTenant,
             onTokenRevoked: scheduleCloseSessionsForToken,
+            onRepositoryDivergence: (): void => recordRepositoryDivergence(observability),
             principal,
             repositoryName,
             store: principal.kind === "tenant" ? store.scope(principal.tenantId) : null,

@@ -2,7 +2,7 @@ import type { Database, Statement } from "bun:sqlite";
 
 import { type UserVersionRow, UserVersionRowSchema } from "./sqlite-message-rows.js";
 
-const SUPPORTED_SCHEMA_VERSION: number = 4;
+const SUPPORTED_SCHEMA_VERSION: number = 8;
 
 function schemaVersion(database: Database): number {
   const statement: Statement<unknown, []> = database.query("PRAGMA user_version");
@@ -113,6 +113,131 @@ export function migrateSqliteDatabase(database: Database): void {
           REFERENCES broadcasts(broadcast_id) ON DELETE CASCADE;
         CREATE INDEX messages_broadcast_recipient ON messages(broadcast_id, recipient_id);
         PRAGMA user_version = 4;
+      `);
+      version = 4;
+    }
+    if (version === 4) {
+      database.exec(`
+        ALTER TABLE agents ADD COLUMN generation INTEGER NOT NULL DEFAULT 1
+          CHECK(generation >= 1);
+        ALTER TABLE agents ADD COLUMN closed_at TEXT;
+        ALTER TABLE agents ADD COLUMN close_reason TEXT
+          CHECK(close_reason IS NULL OR close_reason IN (
+            'completed', 'workspace_deleted', 'superseded', 'manual', 'dormant'
+          ));
+        CREATE TABLE agent_sessions (
+          agent_id TEXT NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
+          generation INTEGER NOT NULL CHECK(generation >= 1),
+          session_key TEXT NOT NULL CHECK(
+            length(session_key) BETWEEN 1 AND 64
+            AND session_key NOT GLOB '*[^A-Za-z0-9._-]*'
+          ),
+          started_at TEXT NOT NULL,
+          last_renewed_at TEXT NOT NULL,
+          lease_expires_at TEXT NOT NULL,
+          ended_at TEXT,
+          end_reason TEXT CHECK(end_reason IS NULL OR end_reason IN (
+            'stop', 'session_end', 'superseded', 'expired', 'closed'
+          )),
+          PRIMARY KEY(agent_id, generation, session_key)
+        );
+        CREATE INDEX agent_sessions_live_lease
+          ON agent_sessions(agent_id, generation, ended_at, lease_expires_at);
+        CREATE INDEX agent_sessions_ended_cleanup
+          ON agent_sessions(ended_at, agent_id, generation, session_key)
+          WHERE ended_at IS NOT NULL;
+        CREATE INDEX agents_open_activity
+          ON agents(closed_at, last_seen_at DESC, agent_id);
+        INSERT INTO agent_sessions(
+          agent_id, generation, session_key, started_at, last_renewed_at, lease_expires_at
+        )
+        SELECT
+          agent_id,
+          1,
+          'backfill',
+          last_seen_at,
+          last_seen_at,
+          strftime('%Y-%m-%dT%H:%M:%fZ', last_seen_at, '+60 minutes')
+        FROM agents
+        WHERE last_seen_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-60 minutes');
+        PRAGMA user_version = 5;
+      `);
+      version = 5;
+    }
+    if (version === 5) {
+      database.exec(`
+        ALTER TABLE messages ADD COLUMN sender_generation INTEGER NOT NULL DEFAULT 1
+          CHECK(sender_generation >= 1);
+        ALTER TABLE messages ADD COLUMN recipient_generation INTEGER NOT NULL DEFAULT 1
+          CHECK(recipient_generation >= 1);
+        ALTER TABLE broadcasts ADD COLUMN sender_generation INTEGER NOT NULL DEFAULT 1
+          CHECK(sender_generation >= 1);
+        CREATE INDEX messages_recipient_generation_sequence
+          ON messages(recipient_id, recipient_generation, sequence);
+        PRAGMA user_version = 6;
+      `);
+      version = 6;
+    }
+    if (version === 6) {
+      database.exec(`
+        CREATE TABLE notices (
+          notice_id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL CHECK(kind IN ('handoff', 'ownership', 'blocker', 'decision')),
+          creator_id TEXT NOT NULL CHECK(
+            length(creator_id) BETWEEN 1 AND 200
+            AND creator_id GLOB '[A-Za-z0-9]*'
+            AND creator_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+          ),
+          creator_generation INTEGER NOT NULL CHECK(creator_generation >= 1),
+          repository_name TEXT NOT NULL,
+          branch_name TEXT,
+          content TEXT NOT NULL,
+          idempotency_key TEXT,
+          created_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          resolved_by_id TEXT CHECK(resolved_by_id IS NULL OR (
+            length(resolved_by_id) BETWEEN 1 AND 200
+            AND resolved_by_id GLOB '[A-Za-z0-9]*'
+            AND resolved_by_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+          )),
+          resolved_by_generation INTEGER CHECK(resolved_by_generation IS NULL OR resolved_by_generation >= 1),
+          resolved_at TEXT,
+          withdrawn_by_id TEXT CHECK(withdrawn_by_id IS NULL OR (
+            length(withdrawn_by_id) BETWEEN 1 AND 200
+            AND withdrawn_by_id GLOB '[A-Za-z0-9]*'
+            AND withdrawn_by_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+          )),
+          withdrawn_by_generation INTEGER CHECK(withdrawn_by_generation IS NULL OR withdrawn_by_generation >= 1),
+          withdrawn_at TEXT,
+          resolution_note TEXT,
+          UNIQUE(creator_id, idempotency_key),
+          CHECK((resolved_at IS NULL) = (resolved_by_id IS NULL)),
+          CHECK((withdrawn_at IS NULL) = (withdrawn_by_id IS NULL)),
+          CHECK(NOT (resolved_at IS NOT NULL AND withdrawn_at IS NOT NULL))
+        );
+        CREATE INDEX notices_repository_state
+          ON notices(repository_name, resolved_at, withdrawn_at, expires_at, created_at DESC);
+        CREATE INDEX notices_expiration ON notices(expires_at);
+        CREATE INDEX notices_creator_agent ON notices(creator_id);
+        CREATE INDEX notices_resolver_agent ON notices(resolved_by_id)
+          WHERE resolved_by_id IS NOT NULL;
+        CREATE INDEX notices_withdrawer_agent ON notices(withdrawn_by_id)
+          WHERE withdrawn_by_id IS NOT NULL;
+        PRAGMA user_version = 7;
+      `);
+      version = 7;
+    }
+    if (version === 7) {
+      database.exec(`
+        CREATE INDEX IF NOT EXISTS agent_sessions_ended_cleanup
+          ON agent_sessions(ended_at, agent_id, generation, session_key)
+          WHERE ended_at IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS notices_creator_agent ON notices(creator_id);
+        CREATE INDEX IF NOT EXISTS notices_resolver_agent ON notices(resolved_by_id)
+          WHERE resolved_by_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS notices_withdrawer_agent ON notices(withdrawn_by_id)
+          WHERE withdrawn_by_id IS NOT NULL;
+        PRAGMA user_version = 8;
       `);
     }
     database.exec("COMMIT");

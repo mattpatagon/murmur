@@ -1,19 +1,35 @@
 import postgres, { type ListenMeta, type Sql, type TransactionSql } from "postgres";
-import { z } from "zod";
 
-import { UnknownAgentError } from "../domain/errors.js";
+import { AgentClosedError, UnknownAgentError } from "../domain/errors.js";
 import type {
   Agent,
   BroadcastMessageCommand,
   BroadcastMessageResult,
+  CloseAgentCommand,
+  CloseAgentResult,
+  EndSessionCommand,
+  EndSessionResult,
   GetMessagesQuery,
+  ListAgentsQuery,
+  ListAgentsResult,
   MarkMessagesReadCommand,
   MarkMessagesReadResult,
   Message,
   RegisterAgentCommand,
+  RegisterAgentResult,
   SendMessageCommand,
   SendMessageResult,
 } from "../domain/models.js";
+import type {
+  ListNoticesQuery,
+  ListNoticesResult,
+  PostNoticeCommand,
+  PostNoticeResult,
+  ResolveNoticeCommand,
+  ResolveNoticeResult,
+  WithdrawNoticeCommand,
+  WithdrawNoticeResult,
+} from "../domain/notice-models.js";
 import {
   AgentId,
   type Clock,
@@ -32,26 +48,34 @@ import type { InboxSubscription, InboxUpdateHandler, MessageStore } from "./mess
 import { broadcastPostgresMessage } from "./postgres-broadcast-store.js";
 import { sendPostgresMessage } from "./postgres-direct-message-store.js";
 import {
+  closePostgresAgent,
+  endPostgresSession,
+  getPostgresAgent,
+  listPostgresAgents,
+  registerPostgresAgent,
+} from "./postgres-agent-lifecycle-store.js";
+import {
   getPostgresInboxVersion,
   getPostgresMessages,
   markPostgresMessagesRead,
   pruneExpiredPostgresMessages,
 } from "./postgres-inbox-store.js";
+import { type InboxNotification, InboxNotificationSchema } from "./postgres-message-rows.js";
+import { prunePostgresLifecycle } from "./postgres-lifecycle-prune.js";
 import {
-  type AgentRow,
-  AgentRowSchema,
-  firstRow,
-  type InboxNotification,
-  InboxNotificationSchema,
-  mapAgentRow,
-} from "./postgres-message-rows.js";
+  listPostgresNotices,
+  postPostgresNotice,
+  prunePostgresNotices,
+  resolvePostgresNotice,
+  withdrawPostgresNotice,
+} from "./postgres-notice-store.js";
 import { verifyPostgresMessageSchema } from "./postgres-message-schema.js";
 import { setPostgresTenantContext } from "./postgres-message-transactions.js";
+import { normalizePostgresStorageError } from "./postgres-storage-errors.js";
 
 export { POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED } from "./postgres-message-transactions.js";
 
 const INBOX_CHANNEL: string = "murmur_inbox_changed";
-const MAX_AGENTS_PER_TENANT: number = 1_000;
 
 type PostgresInboxSubscriber = {
   readonly agentId: AgentId;
@@ -157,15 +181,6 @@ export class PostgresMessageStore implements MessageStore {
     await setPostgresTenantContext(transaction, this.tenantId);
   }
 
-  private async inTenantTransaction(
-    action: (transaction: TransactionSql) => Promise<unknown>,
-  ): Promise<unknown> {
-    return await this.database.begin(async (transaction: TransactionSql): Promise<unknown> => {
-      await this.setTenantContext(transaction);
-      return await action(transaction);
-    });
-  }
-
   private async initialize(): Promise<void> {
     await this.ensureSchema();
     await this.pruneExpired(this.clock.now());
@@ -258,101 +273,38 @@ export class PostgresMessageStore implements MessageStore {
     subscriber.lastSequence = sequence;
   }
 
-  public async registerAgent(command: RegisterAgentCommand): Promise<Agent> {
+  public async registerAgent(command: RegisterAgentCommand): Promise<RegisterAgentResult> {
     this.ensureOpen();
-    const timestamp: string = this.clock.now().toISOString();
-    const rawRows: unknown = await this.inTenantTransaction(
-      async (transaction: TransactionSql): Promise<unknown> =>
-        await transaction`
-        INSERT INTO murmur.agents(
-        tenant_id, agent_id, display_name, metadata, created_at, last_seen_at
-      )
-      VALUES (
-        ${this.tenantId.value}::uuid,
-        ${command.agentId.value},
-        ${command.displayName.value},
-        ${this.database.json(command.metadata)},
-        ${timestamp}::timestamptz,
-        ${timestamp}::timestamptz
-      )
-      ON CONFLICT(tenant_id, agent_id) DO UPDATE SET
-        display_name = excluded.display_name,
-        metadata = excluded.metadata,
-        last_seen_at = excluded.last_seen_at
-      RETURNING
-        agent_id,
-        display_name,
-        metadata::text AS metadata_json,
-        to_char(
-          created_at AT TIME ZONE 'UTC',
-          'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-        ) AS created_at,
-        to_char(
-          last_seen_at AT TIME ZONE 'UTC',
-          'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-        ) AS last_seen_at
-      `,
-    );
-    const rows: AgentRow[] = z.array(AgentRowSchema).parse(rawRows);
-    return mapAgentRow(firstRow(rows, "registered agent"));
+    try {
+      return await registerPostgresAgent(this.database, this.tenantId, command, this.clock.now());
+    } catch (error: unknown) {
+      throw normalizePostgresStorageError(error);
+    }
   }
 
   public async getAgent(agentId: AgentId): Promise<Agent | null> {
     this.ensureOpen();
-    const rawRows: unknown = await this.inTenantTransaction(
-      async (transaction: TransactionSql): Promise<unknown> =>
-        await transaction`
-        SELECT
-        agent_id,
-        display_name,
-        metadata::text AS metadata_json,
-        to_char(
-          created_at AT TIME ZONE 'UTC',
-          'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-        ) AS created_at,
-        to_char(
-          last_seen_at AT TIME ZONE 'UTC',
-          'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-        ) AS last_seen_at
-      FROM murmur.agents
-      WHERE tenant_id = ${this.tenantId.value}::uuid
-        AND agent_id = ${agentId.value}
-      `,
-    );
-    const rows: AgentRow[] = z.array(AgentRowSchema).parse(rawRows);
-    const row: AgentRow | undefined = rows[0];
-    return row === undefined ? null : mapAgentRow(row);
+    return await getPostgresAgent(this.database, this.tenantId, agentId, this.clock.now());
   }
 
-  public async listAgents(): Promise<readonly Agent[]> {
+  public async listAgents(query: ListAgentsQuery): Promise<ListAgentsResult> {
     this.ensureOpen();
     await this.pruneExpired(this.clock.now());
-    const rawRows: unknown = await this.inTenantTransaction(
-      async (transaction: TransactionSql): Promise<unknown> =>
-        await transaction`
-        SELECT
-        agent_id,
-        display_name,
-        metadata::text AS metadata_json,
-        to_char(
-          created_at AT TIME ZONE 'UTC',
-          'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-        ) AS created_at,
-        to_char(
-          last_seen_at AT TIME ZONE 'UTC',
-          'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-        ) AS last_seen_at
-      FROM murmur.agents
-      WHERE tenant_id = ${this.tenantId.value}::uuid
-      ORDER BY last_seen_at DESC, agent_id ASC
-      LIMIT ${MAX_AGENTS_PER_TENANT + 1}
-      `,
-    );
-    const rows: AgentRow[] = z.array(AgentRowSchema).parse(rawRows);
-    if (rows.length > MAX_AGENTS_PER_TENANT) {
-      throw new Error("Tenant agent quota invariant exceeded");
+    return await listPostgresAgents(this.database, this.tenantId, query, this.clock.now());
+  }
+
+  public async endSession(command: EndSessionCommand): Promise<EndSessionResult> {
+    this.ensureOpen();
+    return await endPostgresSession(this.database, this.tenantId, command, this.clock.now());
+  }
+
+  public async closeAgent(command: CloseAgentCommand): Promise<CloseAgentResult> {
+    this.ensureOpen();
+    try {
+      return await closePostgresAgent(this.database, this.tenantId, command, this.clock.now());
+    } catch (error: unknown) {
+      throw normalizePostgresStorageError(error);
     }
-    return rows.map((row: AgentRow): Agent => mapAgentRow(row));
   }
 
   public async broadcastMessage(command: BroadcastMessageCommand): Promise<BroadcastMessageResult> {
@@ -391,9 +343,50 @@ export class PostgresMessageStore implements MessageStore {
     return await markPostgresMessagesRead(this.database, this.tenantId, command, now);
   }
 
-  public async getInboxVersion(agentId: AgentId): Promise<Sequence> {
+  public async postNotice(command: PostNoticeCommand): Promise<PostNoticeResult> {
     this.ensureOpen();
-    return await getPostgresInboxVersion(this.database, this.tenantId, agentId, this.clock.now());
+    const now: Instant = this.clock.now();
+    await this.pruneExpired(now);
+    try {
+      return await postPostgresNotice(this.database, this.tenantId, command, now);
+    } catch (error: unknown) {
+      throw normalizePostgresStorageError(error);
+    }
+  }
+
+  public async listNotices(query: ListNoticesQuery): Promise<ListNoticesResult> {
+    this.ensureOpen();
+    const now: Instant = this.clock.now();
+    await this.pruneExpired(now);
+    return await listPostgresNotices(this.database, this.tenantId, query, now);
+  }
+
+  public async resolveNotice(command: ResolveNoticeCommand): Promise<ResolveNoticeResult> {
+    this.ensureOpen();
+    const now: Instant = this.clock.now();
+    await this.pruneExpired(now);
+    return await resolvePostgresNotice(this.database, this.tenantId, command, now);
+  }
+
+  public async withdrawNotice(command: WithdrawNoticeCommand): Promise<WithdrawNoticeResult> {
+    this.ensureOpen();
+    const now: Instant = this.clock.now();
+    await this.pruneExpired(now);
+    return await withdrawPostgresNotice(this.database, this.tenantId, command, now);
+  }
+
+  public async getInboxVersion(
+    agentId: AgentId,
+    generation: import("../domain/lifecycle-values.js").AgentGeneration | null = null,
+  ): Promise<Sequence> {
+    this.ensureOpen();
+    return await getPostgresInboxVersion(
+      this.database,
+      this.tenantId,
+      agentId,
+      this.clock.now(),
+      generation,
+    );
   }
 
   public async watchInbox(
@@ -402,7 +395,8 @@ export class PostgresMessageStore implements MessageStore {
     handler: InboxUpdateHandler,
   ): Promise<InboxSubscription> {
     this.ensureOpen();
-    await this.requireAgent(agentId);
+    const agent: Agent = await this.requireAgent(agentId);
+    if (agent.state === "closed") throw new AgentClosedError(agentId.value);
     const subscriberId: number = this.shared.nextSubscriberId;
     this.shared.nextSubscriberId += 1;
     const subscriber: PostgresInboxSubscriber = {
@@ -434,7 +428,21 @@ export class PostgresMessageStore implements MessageStore {
 
   public async pruneExpired(now: Instant): Promise<number> {
     this.ensureOpen();
-    return await pruneExpiredPostgresMessages(this.database, this.tenantId, now);
+    try {
+      const messageChanges: number = await pruneExpiredPostgresMessages(
+        this.database,
+        this.tenantId,
+        now,
+      );
+      await this.database.begin(async (transaction: TransactionSql): Promise<void> => {
+        await this.setTenantContext(transaction);
+        await prunePostgresNotices(transaction, this.tenantId, now);
+        await prunePostgresLifecycle(this.database, transaction, this.tenantId, now);
+      });
+      return messageChanges;
+    } catch (error: unknown) {
+      throw normalizePostgresStorageError(error);
+    }
   }
 
   public async close(): Promise<void> {

@@ -1,80 +1,101 @@
-import { type Changes, Database, type Statement } from "bun:sqlite";
+import { type Changes, Database, type SQLQueryBindings, type Statement } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-import { RETENTION_DAYS } from "../domain/contracts.js";
-import {
-  IdempotencyConflictError,
-  IdempotencyWinnerMissingError,
-  UnknownAgentError,
-} from "../domain/errors.js";
+import { AgentClosedError, UnknownAgentError } from "../domain/errors.js";
 import type {
   Agent,
   BroadcastMessageCommand,
   BroadcastMessageResult,
+  CloseAgentCommand,
+  CloseAgentResult,
+  EndSessionCommand,
+  EndSessionResult,
   GetMessagesQuery,
+  ListAgentsQuery,
+  ListAgentsResult,
   MarkMessagesReadCommand,
   MarkMessagesReadResult,
   Message,
   RegisterAgentCommand,
+  RegisterAgentResult,
   SendMessageCommand,
   SendMessageResult,
 } from "../domain/models.js";
+import type {
+  ListNoticesQuery,
+  ListNoticesResult,
+  PostNoticeCommand,
+  PostNoticeResult,
+  ResolveNoticeCommand,
+  ResolveNoticeResult,
+  WithdrawNoticeCommand,
+  WithdrawNoticeResult,
+} from "../domain/notice-models.js";
 import {
   type AgentId,
   type Clock,
   type Instant,
-  MessageId,
+  type MessageId,
   Sequence,
   SystemClock,
   TenantId,
-  ThreadId,
 } from "../domain/value-objects.js";
 import { logSafeError } from "../safe-errors.js";
 import type { InboxSubscription, InboxUpdateHandler, MessageStore } from "./message-store.js";
 import { broadcastSqliteMessage } from "./sqlite-broadcast-store.js";
+import { sendSqliteMessage } from "./sqlite-direct-message-store.js";
+import {
+  closeSqliteAgent,
+  endSqliteSession,
+  listSqliteAgents,
+  registerSqliteAgent,
+  renewSqliteSession,
+  sqliteAgent,
+} from "./sqlite-agent-lifecycle-store.js";
 import { migrateSqliteDatabase } from "./sqlite-message-migrations.js";
+import { pruneSqliteLifecycle } from "./sqlite-lifecycle-prune.js";
 import {
   type InboxVersionRow,
   InboxVersionRowSchema,
-  mapAgentRow,
   mapMessageRow,
 } from "./sqlite-message-rows.js";
+import {
+  listSqliteNotices,
+  postSqliteNotice,
+  pruneSqliteNotices,
+  resolveSqliteNotice,
+  withdrawSqliteNotice,
+} from "./sqlite-notice-store.js";
 
 const SQLITE_WATCH_INTERVAL_MS: number = 200;
 type IntervalHandle = ReturnType<typeof setInterval>;
+type BunParameterList = Parameters<Statement["all"]>;
+type QueryParameters<ParamsType> = ParamsType extends BunParameterList ? ParamsType : [ParamsType];
 
-function existingMessageResult(
-  database: Database,
-  command: SendMessageCommand,
-): SendMessageResult | null {
-  if (command.idempotencyKey === null) return null;
-  const statement: Statement<unknown, [string, string]> = database.query(`
-    SELECT * FROM messages WHERE sender_id = ? AND idempotency_key = ?
-  `);
-  const rawRow: unknown = statement.get(command.senderId.value, command.idempotencyKey.value);
-  if (rawRow === null) return null;
-  const existing: Message = mapMessageRow(rawRow);
-  const sameThread: boolean =
-    command.threadId === null || existing.threadId.value === command.threadId.value;
-  const sameRequest: boolean =
-    existing.recipientId.equals(command.recipientId) &&
-    existing.content.value === command.content.value &&
-    ((existing.branchName === null && command.branchName === null) ||
-      (existing.branchName !== null &&
-        command.branchName !== null &&
-        existing.branchName.equals(command.branchName))) &&
-    ((existing.client === null && command.client === null) ||
-      (existing.client !== null &&
-        command.client !== null &&
-        existing.client.equals(command.client))) &&
-    ((existing.repositoryName === null && command.repositoryName === null) ||
-      (existing.repositoryName !== null &&
-        command.repositoryName !== null &&
-        existing.repositoryName.equals(command.repositoryName))) &&
-    sameThread;
-  if (!sameRequest) throw new IdempotencyConflictError(command.idempotencyKey.value);
-  return { duplicate: true, message: existing };
+interface FinalizableStatement {
+  finalize(): void;
+}
+
+class ManagedSqliteDatabase extends Database {
+  private readonly cachedStatements: Set<FinalizableStatement> = new Set();
+
+  public override query<ReturnType, ParamsType extends SQLQueryBindings | SQLQueryBindings[]>(
+    sql: string,
+  ): Statement<ReturnType, QueryParameters<ParamsType>> {
+    const statement: Statement<ReturnType, QueryParameters<ParamsType>> = super.query<
+      ReturnType,
+      ParamsType
+    >(sql);
+    this.cachedStatements.add(statement);
+    return statement;
+  }
+
+  public closeSynchronously(): void {
+    for (const statement of this.cachedStatements) statement.finalize();
+    this.cachedStatements.clear();
+    super.close(true);
+  }
 }
 
 class SqliteInboxSubscription implements InboxSubscription {
@@ -130,7 +151,7 @@ class SqliteInboxSubscription implements InboxSubscription {
 
 export class SqliteMessageStore implements MessageStore {
   private readonly clock: Clock;
-  private readonly database: Database;
+  private readonly database: ManagedSqliteDatabase;
   private closed: boolean;
 
   public constructor(databasePath: string, clock: Clock = new SystemClock()) {
@@ -139,7 +160,7 @@ export class SqliteMessageStore implements MessageStore {
     }
     this.clock = clock;
     this.closed = false;
-    this.database = new Database(databasePath, {
+    this.database = new ManagedSqliteDatabase(databasePath, {
       create: true,
       readwrite: true,
       safeIntegers: true,
@@ -170,46 +191,33 @@ export class SqliteMessageStore implements MessageStore {
     return agent;
   }
 
-  public registerAgent(command: RegisterAgentCommand): Agent {
+  public registerAgent(command: RegisterAgentCommand): RegisterAgentResult {
     this.ensureOpen();
-    const timestamp: string = this.clock.now().toISOString();
-    const statement: Statement<unknown, [string, string, string, string, string]> =
-      this.database.query(`
-        INSERT INTO agents(agent_id, display_name, metadata_json, created_at, last_seen_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(agent_id) DO UPDATE SET
-          display_name = excluded.display_name,
-          metadata_json = excluded.metadata_json,
-          last_seen_at = excluded.last_seen_at
-      `);
-    statement.run(
-      command.agentId.value,
-      command.displayName.value,
-      JSON.stringify(command.metadata),
-      timestamp,
-      timestamp,
-    );
-    return this.requireAgent(command.agentId);
+    return registerSqliteAgent(this.database, command, this.clock.now());
   }
 
   public getAgent(agentId: AgentId): Agent | null {
     this.ensureOpen();
-    const statement: Statement<unknown, [string]> = this.database.query(
-      "SELECT * FROM agents WHERE agent_id = ?",
-    );
-    const row: unknown = statement.get(agentId.value);
-    return row === null ? null : mapAgentRow(row);
+    const known: unknown = this.database
+      .query<unknown, [string]>("SELECT 1 AS present FROM agents WHERE agent_id = ?")
+      .get(agentId.value);
+    return known === null ? null : sqliteAgent(this.database, agentId, this.clock.now());
   }
 
-  public listAgents(): readonly Agent[] {
+  public listAgents(query: ListAgentsQuery): ListAgentsResult {
     this.ensureOpen();
     this.pruneExpired(this.clock.now());
-    const statement: Statement<unknown, []> = this.database.query(`
-      SELECT * FROM agents
-      ORDER BY last_seen_at DESC, agent_id ASC
-    `);
-    const rows: unknown[] = statement.all();
-    return rows.map((row: unknown): Agent => mapAgentRow(row));
+    return listSqliteAgents(this.database, query, this.clock.now());
+  }
+
+  public endSession(command: EndSessionCommand): EndSessionResult {
+    this.ensureOpen();
+    return endSqliteSession(this.database, command, this.clock.now());
+  }
+
+  public closeAgent(command: CloseAgentCommand): CloseAgentResult {
+    this.ensureOpen();
+    return closeSqliteAgent(this.database, command, this.clock.now());
   }
 
   public broadcastMessage(command: BroadcastMessageCommand): BroadcastMessageResult {
@@ -224,89 +232,30 @@ export class SqliteMessageStore implements MessageStore {
     this.ensureOpen();
     const now: Instant = this.clock.now();
     this.pruneExpired(now);
-    this.requireAgent(command.senderId);
-    this.requireAgent(command.recipientId);
-
-    const existing: SendMessageResult | null = existingMessageResult(this.database, command);
-    if (existing !== null) return existing;
-
-    const messageId: MessageId = MessageId.generate();
-    const threadId: ThreadId = command.threadId === null ? ThreadId.generate() : command.threadId;
-    const createdAt: string = now.toISOString();
-    const expiresAt: string = now.addDays(RETENTION_DAYS).toISOString();
-    const idempotencyKey: string | null =
-      command.idempotencyKey === null ? null : command.idempotencyKey.value;
-    const repositoryName: string | null =
-      command.repositoryName === null ? null : command.repositoryName.value;
-    const branchName: string | null = command.branchName === null ? null : command.branchName.value;
-    const clientName: string | null = command.client === null ? null : command.client.value;
-    const insertStatement: Statement<
-      unknown,
-      [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string,
-        string,
-      ]
-    > = this.database.query(`
-      INSERT INTO messages(
-        message_id, thread_id, sender_id, recipient_id, content,
-        repository_name, branch_name, client_name, idempotency_key, created_at, expires_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(sender_id, idempotency_key) DO NOTHING
-    `);
-    const inserted: Changes = insertStatement.run(
-      messageId.value,
-      threadId.value,
-      command.senderId.value,
-      command.recipientId.value,
-      command.content.value,
-      repositoryName,
-      branchName,
-      clientName,
-      idempotencyKey,
-      createdAt,
-      expiresAt,
-    );
-    if (inserted.changes === 0) {
-      const winner: SendMessageResult | null = existingMessageResult(this.database, command);
-      if (winner === null) throw new IdempotencyWinnerMissingError();
-      return winner;
-    }
-    const updateAgentStatement: Statement<unknown, [string, string]> = this.database.query(
-      "UPDATE agents SET last_seen_at = ? WHERE agent_id = ?",
-    );
-    updateAgentStatement.run(createdAt, command.senderId.value);
-
-    const storedStatement: Statement<unknown, [string]> = this.database.query(
-      "SELECT * FROM messages WHERE message_id = ?",
-    );
-    const storedRow: unknown = storedStatement.get(messageId.value);
-    if (storedRow === null) throw new Error("Inserted message could not be read back");
-    return { duplicate: false, message: mapMessageRow(storedRow) };
+    return sendSqliteMessage(this.database, command, now);
   }
 
   public getMessages(query: GetMessagesQuery): readonly Message[] {
     this.ensureOpen();
     const now: Instant = this.clock.now();
     this.pruneExpired(now);
-    this.requireAgent(query.agentId);
+    let agent: Agent = this.requireAgent(query.agentId);
+    if (query.sessionKey != null) {
+      agent = renewSqliteSession(this.database, query.agentId, query.sessionKey, now, false);
+    }
+    const generation: number =
+      query.generation == null ? agent.generation.value : query.generation.value;
     const unreadFlag: number = query.unreadOnly ? 1 : 0;
     const threadId: string | null = query.threadId === null ? null : query.threadId.value;
     const statement: Statement<
       unknown,
-      [string, number, number, string | null, string | null, number]
+      [string, number, number, string, number, string | null, string | null, number]
     > = this.database.query(`
       SELECT * FROM messages
       WHERE recipient_id = ?
+        AND recipient_generation = ?
         AND sequence > ?
+        AND expires_at > ?
         AND (? = 0 OR read_at IS NULL)
         AND (? IS NULL OR thread_id = ?)
       ORDER BY sequence ASC
@@ -314,7 +263,9 @@ export class SqliteMessageStore implements MessageStore {
     `);
     const rows: unknown[] = statement.all(
       query.agentId.value,
+      generation,
       query.afterSequence.value,
+      now.toISOString(),
       unreadFlag,
       threadId,
       threadId,
@@ -327,35 +278,81 @@ export class SqliteMessageStore implements MessageStore {
     this.ensureOpen();
     const now: Instant = this.clock.now();
     this.pruneExpired(now);
-    this.requireAgent(command.agentId);
+    let agent: Agent = this.requireAgent(command.agentId);
+    if (command.sessionKey != null) {
+      agent = renewSqliteSession(this.database, command.agentId, command.sessionKey, now, false);
+    }
+    const generation: number =
+      command.generation == null ? agent.generation.value : command.generation.value;
     if (command.messageIds.length === 0) return { readAt: now, updated: 0 };
 
     const serializedMessageIds: string = JSON.stringify(
       command.messageIds.map((messageId: MessageId): string => messageId.value),
     );
-    const updateStatement: Statement<unknown, [string, string, string]> = this.database.query(`
+    const updateStatement: Statement<unknown, [string, string, number, string, string]> =
+      this.database.query(`
       UPDATE messages
       SET read_at = COALESCE(read_at, ?)
       WHERE recipient_id = ?
+        AND recipient_generation = ?
         AND message_id IN (SELECT value FROM json_each(?))
+        AND expires_at > ?
     `);
     const changes: Changes = updateStatement.run(
       now.toISOString(),
       command.agentId.value,
+      generation,
       serializedMessageIds,
+      now.toISOString(),
     );
     return { readAt: now, updated: changes.changes };
   }
 
-  public getInboxVersion(agentId: AgentId): Sequence {
+  public postNotice(command: PostNoticeCommand): PostNoticeResult {
     this.ensureOpen();
-    const statement: Statement<unknown, [string, string]> = this.database.query(`
+    const now: Instant = this.clock.now();
+    this.pruneExpired(now);
+    return postSqliteNotice(this.database, command, now);
+  }
+
+  public listNotices(query: ListNoticesQuery): ListNoticesResult {
+    this.ensureOpen();
+    const now: Instant = this.clock.now();
+    this.pruneExpired(now);
+    return listSqliteNotices(this.database, query, now);
+  }
+
+  public resolveNotice(command: ResolveNoticeCommand): ResolveNoticeResult {
+    this.ensureOpen();
+    const now: Instant = this.clock.now();
+    this.pruneExpired(now);
+    return resolveSqliteNotice(this.database, command, now);
+  }
+
+  public withdrawNotice(command: WithdrawNoticeCommand): WithdrawNoticeResult {
+    this.ensureOpen();
+    const now: Instant = this.clock.now();
+    this.pruneExpired(now);
+    return withdrawSqliteNotice(this.database, command, now);
+  }
+
+  public getInboxVersion(
+    agentId: AgentId,
+    generation: import("../domain/lifecycle-values.js").AgentGeneration | null = null,
+  ): Sequence {
+    this.ensureOpen();
+    const agent: Agent = this.requireAgent(agentId);
+    const statement: Statement<unknown, [string, number, string]> = this.database.query(`
       SELECT COALESCE(MAX(sequence), 0) AS version
       FROM messages
-      WHERE recipient_id = ? AND expires_at > ?
+      WHERE recipient_id = ? AND recipient_generation = ? AND expires_at > ?
     `);
     const row: InboxVersionRow = InboxVersionRowSchema.parse(
-      statement.get(agentId.value, this.clock.now().toISOString()),
+      statement.get(
+        agentId.value,
+        generation === null ? agent.generation.value : generation.value,
+        this.clock.now().toISOString(),
+      ),
     );
     return Sequence.parse(row.version);
   }
@@ -366,7 +363,8 @@ export class SqliteMessageStore implements MessageStore {
     handler: InboxUpdateHandler,
   ): InboxSubscription {
     this.ensureOpen();
-    this.requireAgent(agentId);
+    const agent: Agent = this.requireAgent(agentId);
+    if (agent.state === "closed") throw new AgentClosedError(agentId.value);
     return new SqliteInboxSubscription(this, agentId, afterSequence, handler);
   }
 
@@ -380,12 +378,14 @@ export class SqliteMessageStore implements MessageStore {
       "DELETE FROM broadcasts WHERE expires_at <= ?",
     );
     broadcastStatement.run(now.toISOString());
+    pruneSqliteNotices(this.database, now);
+    pruneSqliteLifecycle(this.database, now);
     return changes.changes;
   }
 
   public close(): void {
     if (this.closed) return;
+    this.database.closeSynchronously();
     this.closed = true;
-    this.database.close();
   }
 }

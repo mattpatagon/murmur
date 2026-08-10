@@ -17,13 +17,24 @@ import {
   Sequence,
   ThreadId,
 } from "../domain/value-objects.js";
+import {
+  AgentCloseReasonSchema,
+  AgentGeneration,
+  AgentStateSchema,
+} from "../domain/lifecycle-values.js";
 
 export type AgentRow = {
   readonly agent_id: string;
+  readonly closed_at: string | null;
+  readonly close_reason: string | null;
   readonly created_at: string;
   readonly display_name: string;
+  readonly generation: number;
   readonly last_seen_at: string;
+  readonly lease_expires_at: string | null;
+  readonly live_session_count: number;
   readonly metadata_json: string;
+  readonly state: string;
 };
 
 export type MessageRow = {
@@ -36,8 +47,10 @@ export type MessageRow = {
   readonly message_id: string;
   readonly read_at: string | null;
   readonly recipient_id: string;
+  readonly recipient_generation: number;
   readonly repository_name: string | null;
   readonly sender_id: string;
+  readonly sender_generation: number;
   readonly sequence: number;
   readonly thread_id: string;
 };
@@ -54,10 +67,13 @@ export type BroadcastRow = {
   readonly idempotency_key: string | null;
   readonly repository_name: string;
   readonly sender_id: string;
+  readonly sender_generation: number;
   readonly thread_id: string;
 };
 
 export type SchemaProbeRow = {
+  readonly agent_sessions_table: string | null;
+  readonly agents_generation_column: boolean;
   readonly agents_tenant_column: boolean;
   readonly agents_table: string | null;
   readonly branch_column: boolean;
@@ -68,6 +84,8 @@ export type SchemaProbeRow = {
   readonly messages_tenant_column: boolean;
   readonly messages_tenant_sequence_column: boolean;
   readonly messages_table: string | null;
+  readonly messages_recipient_generation_column: boolean;
+  readonly notices_table: string | null;
   readonly repository_column: boolean;
 };
 
@@ -89,10 +107,16 @@ const SafeDatabaseIntegerSchema: z.ZodType<number> = z
 
 export const AgentRowSchema: z.ZodType<AgentRow> = z.strictObject({
   agent_id: z.string(),
+  closed_at: z.string().nullable(),
+  close_reason: z.string().nullable(),
   created_at: z.string(),
   display_name: z.string(),
+  generation: SafeDatabaseIntegerSchema.pipe(z.number().positive()),
   last_seen_at: z.string(),
+  lease_expires_at: z.string().nullable(),
+  live_session_count: SafeDatabaseIntegerSchema.pipe(z.number().nonnegative()),
   metadata_json: z.string(),
+  state: z.string(),
 });
 
 export const MessageRowSchema: z.ZodType<MessageRow> = z.strictObject({
@@ -105,8 +129,10 @@ export const MessageRowSchema: z.ZodType<MessageRow> = z.strictObject({
   message_id: z.string(),
   read_at: z.string().nullable(),
   recipient_id: z.string(),
+  recipient_generation: SafeDatabaseIntegerSchema.pipe(z.number().positive()),
   repository_name: z.string().nullable(),
   sender_id: z.string(),
+  sender_generation: SafeDatabaseIntegerSchema.pipe(z.number().positive()),
   sequence: SafeDatabaseIntegerSchema.pipe(z.number().nonnegative()),
   thread_id: z.string(),
 });
@@ -123,6 +149,7 @@ export const BroadcastRowSchema: z.ZodType<BroadcastRow> = z.strictObject({
   idempotency_key: z.string().nullable(),
   repository_name: z.string(),
   sender_id: z.string(),
+  sender_generation: SafeDatabaseIntegerSchema.pipe(z.number().positive()),
   thread_id: z.string(),
 });
 
@@ -139,6 +166,8 @@ export const InboxVersionRowSchema: z.ZodType<InboxVersionRow> = z.strictObject(
 });
 
 export const SchemaProbeRowSchema: z.ZodType<SchemaProbeRow> = z.strictObject({
+  agent_sessions_table: z.string().nullable(),
+  agents_generation_column: z.boolean(),
   agents_tenant_column: z.boolean(),
   agents_table: z.string().nullable(),
   branch_column: z.boolean(),
@@ -149,6 +178,8 @@ export const SchemaProbeRowSchema: z.ZodType<SchemaProbeRow> = z.strictObject({
   messages_tenant_column: z.boolean(),
   messages_tenant_sequence_column: z.boolean(),
   messages_table: z.string().nullable(),
+  messages_recipient_generation_column: z.boolean(),
+  notices_table: z.string().nullable(),
   repository_column: z.boolean(),
 });
 
@@ -175,10 +206,17 @@ export function mapAgentRow(input: unknown): Agent {
     const metadata: JsonObject = JsonObjectSchema.parse(parsedMetadata);
     return {
       agentId: AgentId.parse(row.agent_id),
+      closedAt: row.closed_at === null ? null : Instant.parse(row.closed_at),
+      closeReason:
+        row.close_reason === null ? null : AgentCloseReasonSchema.parse(row.close_reason),
       createdAt: Instant.parse(row.created_at),
       displayName: DisplayName.parse(row.display_name),
+      generation: AgentGeneration.parse(row.generation),
       lastSeenAt: Instant.parse(row.last_seen_at),
+      leaseExpiresAt: row.lease_expires_at === null ? null : Instant.parse(row.lease_expires_at),
+      liveSessionCount: row.live_session_count,
       metadata,
+      state: AgentStateSchema.parse(row.state),
     };
   } catch (error: unknown) {
     throw new StorageCorruptionError("agent", error);
@@ -199,17 +237,15 @@ export function mapMessageRow(input: unknown): Message {
       messageId: MessageId.parse(row.message_id),
       readAt,
       recipientId: AgentId.parse(row.recipient_id),
+      recipientGeneration: AgentGeneration.parse(row.recipient_generation),
       repositoryName:
         row.repository_name === null ? null : RepositoryName.parse(row.repository_name),
       senderId: AgentId.parse(row.sender_id),
+      senderGeneration: AgentGeneration.parse(row.sender_generation),
       sequence: Sequence.parse(row.sequence),
       threadId: ThreadId.parse(row.thread_id),
     };
   } catch (error: unknown) {
     throw new StorageCorruptionError("message", error);
   }
-}
-
-export function minutesBefore(instant: Instant, minutes: number): Instant {
-  return Instant.fromDate(new Date(instant.toEpochMilliseconds() - minutes * 60 * 1000));
 }
