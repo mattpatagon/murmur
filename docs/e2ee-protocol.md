@@ -85,6 +85,24 @@ string  expires_at
 The current agent signing key signs those bytes. A verifier derives `prekey_id`, checks the agent
 and signing generation, checks the validity window, and verifies the signature.
 
+An agent signing-key revocation is signed by the stable installation root. Its canonical fields,
+in order, are:
+
+```text
+string  "murmur-e2ee-v1/agent-key-revocation"
+string  root_key_id
+string  agent_id
+string  revoked_signing_key_id
+string  revoked_at
+string  reason
+```
+
+Revocations are cumulative, sorted by revoked signing-key ID, and bounded to 100 per agent bundle.
+The current signing key cannot appear in the revocation set. A verifier derives the root ID,
+requires the exact agent identity and a non-future revocation time, and verifies the root
+signature. Hosted publication rejects removal or mutation of a previously published revocation
+and rejects installation-root substitution.
+
 One-time prekey private material is deleted atomically after the first verified decryption and
 replay-ledger update. A fallback private prekey may decrypt multiple messages and therefore gives a
 weaker forward-secrecy class. Its validity covers message retention plus clock and rotation grace.
@@ -204,10 +222,16 @@ increasing version, validity window, exact agent/root bindings, and cumulative r
 update cannot change its issuer, roll back its version, remove a revocation, or rotate a bound root
 without revoking the prior root.
 
-Agent signing keys rotate under the stable installation root. Old generations and their public
-certificates remain verifiable for retained messages while valid. Private prekeys are retained only
-for their required decryption window. Revocation rejects new claims and new messages but does not
-rewrite signed provenance on retained ciphertext.
+Agent signing keys rotate under the stable installation root. `murmur e2ee revoke-agent-key`
+persists a root-signed revocation before rotation and deletes the revoked generation's private
+prekeys. A crash between those steps is fail-closed: the next local identity operation detects the
+revoked current key and rotates it before publication. The next proxy registration publishes the
+cumulative revocation set with the replacement public bundle.
+
+Old generations and their public certificates remain verifiable for retained messages while
+valid. Revocation blocks a revoked key from becoming current again, rejects new claims and new
+messages, and does not rewrite the sender chain or signed provenance captured on retained
+ciphertext.
 
 ## Direct and broadcast atomicity
 
