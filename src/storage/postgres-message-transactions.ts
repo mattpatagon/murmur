@@ -45,7 +45,7 @@ export async function lockPostgresRecipientCommitOrder(
   recipientIds: readonly string[],
 ): Promise<void> {
   if (recipientIds.length === 0) return;
-  const orderedRecipientIds: string[] = Array.from(recipientIds);
+  const orderedRecipientIds: string[] = Array.from(new Set(recipientIds)).sort();
   await transaction`
     SELECT pg_catalog.pg_advisory_xact_lock(
       pg_catalog.hashtextextended(

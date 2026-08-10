@@ -9,13 +9,18 @@ import process from "node:process";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 
 import { detectBranchName, detectRepositoryName } from "./context/repository-context.js";
-import { InboxOutputSchema, type InboxOutput } from "./domain/contracts.js";
+import { checkRemoteInbox, endRemoteAgentSession } from "./hook-remote-client.js";
+import { isRecord } from "./hook-protocol.js";
+import type { AgentIdentity, InboxSummary, JsonRpcExchange } from "./hook-types.js";
 import { defaultHookCacheDirectory, environmentPath, positiveInteger } from "./platform-paths.js";
 import {
   DEFAULT_MURMUR_URL,
   MURMUR_TOKEN_ENV,
   type MurmurClient,
 } from "./setup/user-configuration.js";
+
+export { checkRemoteInbox, endRemoteAgentSession } from "./hook-remote-client.js";
+export type { AgentIdentity, InboxSummary } from "./hook-types.js";
 
 const DEFAULT_DEBOUNCE_MS: number = 10_000;
 const DEFAULT_TIMEOUT_MS: number = 4_000;
@@ -31,29 +36,9 @@ type HookCache = {
   readonly lastNotifiedInboxVersion: number;
 };
 
-export type AgentIdentity = {
-  readonly agentId: string;
-  readonly branch: string | null;
-  readonly client: MurmurClient;
-  readonly displayName: string;
-  readonly machine: string;
-  readonly repository: string | null;
-  readonly workspace: string;
-  readonly workspaceHash: string;
-};
-
-export type InboxSummary = {
-  readonly inboxVersion: number;
-  readonly messageCount: number;
-  readonly senderIds: readonly string[];
-};
-
 export type HookOutput = {
   readonly hookSpecificOutput?:
-    | {
-        readonly additionalContext: string;
-        readonly hookEventName: string;
-      }
+    | { readonly additionalContext: string; readonly hookEventName: string }
     | undefined;
   readonly systemMessage?: string | undefined;
   readonly terminalSequence?: string | undefined;
@@ -63,29 +48,39 @@ type CheckInbox = (
   identity: AgentIdentity,
   options: {
     readonly afterSequence: number;
+    readonly includeNotices: boolean;
+    readonly sessionKey: string;
     readonly token: string;
     readonly timeoutMs: number;
     readonly url: string;
   },
 ) => Promise<InboxSummary>;
 
-type JsonRpcExchange = {
-  readonly body: unknown;
-  readonly response: Response;
-};
+type EndRemoteSession = (
+  identity: AgentIdentity,
+  options: {
+    readonly eventName: "SessionEnd" | "Stop";
+    readonly sessionKey: string;
+    readonly token: string;
+    readonly timeoutMs: number;
+    readonly url: string;
+  },
+) => Promise<void>;
 
 type HandleHookOptions = {
   readonly cacheDirectory?: string | undefined;
   readonly checkInbox?: CheckInbox | undefined;
   readonly debounceMs?: number | undefined;
+  readonly endSession?: EndRemoteSession | undefined;
   readonly environment?: NodeJS.ProcessEnv | undefined;
   readonly now?: number | undefined;
   readonly timeoutMs?: number | undefined;
   readonly url?: string | undefined;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+export function hookSessionKey(sessionId: string | undefined): string {
+  if (sessionId === undefined || sessionId.trim() === "") return "default";
+  return `hook-${createHash("sha256").update(sessionId).digest("hex").slice(0, 40)}`;
 }
 
 function sanitizedPart(value: string, fallback: string): string {
@@ -112,19 +107,18 @@ export function deriveAgentIdentity(
     environment["MURMUR_WORKSPACE_ID"] ?? basename(resolvedWorkspace),
     "workspace",
   );
-  const agentId: string = `${machine}:${client}:${workspace}:${workspaceHash}`;
   const detectedRepository: ReturnType<typeof detectRepositoryName> = detectRepositoryName(
     environment,
     resolvedWorkspace,
   );
-  const repository: string | null = detectedRepository === null ? null : detectedRepository.value;
   const detectedBranch: ReturnType<typeof detectBranchName> = detectBranchName(
     environment,
     resolvedWorkspace,
   );
+  const repository: string | null = detectedRepository === null ? null : detectedRepository.value;
   const branch: string | null = detectedBranch === null ? null : detectedBranch.value;
   return {
-    agentId,
+    agentId: `${machine}:${client}:${workspace}:${workspaceHash}`,
     branch,
     client,
     displayName: `${client} on ${machine} (${workspace})`,
@@ -182,7 +176,11 @@ function notificationText(summary: InboxSummary): string {
   const noun: string = summary.messageCount === 1 ? "message" : "messages";
   const senders: string =
     summary.senderIds.length === 0 ? "" : ` from ${summary.senderIds.join(", ")}`;
-  return `Murmur: ${summary.messageCount} unread ${noun}${senders}.`;
+  const messages: string = `Murmur: ${summary.messageCount} unread ${noun}${senders}.`;
+  const noticeCount: number = summary.noticeCount ?? 0;
+  if (noticeCount === 0) return messages;
+  const noticeNoun: string = noticeCount === 1 ? "notice" : "notices";
+  return `${messages} ${noticeCount} open coordination ${noticeNoun}.`;
 }
 
 export function buildHookOutput(options: {
@@ -192,7 +190,6 @@ export function buildHookOutput(options: {
   readonly notification?: string | null | undefined;
 }): HookOutput {
   const notification: string | null = options.notification ?? null;
-  const includeContext: boolean = options.eventName !== "Stop";
   const context: string | null =
     options.eventName === "SessionStart" || notification !== null
       ? additionalContext(options.identity, notification)
@@ -202,17 +199,12 @@ export function buildHookOutput(options: {
     systemMessage?: string;
     terminalSequence?: string;
   } = {};
-  if (context !== null && includeContext) {
-    output.hookSpecificOutput = {
-      additionalContext: context,
-      hookEventName: options.eventName,
-    };
+  if (context !== null && options.eventName !== "Stop" && options.eventName !== "SessionEnd") {
+    output.hookSpecificOutput = { additionalContext: context, hookEventName: options.eventName };
   }
   if (notification !== null) {
     output.systemMessage = notification;
-    if (options.client === "claude") {
-      output.terminalSequence = `\u001B]9;${notification}\u0007`;
-    }
+    if (options.client === "claude") output.terminalSequence = `\u001B]9;${notification}\u0007`;
   }
   return output;
 }
@@ -223,17 +215,15 @@ function missingTokenOutput(
   identity: AgentIdentity,
 ): HookOutput | null {
   if (eventName !== "SessionStart") return null;
-  const notification: string = `${MURMUR_TOKEN_ENV} is not set; Murmur notifications are disabled for this session.`;
-  const output: HookOutput = buildHookOutput({
+  return buildHookOutput({
     client,
     eventName,
     identity,
-    notification,
+    notification: `${MURMUR_TOKEN_ENV} is not set; Murmur notifications are disabled for this session.`,
   });
-  return output;
 }
 
-function rpcResult(response: unknown): unknown {
+export function rpcResult(response: unknown): unknown {
   if (!isRecord(response)) throw new Error("Murmur returned an invalid JSON-RPC response");
   if (response["error"] !== undefined) {
     const error: unknown = response["error"];
@@ -249,24 +239,24 @@ function rpcResult(response: unknown): unknown {
 
 async function responseBody(response: Response): Promise<unknown> {
   const content: string = await response.text();
-  if (!response.ok) {
-    throw new Error(`Murmur HTTP ${response.status}: ${content.slice(0, 300)}`);
-  }
+  if (!response.ok) throw new Error(`Murmur HTTP ${response.status}: ${content.slice(0, 300)}`);
   if (content.trim() === "") return null;
   const contentType: string = response.headers.get("content-type") ?? "";
   if (!contentType.includes("text/event-stream")) return JSON.parse(content);
-
   const data: string[] = [];
   for (const line of content.split(/\r?\n/gu)) {
     if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
   }
-  if (data.length === 0) throw new Error("Murmur returned an empty event stream");
   const lastEvent: string | undefined = data.at(-1);
   if (lastEvent === undefined) throw new Error("Murmur returned an empty event stream");
   return JSON.parse(lastEvent);
 }
 
-function requestHeaders(identity: AgentIdentity, token: string, sessionId: string | null): Headers {
+export function requestHeaders(
+  identity: AgentIdentity,
+  token: string,
+  sessionId: string | null,
+): Headers {
   const headers: Headers = new Headers({
     Accept: "application/json, text/event-stream",
     Authorization: `Bearer ${token}`,
@@ -275,14 +265,12 @@ function requestHeaders(identity: AgentIdentity, token: string, sessionId: strin
     "X-Murmur-Client": identity.client,
   });
   if (identity.branch !== null) headers.set("X-Murmur-Branch", identity.branch);
-  if (identity.repository !== null) {
-    headers.set("X-Murmur-Repository", identity.repository);
-  }
+  if (identity.repository !== null) headers.set("X-Murmur-Repository", identity.repository);
   if (sessionId !== null) headers.set("Mcp-Session-Id", sessionId);
   return headers;
 }
 
-async function postJsonRpc(options: {
+export async function postJsonRpc(options: {
   readonly body: Record<string, unknown>;
   readonly headers: Headers;
   readonly timeoutMs: number;
@@ -297,112 +285,8 @@ async function postJsonRpc(options: {
   return { body: await responseBody(response), response };
 }
 
-function remainingTimeoutMs(deadline: number): number {
+export function remainingTimeoutMs(deadline: number): number {
   return Math.max(1, deadline - Date.now());
-}
-
-export async function checkRemoteInbox(
-  identity: AgentIdentity,
-  options: {
-    readonly afterSequence?: number | undefined;
-    readonly token: string;
-    readonly timeoutMs: number;
-    readonly url: string;
-  },
-): Promise<InboxSummary> {
-  const afterSequence: number = options.afterSequence ?? 0;
-  const deadline: number = Date.now() + options.timeoutMs;
-  const initialize: JsonRpcExchange = await postJsonRpc({
-    body: {
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        capabilities: {},
-        clientInfo: { name: "murmur-hook", version: "0.1.0" },
-        protocolVersion: LATEST_PROTOCOL_VERSION,
-      },
-    },
-    headers: requestHeaders(identity, options.token, null),
-    timeoutMs: remainingTimeoutMs(deadline),
-    url: options.url,
-  });
-  rpcResult(initialize.body);
-  const sessionId: string | null = initialize.response.headers.get("mcp-session-id");
-  if (sessionId === null) throw new Error("Murmur did not create an MCP session");
-  const headers: Headers = requestHeaders(identity, options.token, sessionId);
-  try {
-    await postJsonRpc({
-      body: { jsonrpc: "2.0", method: "notifications/initialized", params: {} },
-      headers,
-      timeoutMs: remainingTimeoutMs(deadline),
-      url: options.url,
-    });
-    const registration: JsonRpcExchange = await postJsonRpc({
-      body: {
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/call",
-        params: {
-          name: "register_agent",
-          arguments: {
-            agent_id: identity.agentId,
-            display_name: identity.displayName,
-            metadata: {
-              client: identity.client,
-              machine: identity.machine,
-              ...(identity.repository === null ? {} : { repository: identity.repository }),
-              workspace: identity.workspace,
-            },
-          },
-        },
-      },
-      headers,
-      timeoutMs: remainingTimeoutMs(deadline),
-      url: options.url,
-    });
-    rpcResult(registration.body);
-    const inboxResponse: JsonRpcExchange = await postJsonRpc({
-      body: {
-        jsonrpc: "2.0",
-        id: 3,
-        method: "tools/call",
-        params: {
-          name: "get_messages",
-          arguments: {
-            after_sequence: afterSequence,
-            agent_id: identity.agentId,
-            limit: 100,
-            unread_only: true,
-          },
-        },
-      },
-      headers,
-      timeoutMs: remainingTimeoutMs(deadline),
-      url: options.url,
-    });
-    const toolResult: unknown = rpcResult(inboxResponse.body);
-    if (!isRecord(toolResult)) throw new Error("Murmur returned an invalid tool result");
-    const inbox: InboxOutput = InboxOutputSchema.parse(toolResult["structuredContent"]);
-    const lastMessage: InboxOutput["messages"][number] | undefined = inbox.messages.at(-1);
-    return {
-      inboxVersion: lastMessage === undefined ? afterSequence : lastMessage.sequence,
-      messageCount: inbox.messages.length,
-      senderIds: [
-        ...new Set(
-          inbox.messages.map(
-            (message: InboxOutput["messages"][number]): string => message.sender_id,
-          ),
-        ),
-      ].slice(0, 5),
-    };
-  } finally {
-    await fetch(options.url, {
-      headers,
-      method: "DELETE",
-      signal: AbortSignal.timeout(remainingTimeoutMs(deadline)),
-    }).catch((): void => undefined);
-  }
 }
 
 export async function handleHook(
@@ -412,16 +296,33 @@ export async function handleHook(
 ): Promise<HookOutput | null> {
   const environment: NodeJS.ProcessEnv = options.environment ?? process.env;
   const eventName: string = input.hook_event_name ?? "SessionStart";
-  const cwd: string = input.cwd ?? process.cwd();
-  const identity: AgentIdentity = deriveAgentIdentity(client, cwd, environment);
+  const identity: AgentIdentity = deriveAgentIdentity(
+    client,
+    input.cwd ?? process.cwd(),
+    environment,
+  );
   const token: string | undefined = environment[MURMUR_TOKEN_ENV];
   if (token === undefined || token.trim() === "") {
     return missingTokenOutput(client, eventName, identity);
   }
-
-  const configuredCacheDirectory: string | null = environmentPath(environment, "MURMUR_CACHE_DIR");
+  const timeoutMs: number =
+    options.timeoutMs ?? positiveInteger(environment["MURMUR_HOOK_TIMEOUT_MS"], DEFAULT_TIMEOUT_MS);
+  const sessionKey: string = hookSessionKey(input.session_id);
+  const url: string = options.url ?? environment["MURMUR_MCP_URL"] ?? DEFAULT_MURMUR_URL;
+  if (eventName === "Stop" || eventName === "SessionEnd") {
+    await (options.endSession ?? endRemoteAgentSession)(identity, {
+      eventName,
+      sessionKey,
+      timeoutMs,
+      token,
+      url,
+    });
+    return null;
+  }
   const cacheDirectory: string =
-    options.cacheDirectory ?? configuredCacheDirectory ?? defaultHookCacheDirectory(environment);
+    options.cacheDirectory ??
+    environmentPath(environment, "MURMUR_CACHE_DIR") ??
+    defaultHookCacheDirectory(environment);
   const path: string = cachePath(cacheDirectory, identity);
   const cache: HookCache = readCache(path);
   const now: number = options.now ?? Date.now();
@@ -429,22 +330,22 @@ export async function handleHook(
     options.debounceMs ??
     positiveInteger(environment["MURMUR_HOOK_DEBOUNCE_MS"], DEFAULT_DEBOUNCE_MS);
   if (eventName !== "SessionStart" && now - cache.lastCheckedAt < debounceMs) return null;
-
   writeCache(path, {
     lastCheckedAt: now,
     lastNotifiedInboxVersion: cache.lastNotifiedInboxVersion,
   });
-
-  const timeoutMs: number =
-    options.timeoutMs ?? positiveInteger(environment["MURMUR_HOOK_TIMEOUT_MS"], DEFAULT_TIMEOUT_MS);
   const summary: InboxSummary = await (options.checkInbox ?? checkRemoteInbox)(identity, {
     afterSequence: eventName === "SessionStart" ? 0 : cache.lastNotifiedInboxVersion,
-    token,
+    includeNotices: eventName === "SessionStart",
+    sessionKey,
     timeoutMs,
-    url: options.url ?? environment["MURMUR_MCP_URL"] ?? DEFAULT_MURMUR_URL,
+    token,
+    url,
   });
+  const hasSessionStartNotices: boolean =
+    eventName === "SessionStart" && (summary.noticeCount ?? 0) > 0;
   const shouldNotify: boolean =
-    summary.messageCount > 0 &&
+    (summary.messageCount > 0 || hasSessionStartNotices) &&
     (eventName === "SessionStart" || summary.inboxVersion > cache.lastNotifiedInboxVersion);
   writeCache(path, {
     lastCheckedAt: now,
@@ -481,8 +382,7 @@ async function readHookInput(): Promise<HookInput> {
 async function main(): Promise<void> {
   try {
     const client: MurmurClient = parseClient(process.argv.slice(2));
-    const input: HookInput = await readHookInput();
-    const output: HookOutput | null = await handleHook(input, client);
+    const output: HookOutput | null = await handleHook(await readHookInput(), client);
     if (output !== null && Object.keys(output).length > 0) {
       process.stdout.write(`${JSON.stringify(output)}\n`);
     }

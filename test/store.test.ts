@@ -410,6 +410,11 @@ test("upgrades a SQLite v3 database for broadcast delivery", (): void => {
   const clock: MutableClock = new MutableClock(Instant.parse("2026-08-04T12:00:00.000Z"));
   const store: SqliteMessageStore = new SqliteMessageStore(databasePath, clock);
   try {
+    store.registerAgent({
+      agentId: AgentId.parse("bob"),
+      displayName: DisplayName.parse("Bob"),
+      metadata: { machine: "mac-1", repository: "mattpatagon/murmur" },
+    });
     const result: BroadcastMessageResult = store.broadcastMessage({
       ...baseBroadcastCommand(),
       audience: {

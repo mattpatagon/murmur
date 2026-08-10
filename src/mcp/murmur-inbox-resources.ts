@@ -91,7 +91,9 @@ export class MurmurInboxResources {
     const query: GetMessagesQuery = {
       afterSequence: Sequence.zero(),
       agentId,
+      generation: null,
       limit: 500,
+      sessionKey: null,
       threadId: null,
       unreadOnly: false,
     };
@@ -164,7 +166,10 @@ export class MurmurInboxResources {
     this.server.setRequestHandler(
       ListResourcesRequestSchema,
       async (): Promise<ListResourcesResult> => ({
-        resources: (this.store === null ? [] : await this.store.listAgents()).map(
+        resources: (this.store === null
+          ? []
+          : await this.store.listAgents({ state: "active" })
+        ).map(
           (agent: Agent): ListedResource => ({
             description: `Durable inbox for ${agent.agentId.value}`,
             mimeType: "application/json",

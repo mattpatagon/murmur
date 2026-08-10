@@ -5,6 +5,48 @@ export class UnknownAgentError extends Error {
   }
 }
 
+export class AgentClosedError extends Error {
+  public constructor(agentId: string) {
+    super(`Agent '${agentId}' is closed. Register it again before creating new work.`);
+    this.name = "AgentClosedError";
+  }
+}
+
+export class StaleAgentGenerationError extends Error {
+  public constructor(agentId: string) {
+    super(`Agent '${agentId}' changed generation. Refresh its lifecycle state and retry.`);
+    this.name = "StaleAgentGenerationError";
+  }
+}
+
+export class AgentCapacityError extends Error {
+  public constructor() {
+    super("Open agent capacity reached. Close an inactive identity before registering another.");
+    this.name = "AgentCapacityError";
+  }
+}
+
+export class NoticeCapacityError extends Error {
+  public constructor() {
+    super("Retained notice capacity reached. Resolve or withdraw old notices before posting.");
+    this.name = "NoticeCapacityError";
+  }
+}
+
+export class NoticeStateConflictError extends Error {
+  public constructor() {
+    super("Notice is no longer open. Refresh it before changing its state.");
+    this.name = "NoticeStateConflictError";
+  }
+}
+
+export class NoticeOwnershipError extends Error {
+  public constructor() {
+    super("Only the creating agent identity can withdraw this notice.");
+    this.name = "NoticeOwnershipError";
+  }
+}
+
 export class IdempotencyConflictError extends Error {
   public constructor(key: string) {
     super(`Idempotency key '${key}' was already used for a different message`);

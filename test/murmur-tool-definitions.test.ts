@@ -7,12 +7,19 @@ import { type ToolExposure, toolsForPrincipal } from "../src/mcp/murmur-tool-def
 
 const DATA_TOOLS: readonly string[] = [
   "broadcast_message",
+  "close_agent",
+  "end_session",
+  "get_message_history",
   "get_messages",
   "list_agents",
+  "list_notices",
   "mark_messages_read",
+  "post_notice",
   "register_agent",
+  "resolve_notice",
   "send_message",
   "wait_for_messages",
+  "withdraw_notice",
 ];
 const TENANT_ADMIN_TOOLS: readonly string[] = [
   "create_access_token",

@@ -3,9 +3,12 @@ import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 import {
-  ACTIVE_AGENT_WINDOW_MINUTES,
   BroadcastMessageInputSchema,
   BroadcastMessageOutputSchema,
+  CloseAgentInputSchema,
+  CloseAgentOutputSchema,
+  EndSessionInputSchema,
+  EndSessionOutputSchema,
   GetMessagesInputSchema,
   InboxOutputSchema,
   ListAgentsInputSchema,
@@ -19,6 +22,19 @@ import {
   WaitForMessagesInputSchema,
   WaitForMessagesOutputSchema,
 } from "../domain/contracts.js";
+import {
+  GetMessageHistoryInputSchema,
+  MessageHistoryOutputSchema,
+} from "../domain/history-contracts.js";
+import { AGENT_LEASE_MINUTES } from "../domain/lifecycle-values.js";
+import {
+  ListNoticesInputSchema,
+  ListNoticesOutputSchema,
+  NoticeMutationOutputSchema,
+  PostNoticeInputSchema,
+  ResolveNoticeInputSchema,
+  WithdrawNoticeInputSchema,
+} from "../domain/notice-contracts.js";
 import {
   BootstrapOperatorInputSchema,
   CreateOperatorTokenInputSchema,
@@ -113,7 +129,7 @@ function dataTools(): Tool[] {
     toolDefinition(
       "broadcast_message",
       "Broadcast agent message",
-      `Persist one durable inbox delivery for every agent refreshed in the last ${ACTIVE_AGENT_WINDOW_MINUTES} minutes that matches the optional audience filters. Repository and machine filters combine with AND; omit both to broadcast globally. The sender is excluded, and idempotent retries preserve the original recipient snapshot.`,
+      `Persist one durable inbox delivery for every agent with a live ${AGENT_LEASE_MINUTES}-minute session lease that matches the optional audience filters. Repository and machine filters combine with AND; omit both to broadcast globally. The sender is excluded, and idempotent retries preserve the original recipient snapshot.`,
       BroadcastMessageInputSchema,
       BroadcastMessageOutputSchema,
       {
@@ -160,6 +176,92 @@ function dataTools(): Tool[] {
         idempotentHint: true,
         readOnlyHint: false,
         title: "Mark messages read",
+      },
+    ),
+    toolDefinition(
+      "get_message_history",
+      "Read generation history",
+      "Read one explicit historical inbox generation without renewing an agent session.",
+      GetMessageHistoryInputSchema,
+      MessageHistoryOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: true,
+        title: "Read generation history",
+      },
+    ),
+    toolDefinition(
+      "end_session",
+      "End agent session",
+      "End one session lease. Stop hooks also end the compatibility default lease atomically.",
+      EndSessionInputSchema,
+      EndSessionOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: false,
+        title: "End agent session",
+      },
+    ),
+    toolDefinition(
+      "close_agent",
+      "Close agent",
+      "Explicitly close an agent generation and all of its live sessions.",
+      CloseAgentInputSchema,
+      CloseAgentOutputSchema,
+      { destructiveHint: true, idempotentHint: true, readOnlyHint: false, title: "Close agent" },
+    ),
+    toolDefinition(
+      "post_notice",
+      "Post coordination notice",
+      "Post a repository-scoped handoff, ownership, blocker, or decision notice with a bounded TTL.",
+      PostNoticeInputSchema,
+      NoticeMutationOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: false,
+        readOnlyHint: false,
+        title: "Post coordination notice",
+      },
+    ),
+    toolDefinition(
+      "list_notices",
+      "List coordination notices",
+      "List repository-scoped coordination notices. Reading never creates or renews a default session.",
+      ListNoticesInputSchema,
+      ListNoticesOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: true,
+        title: "List coordination notices",
+      },
+    ),
+    toolDefinition(
+      "resolve_notice",
+      "Resolve coordination notice",
+      "Resolve an open repository notice as any registered tenant actor.",
+      ResolveNoticeInputSchema,
+      NoticeMutationOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: false,
+        title: "Resolve coordination notice",
+      },
+    ),
+    toolDefinition(
+      "withdraw_notice",
+      "Withdraw coordination notice",
+      "Withdraw an open repository notice using the same stable agent identity that created it.",
+      WithdrawNoticeInputSchema,
+      NoticeMutationOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: true,
+        readOnlyHint: false,
+        title: "Withdraw coordination notice",
       },
     ),
   ];

@@ -265,7 +265,8 @@ test("replaces owned hooks even when existing event values are malformed", (): v
   const serialized: string = JSON.stringify(configured);
   expect(serialized).not.toContain("/old/murmur-hook");
   expect(serialized).toContain("/new/murmur-hook --client codex");
-  expect(serialized.match(/new\/murmur-hook/gu)).toHaveLength(4);
+  expect(serialized.match(/new\/murmur-hook/gu)).toHaveLength(5);
+  expect(serialized).toContain("SessionEnd");
 });
 
 test("quotes hook paths safely and resolves environment-specific config roots", (): void => {
