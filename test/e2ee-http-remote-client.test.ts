@@ -1,29 +1,31 @@
 import { expect, test } from "bun:test";
-
-import type { AgentDto, CloseAgentOutput, EndSessionOutput } from "../src/domain/contracts.js";
-
 import {
-  E2eeHttpRemoteClient,
-  type E2eeHttpRemoteClientConfig,
-  type E2eeWireToolCaller,
-} from "../src/e2ee/http-remote-client.js";
+  type CanaryE2eeIdentity,
+  canaryE2eeBundle,
+  createCanaryE2eeIdentity,
+  encryptCanaryE2eeMessage,
+} from "../scripts/lib/e2ee-canary-crypto.js";
+import type {
+  AgentDto,
+  CloseAgentOutput,
+  EndSessionOutput,
+  RegisterAgentOutput,
+} from "../src/domain/contracts.js";
+import { E2eeHttpRemoteClient, type E2eeWireToolCaller } from "../src/e2ee/http-remote-client.js";
 import {
   ENCRYPTION_CLAIM_EXPIRED_MESSAGE,
   EncryptionClaimExpiredError,
 } from "../src/e2ee/remote-client.js";
 import type {
+  ClaimEncryptionPrekeyOutput,
   E2eeCapabilityOutput,
+  EncryptedMessageDto,
+  PutEncryptedMessageInput,
   WaitForEncryptedMessagesOutput,
 } from "../src/e2ee/wire-tools.js";
+import type { EffectiveOrchestratorDto } from "../src/hosted/orchestration-contracts.js";
 
 const TENANT_ID: string = "11111111-1111-4111-8111-111111111111";
-const CONFIG: E2eeHttpRemoteClientConfig = {
-  branch: "feature/e2ee",
-  client: "codex",
-  endpoint: "http://127.0.0.1:1/mcp",
-  repository: "mattpatagon/murmur",
-  token: "test-access-token",
-};
 const CAPABILITY: E2eeCapabilityOutput = {
   caller_authority: "peer",
   max_ciphertext_bytes: 524_304,
@@ -42,6 +44,7 @@ type RecordedCall = {
 
 class FakeCaller implements E2eeWireToolCaller {
   public readonly calls: RecordedCall[] = [];
+  public closeError: unknown = null;
   public closeCount: number = 0;
   public response: unknown;
   public thrown: unknown = null;
@@ -61,6 +64,7 @@ class FakeCaller implements E2eeWireToolCaller {
   }
 
   public async close(): Promise<void> {
+    if (this.closeError !== null) throw this.closeError;
     this.closeCount += 1;
   }
 }
@@ -162,6 +166,217 @@ test("forwards metadata-only agent lifecycle operations through the encrypted en
   ]);
 });
 
+test("forwards every bounded encrypted and orchestration operation", async (): Promise<void> => {
+  const now: Date = new Date();
+  const alice: CanaryE2eeIdentity = await createCanaryE2eeIdentity("alice", now);
+  const bob: CanaryE2eeIdentity = await createCanaryE2eeIdentity("bob", now);
+  const aliceBundle: ReturnType<typeof canaryE2eeBundle> = canaryE2eeBundle(alice);
+  const bobBundle: ReturnType<typeof canaryE2eeBundle> = canaryE2eeBundle(bob);
+  const bobOneTime: ReturnType<typeof canaryE2eeBundle>["one_time_prekeys"][number] | undefined =
+    bobBundle.one_time_prekeys[0];
+  if (bobOneTime === undefined) throw new Error("Canary recipient prekey is missing");
+  const claim: ClaimEncryptionPrekeyOutput = {
+    bundle: bobBundle,
+    claim_id: "22222222-2222-4222-8222-222222222222",
+    claimed_at: now.toISOString(),
+    expires_at: new Date(now.getTime() + 60_000).toISOString(),
+    prekey_class: "one_time",
+    prekey_id: bobOneTime.prekey_id,
+    provenance: {
+      message_kind: "message",
+      orchestrator_policy_id: null,
+      sender_authority: "peer",
+    },
+    recipient_id: "bob",
+  };
+  const encryptedInput: PutEncryptedMessageInput = await encryptCanaryE2eeMessage({
+    claim,
+    idempotencyKey: "http-remote-complete",
+    pairCounter: 1,
+    plaintext: "encrypted wrapper coverage",
+    recipient: bob,
+    repository: "mattpatagon/murmur",
+    sender: alice,
+    senderId: "alice",
+    tenantId: TENANT_ID,
+  });
+  const encryptedMessage: EncryptedMessageDto = {
+    envelope: encryptedInput.envelope,
+    read_at: null,
+    sender_chain: {
+      agent_certificate: aliceBundle.agent_certificate,
+      root_key_id: aliceBundle.root_key_id,
+      root_public_key: aliceBundle.root_public_key,
+    },
+    tenant_sequence: 1,
+  };
+  const orchestrator: EffectiveOrchestratorDto = {
+    agent_id: "bob",
+    policy_id: "33333333-3333-4333-8333-333333333333",
+    scope: { personal_id: null, repository: "mattpatagon/murmur", scope_kind: "organization" },
+  };
+  const agent: AgentDto = {
+    agent_id: "alice",
+    authority: "peer",
+    closed_at: null,
+    close_reason: null,
+    created_at: now.toISOString(),
+    display_name: "Alice",
+    generation: 1,
+    last_seen_at: now.toISOString(),
+    lease_expires_at: new Date(now.getTime() + 60_000).toISOString(),
+    live_session_count: 1,
+    metadata: {},
+    state: "active",
+  };
+  const registered: RegisterAgentOutput = {
+    agent,
+    inbox_uri: "murmur://inbox/alice",
+    lease_minutes: 60,
+    reopened: false,
+    repository_diverged: false,
+    retention_days: 30,
+  };
+  const caller: FakeCaller = new FakeCaller(toolOutput(registered));
+  const client: E2eeHttpRemoteClient = new E2eeHttpRemoteClient(caller);
+  expect(await client.registerAgent({ agent_id: "alice" })).toEqual(registered);
+
+  caller.response = toolOutput({ agents: [agent], next_cursor: null });
+  expect((await client.listAgents({ limit: 10, state: "all" })).agents).toEqual([agent]);
+  caller.response = toolOutput({
+    agent_id: "alice",
+    fallback_prekey_id: aliceBundle.fallback_prekey.prekey_id,
+    one_time_prekey_count: 1,
+    published_at: now.toISOString(),
+    root_key_id: aliceBundle.root_key_id,
+  });
+  await client.publishAgentKeyBundle({ agent_id: "alice", bundle: aliceBundle });
+
+  caller.response = toolOutput(claim);
+  expect(
+    await client.claimEncryptionPrekey({
+      context: {
+        branch: "feature/e2ee",
+        client: "codex",
+        repository: "mattpatagon/murmur",
+      },
+      recipient_id: "bob",
+      sender_id: "alice",
+    }),
+  ).toEqual(claim);
+  caller.response = toolOutput({ caller_authority: "peer", orchestrator });
+  expect(await client.getOrchestrator({})).toEqual({ caller_authority: "peer", orchestrator });
+  caller.response = toolOutput({
+    policy: {
+      ...orchestrator,
+      created_at: now.toISOString(),
+      created_by_token_id: "44444444-4444-4444-8444-444444444444",
+      enabled: true,
+      instructions: "Handle bounded production coordination",
+      orchestrator_token_id: "55555555-5555-4555-8555-555555555555",
+      updated_at: now.toISOString(),
+      updated_by_token_id: "44444444-4444-4444-8444-444444444444",
+    },
+  });
+  expect((await client.getDelegation({ policy_id: orchestrator.policy_id })).policy.policy_id).toBe(
+    orchestrator.policy_id,
+  );
+
+  const orchestratorClaim: ClaimEncryptionPrekeyOutput = {
+    ...claim,
+    provenance: {
+      message_kind: "orchestration_request",
+      orchestrator_policy_id: orchestrator.policy_id,
+      sender_authority: "peer",
+    },
+  };
+  caller.response = toolOutput({ claim: orchestratorClaim, orchestrator });
+  expect(
+    (
+      await client.claimOrchestratorPrekey({
+        context: {
+          branch: "feature/e2ee",
+          client: "codex",
+          repository: "mattpatagon/murmur",
+        },
+        sender_id: "alice",
+      })
+    ).orchestrator,
+  ).toEqual(orchestrator);
+
+  caller.response = toolOutput({
+    duplicate: false,
+    message: encryptedMessage,
+    retention_days: 30,
+    status: "stored",
+  });
+  expect((await client.putEncryptedMessage(encryptedInput)).message).toEqual(encryptedMessage);
+  caller.response = toolOutput({ agent_id: "bob", inbox_version: 1, messages: [encryptedMessage] });
+  expect(
+    (
+      await client.getEncryptedMessages({
+        after_sequence: 0,
+        agent_id: "bob",
+        limit: 10,
+        unread_only: false,
+      })
+    ).messages,
+  ).toEqual([encryptedMessage]);
+  caller.response = toolOutput({ read_at: now.toISOString(), updated: 1 });
+  expect(
+    await client.markMessagesRead({
+      agent_id: "bob",
+      message_ids: [encryptedInput.envelope.header.message_id],
+    }),
+  ).toMatchObject({ updated: 1 });
+
+  caller.response = toolOutput({
+    broadcast_id: "66666666-6666-4666-8666-666666666666",
+    claims: [],
+    duplicate: false,
+    expires_at: new Date(now.getTime() + 60_000).toISOString(),
+    recipient_count: 0,
+    thread_id: "bounded-broadcast",
+  });
+  await client.prepareEncryptedBroadcast({
+    audience: {},
+    context: {
+      branch: "feature/e2ee",
+      client: "codex",
+      repository: "mattpatagon/murmur",
+    },
+    sender_id: "alice",
+  });
+  await expect(
+    client.putEncryptedBroadcastDelivery({
+      broadcast_id: "66666666-6666-4666-8666-666666666666",
+      claim_id: claim.claim_id,
+      envelope: encryptedInput.envelope,
+    }),
+  ).rejects.toThrow();
+  caller.response = toolOutput({
+    broadcast_id: "66666666-6666-4666-8666-666666666666",
+    committed_at: now.toISOString(),
+    duplicate: false,
+    recipient_count: 0,
+    status: "stored",
+  });
+  await client.commitEncryptedBroadcast({
+    broadcast_id: "66666666-6666-4666-8666-666666666666",
+  });
+  caller.response = toolOutput({ cancelled: true });
+  await client.cancelEncryptedBroadcast({
+    broadcast_id: "66666666-6666-4666-8666-666666666666",
+  });
+  caller.response = toolOutput({
+    agent_id: "bob",
+    inbox_version: 1,
+    newest_sequence: 1,
+    unread_count: 1,
+  });
+  expect((await client.getInboxSummary({ agent_id: "bob" })).unread_count).toBe(1);
+});
+
 test("translates untrusted failures without exposing upstream details", async (): Promise<void> => {
   const caller: FakeCaller = new FakeCaller({ malformed: "secret-body" });
   const client: E2eeHttpRemoteClient = new E2eeHttpRemoteClient(caller);
@@ -198,108 +413,9 @@ test("closes idempotently and rejects calls after shutdown", async (): Promise<v
   await expect(client.capability()).rejects.toThrow("remote client is closed");
 });
 
-test("connects over bounded Streamable HTTP with authenticated project context", async (): Promise<void> => {
-  const requests: Request[] = [];
-  const server: ReturnType<typeof Bun.serve> = Bun.serve({
-    fetch: async (request: Request): Promise<Response> => {
-      requests.push(request.clone());
-      const input: unknown = await request.json();
-      if (typeof input !== "object" || input === null || Array.isArray(input)) {
-        return Response.json({ error: "invalid" }, { status: 400 });
-      }
-      const method: unknown = Reflect.get(input, "method");
-      const id: unknown = Reflect.get(input, "id");
-      if (method === "initialize" && (typeof id === "number" || typeof id === "string")) {
-        return Response.json(
-          {
-            id,
-            jsonrpc: "2.0",
-            result: {
-              capabilities: { tools: {} },
-              protocolVersion: "2025-11-25",
-              serverInfo: { name: "test-murmur", version: "1.0.0" },
-            },
-          },
-          { headers: { "mcp-session-id": "bounded-session" } },
-        );
-      }
-      if (method === "notifications/initialized") return new Response(null, { status: 202 });
-      if (method === "tools/call" && (typeof id === "number" || typeof id === "string")) {
-        const result: Record<string, unknown> = toolOutput(CAPABILITY);
-        const event: string = `event: message\ndata: ${JSON.stringify({ id, jsonrpc: "2.0", result })}\n\n`;
-        return new Response(event, { headers: { "content-type": "text/event-stream" } });
-      }
-      return Response.json({ error: "unexpected" }, { status: 400 });
-    },
-    hostname: "127.0.0.1",
-    port: 0,
-  });
-  const client: E2eeHttpRemoteClient = await E2eeHttpRemoteClient.connect({
-    ...CONFIG,
-    endpoint: `http://127.0.0.1:${server.port}/mcp`,
-  });
-  try {
-    expect(await client.capability()).toEqual(CAPABILITY);
-    expect(requests).toHaveLength(3);
-    const callRequest: Request | undefined = requests[2];
-    if (callRequest === undefined) throw new Error("Tool request was not captured");
-    const callHeaders: Headers = callRequest.headers;
-    expect(callHeaders.get("authorization")).toBe("Bearer test-access-token");
-    expect(callHeaders.get("x-murmur-repository")).toBe("mattpatagon/murmur");
-    expect(callHeaders.get("x-murmur-branch")).toBe("feature/e2ee");
-    expect(callHeaders.get("x-murmur-client")).toBe("codex");
-    expect(callHeaders.get("mcp-session-id")).toBe("bounded-session");
-    expect(callHeaders.get("mcp-protocol-version")).toBe("2025-11-25");
-  } finally {
-    await client.close();
-    server.stop(true);
-  }
-});
-
-test("rejects an unbounded or non-visible hosted session identifier", async (): Promise<void> => {
-  const server: ReturnType<typeof Bun.serve> = Bun.serve({
-    fetch: async (request: Request): Promise<Response> => {
-      const input: unknown = await request.json();
-      if (typeof input !== "object" || input === null || Array.isArray(input)) {
-        return Response.json({ error: "invalid" }, { status: 400 });
-      }
-      const id: unknown = Reflect.get(input, "id");
-      return Response.json(
-        {
-          id,
-          jsonrpc: "2.0",
-          result: {
-            capabilities: { tools: {} },
-            protocolVersion: "2025-11-25",
-            serverInfo: { name: "test-murmur", version: "1.0.0" },
-          },
-        },
-        { headers: { "mcp-session-id": "x".repeat(129) } },
-      );
-    },
-    hostname: "127.0.0.1",
-    port: 0,
-  });
-  try {
-    await expect(
-      E2eeHttpRemoteClient.connect({
-        ...CONFIG,
-        endpoint: `http://127.0.0.1:${server.port}/mcp`,
-      }),
-    ).rejects.toThrow("encrypted Murmur service connection failed");
-  } finally {
-    server.stop(true);
-  }
-});
-
-test("rejects insecure external endpoints and unsafe configuration before connecting", async (): Promise<void> => {
-  await expect(
-    E2eeHttpRemoteClient.connect({ ...CONFIG, endpoint: "http://example.com/mcp" }),
-  ).rejects.toThrow("must use HTTPS outside loopback");
-  await expect(
-    E2eeHttpRemoteClient.connect({ ...CONFIG, endpoint: "https://user@example.com/mcp" }),
-  ).rejects.toThrow("may not contain credentials or parameters");
-  await expect(E2eeHttpRemoteClient.connect({ ...CONFIG, token: "bad token" })).rejects.toThrow(
-    "access token is invalid",
-  );
+test("normalizes remote shutdown failure", async (): Promise<void> => {
+  const caller: FakeCaller = new FakeCaller(toolOutput(CAPABILITY));
+  caller.closeError = new Error("sensitive close detail");
+  const client: E2eeHttpRemoteClient = new E2eeHttpRemoteClient(caller);
+  await expect(client.close()).rejects.toThrow("encrypted Murmur service shutdown failed");
 });

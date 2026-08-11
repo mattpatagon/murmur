@@ -47,10 +47,8 @@ import {
   TenantId,
 } from "../domain/value-objects.js";
 import { logSafeError } from "../safe-errors.js";
-import type { InboxSubscription, InboxUpdateHandler, MessageStore } from "./message-store.js";
 import type { E2eeMessageStore } from "./e2ee-message-store.js";
-import { broadcastSqliteMessage } from "./sqlite-broadcast-store.js";
-import { sendSqliteMessage } from "./sqlite-direct-message-store.js";
+import type { InboxSubscription, InboxUpdateHandler, MessageStore } from "./message-store.js";
 import {
   closeSqliteAgent,
   endSqliteSession,
@@ -59,9 +57,11 @@ import {
   renewSqliteSession,
   sqliteAgent,
 } from "./sqlite-agent-lifecycle-store.js";
-import { migrateSqliteDatabase } from "./sqlite-message-migrations.js";
+import { broadcastSqliteMessage } from "./sqlite-broadcast-store.js";
+import { sendSqliteMessage } from "./sqlite-direct-message-store.js";
 import { SqliteE2eeMessageStore } from "./sqlite-e2ee-message-store.js";
 import { pruneSqliteLifecycle } from "./sqlite-lifecycle-prune.js";
+import { migrateSqliteDatabase } from "./sqlite-message-migrations.js";
 import {
   type InboxVersionRow,
   InboxVersionRowSchema,

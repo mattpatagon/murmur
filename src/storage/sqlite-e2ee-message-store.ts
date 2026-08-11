@@ -3,6 +3,12 @@ import type { Database } from "bun:sqlite";
 import type { MarkMessagesReadInput, MarkMessagesReadOutput } from "../domain/contracts.js";
 import { SessionKey } from "../domain/lifecycle-values.js";
 import { AgentId, type Clock, type Instant, type TenantId } from "../domain/value-objects.js";
+import { ordinaryClaimedProvenance } from "../e2ee/claimed-provenance.js";
+import {
+  verifyHostedEncryptedEnvelope,
+  verifyHostedPublicBundle,
+} from "../e2ee/hosted-validation.js";
+import { MAX_E2EE_CIPHERTEXT_BYTES } from "../e2ee/wire-contracts.js";
 import type {
   CancelEncryptedBroadcastInput,
   CancelEncryptedBroadcastOutput,
@@ -23,12 +29,6 @@ import type {
   PutEncryptedMessageInput,
   PutEncryptedMessageOutput,
 } from "../e2ee/wire-tools.js";
-import { MAX_E2EE_CIPHERTEXT_BYTES } from "../e2ee/wire-contracts.js";
-import { ordinaryClaimedProvenance } from "../e2ee/claimed-provenance.js";
-import {
-  verifyHostedEncryptedEnvelope,
-  verifyHostedPublicBundle,
-} from "../e2ee/hosted-validation.js";
 import { logSafeError } from "../safe-errors.js";
 import type {
   E2eeMessageStore,
@@ -47,9 +47,9 @@ import {
 } from "./sqlite-e2ee-broadcasts.js";
 import { claimSqliteEncryptionPrekey, publishSqliteAgentKeyBundle } from "./sqlite-e2ee-keys.js";
 import {
+  existingSqliteEncryptedMessageOutput,
   getSqliteEncryptedInboxSummary,
   getSqliteEncryptedMessages,
-  existingSqliteEncryptedMessageOutput,
   markSqliteEncryptedMessagesRead,
   putSqliteEncryptedMessage,
 } from "./sqlite-e2ee-messages.js";
@@ -247,6 +247,7 @@ export class SqliteE2eeMessageStore implements E2eeMessageStore {
       now,
       authorization ?? {
         boundSenderId: null,
+        orchestrationScope: null,
         provenance: ordinaryClaimedProvenance("peer"),
       },
     );
@@ -263,6 +264,7 @@ export class SqliteE2eeMessageStore implements E2eeMessageStore {
       this.clock.now(),
       authorization ?? {
         boundSenderId: null,
+        orchestrationScope: null,
         provenance: ordinaryClaimedProvenance("peer"),
       },
     );
@@ -278,6 +280,7 @@ export class SqliteE2eeMessageStore implements E2eeMessageStore {
       input,
       authorization ?? {
         boundSenderId: null,
+        orchestrationScope: null,
         provenance: ordinaryClaimedProvenance("peer"),
       },
     );

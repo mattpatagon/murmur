@@ -1,3 +1,4 @@
+import type { AgentGeneration } from "../domain/lifecycle-values.js";
 import type {
   Agent,
   BroadcastMessageCommand,
@@ -27,7 +28,6 @@ import type {
   WithdrawNoticeCommand,
   WithdrawNoticeResult,
 } from "../domain/notice-models.js";
-import type { AgentGeneration } from "../domain/lifecycle-values.js";
 import type { AgentId, Instant, Sequence, TenantId } from "../domain/value-objects.js";
 
 export type Awaitable<T> = Promise<T> | T;

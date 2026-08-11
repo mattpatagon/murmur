@@ -32,7 +32,7 @@ import {
   waitForDecryptedMessages,
 } from "../src/e2ee/proxy-receive.js";
 import type { E2eeRemoteClient } from "../src/e2ee/remote-client.js";
-import { envelopeToDto, signingChainToDto } from "../src/e2ee/wire-contracts.js";
+import { envelopeToDto, parseEnvelopeDto, signingChainToDto } from "../src/e2ee/wire-contracts.js";
 import type {
   CancelEncryptedBroadcastInput,
   CancelEncryptedBroadcastOutput,
@@ -96,7 +96,11 @@ class ReceiveRemote implements E2eeRemoteClient {
   public markCalls: number = 0;
 
   public setMessage(message: EncryptedMessageDto): void {
-    this.#inbox = { agent_id: "recipient", inbox_version: 1, messages: [message] };
+    this.#inbox = {
+      agent_id: "recipient",
+      inbox_version: message.tenant_sequence,
+      messages: [message],
+    };
   }
 
   public setMessages(messages: readonly EncryptedMessageDto[]): void {
@@ -428,6 +432,21 @@ test("rejects signed-envelope context relabeling and public-chain substitution",
     const validMessage: VerifiedDecryptedMessage | undefined = valid.messages[0];
     if (validMessage === undefined) throw new Error("Expected valid message after tamper attempts");
     expect(validMessage.content).toBe("received plaintext sentinel");
+    const alternateEnvelope: EncryptedEnvelope = await encryptEnvelope(
+      parseEnvelopeDto(message.envelope).header,
+      "different valid ciphertext under the cached message identity",
+      senderAgent.privateKey,
+      prekey.certificate.prekeyPublicKey,
+      new FixedRandom(await createBoxKeyPair(bytes(32, 193))),
+    );
+    remote.setMessage({ ...message, envelope: envelopeToDto(alternateEnvelope) });
+    await expect(
+      receiveEncryptedMessages(vault, remote, new FixedTestClock(), input),
+    ).rejects.toThrow("Encrypted message verification failed");
+    remote.setMessage({ ...message, tenant_sequence: 2 });
+    await expect(
+      receiveEncryptedMessages(vault, remote, new FixedTestClock(), input),
+    ).rejects.toThrow("Encrypted message verification failed");
     remote.setMessages([
       { ...message, tenant_sequence: 2 },
       { ...message, tenant_sequence: 2 },

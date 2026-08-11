@@ -103,7 +103,12 @@ if [ -z "$second_tenant_id" ]; then
   echo 'Hosted verification did not create a second tenant for direct RLS probes' >&2
   exit 1
 fi
-for tenant_table in agents agent_sessions messages broadcasts access_tokens notices orchestrator_policies; do
+tenant_tables=(
+  agents agent_sessions messages broadcasts access_tokens notices orchestrator_policies
+  tenant_e2ee_state tenant_e2ee_usage e2ee_key_bundles e2ee_prekeys e2ee_claims
+  e2ee_messages e2ee_broadcasts e2ee_broadcast_deliveries
+)
+for tenant_table in "${tenant_tables[@]}"; do
   expected_rows="$(psql "$admin_url" --tuples-only --no-align --quiet \
     --command "select count(*) from murmur.$tenant_table where tenant_id = '$founding_tenant_id'::uuid")"
   visible_rows="$(psql "$app_url" --tuples-only --no-align --quiet \
@@ -132,6 +137,92 @@ if psql "$app_url" --set ON_ERROR_STOP=1 \
   echo 'murmur_app unexpectedly wrote an agent outside its tenant context' >&2
   exit 1
 fi
+
+e2ee_tenant_id="$(psql "$admin_url" --tuples-only --no-align --quiet \
+  --command "select state.tenant_id
+    from murmur.tenant_e2ee_state as state
+    where state.state = 'enforced'
+      and exists (
+        select 1 from murmur.e2ee_messages as message
+        where message.tenant_id = state.tenant_id
+      )
+    order by state.tenant_id limit 1")"
+if [ -z "$e2ee_tenant_id" ]; then
+  echo 'Hosted verification did not enforce E2E for a tenant' >&2
+  exit 1
+fi
+e2ee_expected_rows="$(psql "$admin_url" --tuples-only --no-align --quiet \
+  --command "select count(*) from murmur.e2ee_messages where tenant_id = '$e2ee_tenant_id'::uuid")"
+if [ "$e2ee_expected_rows" -lt 1 ]; then
+  echo 'Hosted verification did not retain an encrypted message' >&2
+  exit 1
+fi
+e2ee_visible_rows="$(psql "$app_url" --tuples-only --no-align --quiet \
+  --command "begin; set local murmur.tenant_id = '$e2ee_tenant_id'; select count(*) from murmur.e2ee_messages; rollback;")"
+if [ "$e2ee_visible_rows" != "$e2ee_expected_rows" ]; then
+  echo "E2E RLS probe expected $e2ee_expected_rows rows, found $e2ee_visible_rows" >&2
+  exit 1
+fi
+e2ee_cross_rows="$(psql "$app_url" --tuples-only --no-align --quiet \
+  --command "begin; set local murmur.tenant_id = '$second_tenant_id'; select count(*) from murmur.e2ee_messages where tenant_id = '$e2ee_tenant_id'::uuid; rollback;")"
+if [ "$e2ee_cross_rows" != '0' ]; then
+  echo 'E2E RLS probe exposed ciphertext across tenants' >&2
+  exit 1
+fi
+plaintext_rows="$(psql "$admin_url" --tuples-only --no-align --quiet \
+  --command "select count(*) from murmur.messages where tenant_id = '$e2ee_tenant_id'::uuid")"
+if [ "$plaintext_rows" != '0' ]; then
+  echo "Enforced E2E tenant retained $plaintext_rows plaintext messages" >&2
+  exit 1
+fi
+plaintext_fields="$(psql "$admin_url" --tuples-only --no-align --quiet \
+  --command "select count(*) from murmur.e2ee_messages where tenant_id = '$e2ee_tenant_id'::uuid and (envelope_json ? 'content' or envelope_json ? 'plaintext' or sender_chain_json ? 'content' or sender_chain_json ? 'plaintext')")"
+if [ "$plaintext_fields" != '0' ]; then
+  echo 'Encrypted storage exposed a plaintext-bearing JSON field' >&2
+  exit 1
+fi
+if psql "$app_url" --set ON_ERROR_STOP=1 \
+  --command "begin;
+    set local murmur.tenant_id = '$e2ee_tenant_id';
+    update murmur.tenant_e2ee_state set plaintext_writes_blocked = false
+    where tenant_id = '$e2ee_tenant_id'::uuid;
+    rollback;" >/dev/null 2>&1; then
+  echo 'murmur_app unexpectedly mutated tenant E2E state directly' >&2
+  exit 1
+fi
+if psql "$app_url" --set ON_ERROR_STOP=1 \
+  --command "begin;
+    set local murmur.tenant_id = '$founding_tenant_id';
+    insert into murmur.tenant_e2ee_usage(tenant_id) values ('$second_tenant_id'::uuid);
+    rollback;" >/dev/null 2>&1; then
+  echo 'murmur_app unexpectedly wrote E2E usage across tenants' >&2
+  exit 1
+fi
+if psql "$app_url" --set ON_ERROR_STOP=1 \
+  --command "begin;
+    set local murmur.tenant_id = '$e2ee_tenant_id';
+    insert into murmur.messages(
+      tenant_id, tenant_sequence, message_id, thread_id, sender_id, recipient_id,
+      content, created_at, expires_at
+    )
+    select '$e2ee_tenant_id'::uuid, 999997, pg_catalog.gen_random_uuid(),
+      'ci-e2ee-plaintext-denied', agent_id, agent_id, 'forbidden plaintext',
+      pg_catalog.statement_timestamp(), pg_catalog.statement_timestamp() + interval '30 days'
+    from murmur.agents
+    where tenant_id = '$e2ee_tenant_id'::uuid
+    order by agent_id limit 1;
+    rollback;" >/dev/null 2>&1; then
+  echo 'Enforced E2E tenant unexpectedly accepted a plaintext message' >&2
+  exit 1
+fi
+for public_role in anon authenticated; do
+  if psql "$admin_url" --set ON_ERROR_STOP=1 \
+    --command "begin; set local role $public_role; select count(*) from murmur.e2ee_messages; rollback;" \
+    >/dev/null 2>&1; then
+    echo "$public_role unexpectedly read encrypted tenant storage" >&2
+    exit 1
+  fi
+done
 
 provenance_tenant_id="$(psql "$admin_url" --tuples-only --no-align --quiet \
   --command "select message.tenant_id
@@ -211,7 +302,9 @@ if psql "$app_url" --set ON_ERROR_STOP=1 \
   echo 'murmur_app unexpectedly inserted spoofed broadcast authority' >&2
   exit 1
 fi
-unset founding_tenant_id second_tenant_id tenant_table expected_rows visible_rows no_context_rows
+unset founding_tenant_id second_tenant_id tenant_table tenant_tables expected_rows visible_rows
+unset no_context_rows e2ee_tenant_id e2ee_expected_rows e2ee_visible_rows e2ee_cross_rows
+unset plaintext_rows plaintext_fields public_role
 unset provenance_tenant_id
 
 assigned_sequence="$(psql "$app_url" \

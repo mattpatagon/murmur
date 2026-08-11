@@ -1,7 +1,7 @@
 import type { Database, Statement } from "bun:sqlite";
 import { z } from "zod";
 
-const VAULT_SCHEMA_VERSION: number = 9;
+const VAULT_SCHEMA_VERSION: number = 10;
 const UserVersionRowSchema: z.ZodType<{ readonly user_version: number }> = z.object({
   user_version: z
     .union([z.number().int(), z.bigint()])
@@ -214,6 +214,26 @@ export function migrateLocalVault(database: Database): void {
         );
         CREATE INDEX orchestration_routes_expiration ON orchestration_routes(expires_at);
         PRAGMA user_version = 9;
+      `);
+    }
+    if (version <= 9) {
+      database.exec(`
+        DROP INDEX decrypted_cache_expiration;
+        DROP TABLE decrypted_cache;
+        CREATE TABLE decrypted_cache (
+          message_id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL,
+          sender_id TEXT NOT NULL,
+          recipient_id TEXT NOT NULL,
+          pair_counter INTEGER NOT NULL CHECK(pair_counter > 0),
+          tenant_sequence INTEGER NOT NULL CHECK(tenant_sequence > 0),
+          wire_digest BLOB NOT NULL CHECK(length(wire_digest) = 32),
+          plaintext TEXT NOT NULL CHECK(length(plaintext) BETWEEN 1 AND 100000),
+          expires_at TEXT NOT NULL,
+          UNIQUE(tenant_id, sender_id, recipient_id, pair_counter)
+        );
+        CREATE INDEX decrypted_cache_expiration ON decrypted_cache(expires_at);
+        PRAGMA user_version = 10;
       `);
     }
     database.exec("COMMIT");

@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-
+import {
+  type CanaryE2eeIdentity,
+  canaryE2eeBundle,
+  createCanaryE2eeIdentity,
+  encryptCanaryE2eeMessage,
+} from "../scripts/lib/e2ee-canary-crypto.js";
 import type { MarkMessagesReadInput, MarkMessagesReadOutput } from "../src/domain/contracts.js";
 import type { TenantId } from "../src/domain/value-objects.js";
 import type { PublicAgentKeyBundleDto } from "../src/e2ee/wire-contracts.js";
@@ -13,6 +18,7 @@ import type {
   CommitEncryptedBroadcastOutput,
   E2eeCapabilityOutput,
   EncryptedInboxOutput,
+  EncryptedMessageDto,
   GetEncryptedMessagesInput,
   GetInboxSummaryInput,
   GetInboxSummaryOutput,
@@ -78,6 +84,7 @@ function entitlement(state: E2eeEntitlementRecord["state"]): E2eeEntitlementReco
     retainedCiphertextMessages: 0,
     state,
     trustPolicyVersion: state === "enforced" ? 1 : null,
+    unprovisionedActiveAgents: 0,
     unreadPlaintextMessages: 0,
   });
 }
@@ -99,6 +106,7 @@ class FakeE2eeStore implements E2eeMessageStore {
   public claimInput: ClaimEncryptionPrekeyInput | null = null;
   public inboxes: EncryptedInboxOutput[] = [];
   public publishInput: PublishAgentKeyBundleInput | null = null;
+  public putOutput: PutEncryptedMessageOutput | null = null;
   public watchCloseCount: number = 0;
 
   public scopeE2ee(_tenantId: TenantId): E2eeMessageStore {
@@ -142,7 +150,8 @@ class FakeE2eeStore implements E2eeMessageStore {
   }
 
   public putEncryptedMessage(_input: PutEncryptedMessageInput): PutEncryptedMessageOutput {
-    throw new Error("unused fake message put");
+    if (this.putOutput === null) throw new Error("fake message output is unavailable");
+    return this.putOutput;
   }
 
   public getEncryptedMessages(input: GetEncryptedMessagesInput): EncryptedInboxOutput {
@@ -156,31 +165,53 @@ class FakeE2eeStore implements E2eeMessageStore {
   }
 
   public prepareEncryptedBroadcast(
-    _input: PrepareEncryptedBroadcastInput,
+    input: PrepareEncryptedBroadcastInput,
   ): PrepareEncryptedBroadcastOutput {
-    throw new Error("unused fake broadcast prepare");
+    return {
+      broadcast_id: "44444444-4444-4444-8444-444444444444",
+      claims: [],
+      duplicate: false,
+      expires_at: EXPIRES_AT,
+      recipient_count: 0,
+      thread_id: input.thread_id === undefined ? "fake-broadcast-thread" : input.thread_id,
+    };
   }
 
   public putEncryptedBroadcastDelivery(
-    _input: PutEncryptedBroadcastDeliveryInput,
+    input: PutEncryptedBroadcastDeliveryInput,
   ): PutEncryptedBroadcastDeliveryOutput {
-    throw new Error("unused fake broadcast delivery");
+    return {
+      accepted: true,
+      duplicate: false,
+      recipient_id: input.envelope.header.recipient_id,
+    };
   }
 
   public commitEncryptedBroadcast(
-    _input: CommitEncryptedBroadcastInput,
+    input: CommitEncryptedBroadcastInput,
   ): CommitEncryptedBroadcastOutput {
-    throw new Error("unused fake broadcast commit");
+    return {
+      broadcast_id: input.broadcast_id,
+      committed_at: NOW,
+      duplicate: false,
+      recipient_count: 0,
+      status: "stored",
+    };
   }
 
   public cancelEncryptedBroadcast(
     _input: CancelEncryptedBroadcastInput,
   ): CancelEncryptedBroadcastOutput {
-    throw new Error("unused fake broadcast cancel");
+    return { cancelled: true };
   }
 
-  public getEncryptedInboxSummary(_input: GetInboxSummaryInput): GetInboxSummaryOutput {
-    throw new Error("unused fake inbox summary");
+  public getEncryptedInboxSummary(input: GetInboxSummaryInput): GetInboxSummaryOutput {
+    return {
+      agent_id: input.agent_id,
+      inbox_version: 1,
+      newest_sequence: 1,
+      unread_count: 1,
+    };
   }
 
   public async watchEncryptedInbox(
@@ -208,11 +239,19 @@ function context(
     boundAgentId: null,
     capability: capability(state),
     entitlement: entitlement(state),
+    orchestrationScope: null,
     resolveOrchestrator: null,
     senderAuthority: "peer",
     sleep,
     store,
   };
+}
+
+function structured(output: CallToolResult | null): Record<string, unknown> {
+  if (output === null || output.structuredContent === undefined) {
+    throw new Error("Encrypted tool result omitted structured content");
+  }
+  return output.structuredContent;
 }
 
 test("returns only the server-derived capability in the off state", async (): Promise<void> => {
@@ -294,6 +333,7 @@ test("resolves encrypted orchestration claims entirely from authenticated server
   });
   expect(store.claimAuthorization).toEqual({
     boundSenderId: null,
+    orchestrationScope: null,
     provenance: {
       message_kind: "orchestration_request",
       orchestrator_policy_id: policyId,
@@ -336,4 +376,123 @@ test("rejects a store response that crosses encrypted inbox identity", async ():
       context("enforced", store),
     ),
   ).rejects.toThrow("identity is inconsistent");
+});
+
+test("routes every enforced ciphertext mutation through bounded validated outputs", async (): Promise<void> => {
+  const store: FakeE2eeStore = new FakeE2eeStore();
+  const now: Date = new Date();
+  const alice: CanaryE2eeIdentity = await createCanaryE2eeIdentity("alice", now);
+  const bob: CanaryE2eeIdentity = await createCanaryE2eeIdentity("bob", now);
+  const bobBundle: ReturnType<typeof canaryE2eeBundle> = canaryE2eeBundle(bob);
+  const oneTime: ReturnType<typeof canaryE2eeBundle>["one_time_prekeys"][number] | undefined =
+    bobBundle.one_time_prekeys[0];
+  if (oneTime === undefined) throw new Error("Fake recipient prekey is missing");
+  const claim: ClaimEncryptionPrekeyOutput = {
+    bundle: bobBundle,
+    claim_id: "55555555-5555-4555-8555-555555555555",
+    claimed_at: now.toISOString(),
+    expires_at: new Date(now.getTime() + 60_000).toISOString(),
+    prekey_class: "one_time",
+    prekey_id: oneTime.prekey_id,
+    provenance: {
+      message_kind: "message",
+      orchestrator_policy_id: null,
+      sender_authority: "peer",
+    },
+    recipient_id: "bob",
+  };
+  const put: PutEncryptedMessageInput = await encryptCanaryE2eeMessage({
+    claim,
+    idempotencyKey: "mcp-enforced-complete",
+    pairCounter: 1,
+    plaintext: "ciphertext route coverage",
+    recipient: bob,
+    repository: "owner/repository",
+    sender: alice,
+    senderId: "alice",
+    tenantId: TENANT_ID,
+  });
+  const aliceBundle: ReturnType<typeof canaryE2eeBundle> = canaryE2eeBundle(alice);
+  const message: EncryptedMessageDto = {
+    envelope: put.envelope,
+    read_at: null,
+    sender_chain: {
+      agent_certificate: aliceBundle.agent_certificate,
+      root_key_id: aliceBundle.root_key_id,
+      root_public_key: aliceBundle.root_public_key,
+    },
+    tenant_sequence: 1,
+  };
+  store.putOutput = { duplicate: false, message, retention_days: 30, status: "stored" };
+  store.inboxes.push({ agent_id: "bob", inbox_version: 1, messages: [message] });
+  const routed: E2eeToolContext = context("enforced", store);
+
+  expect(structured(await callE2eeTool("put_encrypted_message", put, routed))).toMatchObject({
+    duplicate: false,
+  });
+  expect(
+    structured(
+      await callE2eeTool(
+        "get_encrypted_messages",
+        { after_sequence: 0, agent_id: "bob", limit: 10, unread_only: false },
+        routed,
+      ),
+    ),
+  ).toMatchObject({ agent_id: "bob", inbox_version: 1 });
+  expect(
+    structured(
+      await callE2eeTool(
+        "mark_messages_read",
+        { agent_id: "bob", message_ids: [put.envelope.header.message_id] },
+        routed,
+      ),
+    ),
+  ).toMatchObject({ updated: 1 });
+  expect(
+    structured(
+      await callE2eeTool(
+        "prepare_encrypted_broadcast",
+        {
+          audience: {},
+          context: { branch: "feature/e2e", client: "codex", repository: "owner/repository" },
+          sender_id: "alice",
+        },
+        routed,
+      ),
+    ),
+  ).toMatchObject({ recipient_count: 0 });
+  expect(
+    structured(
+      await callE2eeTool(
+        "put_encrypted_broadcast_delivery",
+        {
+          broadcast_id: "44444444-4444-4444-8444-444444444444",
+          claim_id: claim.claim_id,
+          envelope: put.envelope,
+        },
+        routed,
+      ),
+    ),
+  ).toMatchObject({ accepted: true, recipient_id: "bob" });
+  expect(
+    structured(
+      await callE2eeTool(
+        "commit_encrypted_broadcast",
+        { broadcast_id: "44444444-4444-4444-8444-444444444444" },
+        routed,
+      ),
+    ),
+  ).toMatchObject({ status: "stored" });
+  expect(
+    structured(
+      await callE2eeTool(
+        "cancel_encrypted_broadcast",
+        { broadcast_id: "44444444-4444-4444-8444-444444444444" },
+        routed,
+      ),
+    ),
+  ).toEqual({ cancelled: true });
+  expect(
+    structured(await callE2eeTool("get_inbox_summary", { agent_id: "bob" }, routed)),
+  ).toMatchObject({ agent_id: "bob", unread_count: 1 });
 });

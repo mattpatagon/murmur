@@ -53,7 +53,7 @@ export async function verifyHostedOrchestrationRollback(
           sender_id: "forbidden",
         },
       ),
-    ).toContain("cannot access tenant data");
+    ).toContain("Unknown tool");
     root = await PostgresMessageStore.connect(configuredDatabaseUrl, testTlsConfiguration);
     const store: MessageStore = root.scope(TenantId.parse(options.tenantId));
     const messages: readonly Message[] = await store.getMessages({

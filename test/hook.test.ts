@@ -367,7 +367,10 @@ test("recovers from corrupt hook cache and uses safe numeric environment fallbac
       path.endsWith(".json"),
     );
     if (cacheFile === undefined) throw new Error("Expected a hook cache file");
-    writeFileSync(join(directory, cacheFile), "not-json");
+    writeFileSync(
+      join(directory, cacheFile),
+      JSON.stringify({ lastCheckedAt: "invalid", lastNotifiedInboxVersion: 0 }),
+    );
     const recovered: HookOutput | null = await handleHook(
       { cwd: "/work/repo", hook_event_name: "PostToolUse" },
       "codex",

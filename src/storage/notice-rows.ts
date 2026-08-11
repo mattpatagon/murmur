@@ -1,5 +1,5 @@
 import { z } from "zod";
-
+import { StorageCorruptionError } from "../domain/errors.js";
 import {
   AgentGeneration,
   NoticeContent,
@@ -10,7 +10,6 @@ import {
 } from "../domain/lifecycle-values.js";
 import type { Notice } from "../domain/notice-models.js";
 import { AgentId, BranchName, Instant, RepositoryName } from "../domain/value-objects.js";
-import { StorageCorruptionError } from "../domain/errors.js";
 
 export type NoticeRow = {
   readonly branch_name: string | null;

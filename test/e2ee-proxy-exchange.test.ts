@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
+import { assertNoE2eePlaintextLeak, type LeakScanResult } from "../scripts/e2ee-leak-detector.js";
+import type { MarkMessagesReadOutput, RegisterAgentOutput } from "../src/domain/contracts.js";
 import type { Clock, Instant } from "../src/domain/value-objects.js";
 import {
   AgentClient,
@@ -15,8 +16,6 @@ import { LocalE2eeVault } from "../src/e2ee/local-vault.js";
 import type { StoredPrekey, StoredRootKey } from "../src/e2ee/local-vault-rows.js";
 import type { ProxyInboxOutput, ProxySendMessageOutput } from "../src/e2ee/proxy-contracts.js";
 import { E2eeProxyService } from "../src/e2ee/proxy-service.js";
-import type { MarkMessagesReadOutput } from "../src/domain/contracts.js";
-import { assertNoE2eePlaintextLeak, type LeakScanResult } from "../scripts/e2ee-leak-detector.js";
 import { MemoryE2eeBackend, MemoryE2eeRemote } from "./support/e2ee-memory-remote.js";
 
 const NOW_TEXT: string = "2026-08-10T20:00:00.000Z";
@@ -131,6 +130,18 @@ test("two local proxies exchange, verify, decrypt, retry, and acknowledge withou
     expect(retried.message.message_id).toBe(sent.message.message_id);
 
     expect(privateOneTimePrekeys(recipientVault, RECIPIENT_ID)).toBe(20);
+    expect(
+      await recipient.waitForMessages({
+        after_sequence: 0,
+        agent_id: RECIPIENT_ID,
+        timeout_seconds: 1,
+      }),
+    ).toMatchObject({
+      agent_id: RECIPIENT_ID,
+      messages: [{ content: SENTINEL }],
+      timed_out: false,
+    });
+    expect(privateOneTimePrekeys(recipientVault, RECIPIENT_ID)).toBe(19);
     const inbox: ProxyInboxOutput = await recipient.getMessages({
       after_sequence: 0,
       agent_id: RECIPIENT_ID,
@@ -139,7 +150,7 @@ test("two local proxies exchange, verify, decrypt, retry, and acknowledge withou
     });
     expect(inbox.messages).toHaveLength(1);
     expect(inbox.messages[0]).toEqual(sent.message);
-    expect(privateOneTimePrekeys(recipientVault, RECIPIENT_ID)).toBe(19);
+    expect(privateOneTimePrekeys(recipientVault, RECIPIENT_ID)).toBe(20);
 
     const marked: MarkMessagesReadOutput = await recipient.markMessagesRead({
       agent_id: RECIPIENT_ID,
@@ -171,6 +182,51 @@ test("two local proxies exchange, verify, decrypt, retry, and acknowledge withou
     ).toBe(true);
   } finally {
     await Promise.allSettled([sender.close(), recipient.close()]);
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("proxy service delegates bounded lifecycle operations and fails closed after shutdown", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-e2ee-proxy-lifecycle-"));
+  const vault: LocalE2eeVault = new LocalE2eeVault(join(directory, "lifecycle.sqlite"), "linux");
+  const remote: MemoryE2eeRemote = new MemoryE2eeRemote(new MemoryE2eeBackend());
+  const proxy: E2eeProxyService = service(vault, remote, "example/lifecycle", "feature/lifecycle");
+  try {
+    const registered: RegisterAgentOutput = await proxy.registerAgent({
+      agent_id: SENDER_ID,
+      session_key: "pane-one",
+    });
+    expect((await proxy.listAgents({ limit: 10, state: "all" })).agents).toHaveLength(1);
+    expect((await proxy.getAgent({ agent_id: SENDER_ID })).agent.state).toBe("active");
+    expect(
+      await proxy.endSession({
+        agent_id: SENDER_ID,
+        end_default_session: false,
+        expected_generation: registered.agent.generation,
+        reason: "stop",
+        session_key: "pane-one",
+      }),
+    ).toMatchObject({ ended: 1, generation: registered.agent.generation });
+    expect(
+      await proxy.closeAgent({
+        agent_id: SENDER_ID,
+        expected_generation: registered.agent.generation,
+        reason: "completed",
+      }),
+    ).toMatchObject({ agent: { state: "closed" }, already_closed: false });
+    await expect(proxy.getOrchestrator({})).rejects.toThrow(
+      "Encrypted orchestration is unavailable",
+    );
+    await expect(
+      proxy.getDelegation({ policy_id: "11111111-1111-4111-8111-111111111111" }),
+    ).rejects.toThrow("Encrypted orchestration is unavailable");
+    await proxy.close();
+    await proxy.close();
+    await expect(proxy.listAgents({ limit: 10, state: "all" })).rejects.toThrow(
+      "local E2E proxy is closed",
+    );
+  } finally {
+    await proxy.close().catch((_error: unknown): void => undefined);
     rmSync(directory, { force: true, recursive: true });
   }
 });

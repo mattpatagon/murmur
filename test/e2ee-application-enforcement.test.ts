@@ -6,8 +6,8 @@ import type { CallToolResult, ListToolsResult } from "@modelcontextprotocol/sdk/
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 
 import { AgentClient, BranchName, RepositoryName, TenantId } from "../src/domain/value-objects.js";
-import { parseE2eeEntitlementRecord } from "../src/hosted/e2ee-entitlement.js";
 import type { HostedPrincipal } from "../src/hosted/control-plane.js";
+import { parseE2eeEntitlementRecord } from "../src/hosted/e2ee-entitlement.js";
 import { MurmurApplication } from "../src/mcp/murmur-application.js";
 import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
 
@@ -36,6 +36,7 @@ test("enforced applications reject hidden plaintext calls and expose no plaintex
       retainedCiphertextMessages: 0,
       state: "enforced",
       trustPolicyVersion: 1,
+      unprovisionedActiveAgents: 0,
       unreadPlaintextMessages: 0,
     }),
     e2eeStore: null,

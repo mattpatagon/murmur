@@ -12,6 +12,7 @@ import {
   NOTICE_AUDIT_DAYS,
   NoticeId,
 } from "../domain/lifecycle-values.js";
+import type { Agent } from "../domain/models.js";
 import type {
   ListNoticesQuery,
   ListNoticesResult,
@@ -23,7 +24,6 @@ import type {
   WithdrawNoticeCommand,
   WithdrawNoticeResult,
 } from "../domain/notice-models.js";
-import type { Agent } from "../domain/models.js";
 import { Instant } from "../domain/value-objects.js";
 import { mapNoticeRow, type NoticeRow, NoticeRowSchema } from "./notice-rows.js";
 import { renewSqliteSession, sqliteAgent } from "./sqlite-agent-lifecycle-store.js";

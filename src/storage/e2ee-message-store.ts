@@ -5,6 +5,7 @@ import type {
   CancelEncryptedBroadcastOutput,
   ClaimEncryptionPrekeyInput,
   ClaimEncryptionPrekeyOutput,
+  ClaimedProvenanceDto,
   CommitEncryptedBroadcastInput,
   CommitEncryptedBroadcastOutput,
   EncryptedInboxOutput,
@@ -19,14 +20,19 @@ import type {
   PutEncryptedBroadcastDeliveryOutput,
   PutEncryptedMessageInput,
   PutEncryptedMessageOutput,
-  ClaimedProvenanceDto,
 } from "../e2ee/wire-tools.js";
 import type { Awaitable, InboxSubscription } from "./message-store.js";
 
 export type EncryptedInboxUpdateHandler = (sequence: number) => Promise<void>;
 
+export type E2eeOrchestrationScope = {
+  readonly personalId: string;
+  readonly repositoryName: string | null;
+};
+
 export type E2eeWriteAuthorization = {
   readonly boundSenderId: string | null;
+  readonly orchestrationScope: E2eeOrchestrationScope | null;
   readonly provenance: ClaimedProvenanceDto;
 };
 
@@ -37,7 +43,10 @@ export interface E2eeMessageStore {
     input: ClaimEncryptionPrekeyInput,
     authorization?: E2eeWriteAuthorization,
   ): Awaitable<ClaimEncryptionPrekeyOutput>;
-  putEncryptedMessage(input: PutEncryptedMessageInput): Awaitable<PutEncryptedMessageOutput>;
+  putEncryptedMessage(
+    input: PutEncryptedMessageInput,
+    authorization?: E2eeWriteAuthorization,
+  ): Awaitable<PutEncryptedMessageOutput>;
   getEncryptedMessages(input: GetEncryptedMessagesInput): Awaitable<EncryptedInboxOutput>;
   markEncryptedMessagesRead(input: MarkMessagesReadInput): Awaitable<MarkMessagesReadOutput>;
   prepareEncryptedBroadcast(

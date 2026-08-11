@@ -8,6 +8,7 @@ const E2eeEntitlementRecordSchema: z.ZodType<E2eeEntitlementRecord> = z
     retainedCiphertextMessages: z.number().int().nonnegative().safe(),
     state: z.enum(["enforced", "off", "provisioning"]),
     trustPolicyVersion: z.number().int().positive().safe().nullable(),
+    unprovisionedActiveAgents: z.number().int().nonnegative().safe(),
     unreadPlaintextMessages: z.number().int().nonnegative().safe(),
   })
   .superRefine((record: E2eeEntitlementRecord, context: z.core.$RefinementCtx): void => {
@@ -18,6 +19,7 @@ const E2eeEntitlementRecordSchema: z.ZodType<E2eeEntitlementRecord> = z
       record.state === "enforced" &&
       (!record.plaintextWritesBlocked ||
         record.trustPolicyVersion === null ||
+        record.unprovisionedActiveAgents !== 0 ||
         record.unreadPlaintextMessages !== 0)
     ) {
       context.addIssue({ code: "custom", message: "Enforced E2E state is incomplete" });
@@ -25,6 +27,7 @@ const E2eeEntitlementRecordSchema: z.ZodType<E2eeEntitlementRecord> = z
   });
 
 export const E2EE_CAPABILITY_TOOL_NAME: string = "get_e2ee_capability";
+export const HOSTED_MAX_ONE_TIME_PREKEYS: number = 20;
 export const TENANT_METADATA_TOOL_NAMES: readonly string[] = [
   "close_agent",
   "end_session",
@@ -67,7 +70,19 @@ export type E2eeEntitlementRecord = {
   readonly retainedCiphertextMessages: number;
   readonly state: E2eeEntitlementState;
   readonly trustPolicyVersion: number | null;
+  readonly unprovisionedActiveAgents: number;
   readonly unreadPlaintextMessages: number;
+};
+
+export type E2eeTransitionAction =
+  | "begin_provisioning"
+  | "block_plaintext_writes"
+  | "enforce"
+  | "rollback_off";
+
+export type E2eeTransitionResult = {
+  readonly changed: boolean;
+  readonly entitlement: E2eeEntitlementRecord;
 };
 
 export function parseE2eeEntitlementRecord(input: unknown): E2eeEntitlementRecord {
@@ -106,6 +121,9 @@ export function completeE2eeEnforcement(current: E2eeEntitlementRecord): E2eeEnt
   }
   if (current.trustPolicyVersion === null) {
     throw new Error("E2E enforcement requires a tenant trust policy");
+  }
+  if (current.unprovisionedActiveAgents !== 0) {
+    throw new Error("E2E enforcement requires every active agent to publish keys");
   }
   return withState(current, "enforced", true);
 }

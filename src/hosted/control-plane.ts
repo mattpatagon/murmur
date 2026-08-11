@@ -41,6 +41,16 @@ import {
   onlyRow,
   page,
 } from "./control-plane-rows.js";
+import {
+  getPostgresE2eeEntitlement,
+  resetPostgresE2eeIdentity,
+  transitionPostgresE2ee,
+} from "./e2ee-control-plane.js";
+import type {
+  E2eeEntitlementRecord,
+  E2eeTransitionAction,
+  E2eeTransitionResult,
+} from "./e2ee-entitlement.js";
 import { HostedAuthenticator } from "./hosted-authenticator.js";
 import {
   changePostgresTenantStatus,
@@ -64,29 +74,7 @@ import {
 } from "./tenant-token-control-plane.js";
 import { issueOperatorToken, providedOperatorToken } from "./token-issuance.js";
 
-export type {
-  AdminAuditEvent,
-  AskOrchestratorCommand,
-  BootstrapPrincipal,
-  CredentialAdmission,
-  EffectiveOrchestrator,
-  HostedControlPlane,
-  HostedPrincipal,
-  HostedTlsConfiguration,
-  IssuedOperatorToken,
-  IssuedToken,
-  OperatorPrincipal,
-  OperatorTokenSummary,
-  OrchestrationRequestResult,
-  OrchestratorPolicy,
-  OrchestratorScope,
-  Page,
-  TenantPrincipal,
-  TenantStatus,
-  TenantSummary,
-  TenantTokenRole,
-  TokenSummary,
-} from "./control-plane-contracts.js";
+export type * from "./control-plane-contracts.js";
 
 export class PostgresHostedControlPlane implements HostedControlPlane {
   private readonly authenticator: HostedAuthenticator;
@@ -139,6 +127,43 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
   public async authenticate(token: string): Promise<HostedPrincipal | null> {
     this.ensureOpen();
     return await this.authenticator.authenticate(token);
+  }
+
+  public async getE2eeEntitlement(principal: TenantPrincipal): Promise<E2eeEntitlementRecord> {
+    this.ensureOpen();
+    return await getPostgresE2eeEntitlement(this.database, principal);
+  }
+
+  public async resetE2eeIdentity(
+    principal: TenantPrincipal,
+    agentId: AgentId,
+    expectedRootKeyId: string,
+    reason: string,
+  ): Promise<boolean> {
+    this.ensureOpen();
+    return await resetPostgresE2eeIdentity(
+      this.database,
+      principal,
+      agentId,
+      expectedRootKeyId,
+      reason,
+    );
+  }
+
+  public async transitionE2ee(
+    principal: TenantPrincipal,
+    action: E2eeTransitionAction,
+    expectedState: E2eeEntitlementRecord["state"],
+    trustPolicyVersion: number | null,
+  ): Promise<E2eeTransitionResult> {
+    this.ensureOpen();
+    return await transitionPostgresE2ee(
+      this.database,
+      principal,
+      action,
+      expectedState,
+      trustPolicyVersion,
+    );
   }
 
   public async hasActiveOperator(): Promise<boolean> {

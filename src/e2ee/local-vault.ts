@@ -41,8 +41,10 @@ export type CacheDecryptedInput = {
   readonly prekeyId: string;
   readonly recipientId: string;
   readonly senderId: string;
+  readonly tenantSequence: number;
   readonly tenantId: string;
   readonly verifiedAt: string;
+  readonly wireDigest: Uint8Array;
 };
 
 function sameDigest(left: Uint8Array, right: Uint8Array): boolean {
@@ -67,7 +69,9 @@ function cachedMessageMatches(existing: CachedMessage, input: CacheDecryptedInpu
     existing.recipientId === input.recipientId &&
     existing.pairCounter === input.pairCounter &&
     existing.plaintext === input.plaintext &&
-    existing.expiresAt === input.expiresAt
+    existing.expiresAt === input.expiresAt &&
+    existing.tenantSequence === input.tenantSequence &&
+    sameDigest(existing.wireDigest, input.wireDigest)
   );
 }
 
@@ -348,7 +352,8 @@ export class LocalE2eeVault {
   public getCachedMessage(messageId: string): CachedMessage | null {
     this.#ensureOpen();
     using statement: Statement<unknown, [string]> = this.#database.prepare(`
-      SELECT message_id, tenant_id, sender_id, recipient_id, pair_counter, plaintext, expires_at
+      SELECT message_id, tenant_id, sender_id, recipient_id, pair_counter,
+             tenant_sequence, wire_digest, plaintext, expires_at
       FROM decrypted_cache WHERE message_id = ?
     `);
     const row: unknown = statement.get(messageId);
@@ -390,11 +395,12 @@ export class LocalE2eeVault {
 
       using insertCache: Statement<
         unknown,
-        [string, string, string, string, number, string, string]
+        [string, string, string, string, number, number, Uint8Array, string, string]
       > = this.#database.prepare(`
           INSERT INTO decrypted_cache(
-            message_id, tenant_id, sender_id, recipient_id, pair_counter, plaintext, expires_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            message_id, tenant_id, sender_id, recipient_id, pair_counter,
+            tenant_sequence, wire_digest, plaintext, expires_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
       insertCache.run(
         input.messageId,
@@ -402,6 +408,8 @@ export class LocalE2eeVault {
         input.senderId,
         input.recipientId,
         input.pairCounter,
+        input.tenantSequence,
+        input.wireDigest,
         input.plaintext,
         input.expiresAt,
       );

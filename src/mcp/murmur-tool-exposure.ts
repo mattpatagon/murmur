@@ -1,5 +1,5 @@
-import type { E2eeEntitlementRecord } from "../hosted/e2ee-entitlement.js";
 import type { HostedPrincipal } from "../hosted/control-plane.js";
+import type { E2eeEntitlementRecord } from "../hosted/e2ee-entitlement.js";
 
 export type { E2eeEntitlementRecord } from "../hosted/e2ee-entitlement.js";
 

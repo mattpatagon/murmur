@@ -131,8 +131,9 @@ The signed outer header contains these logical fields:
 | `padded_length` | Exact padded inner byte count |
 
 Provenance is a closed consistency rule. A normal message is
-`peer / message / null`. An orchestrated request is
-`orchestrator / orchestration_request / non-null-policy-UUID`. Every other combination is invalid.
+`peer / message / null` or `orchestrator / message / null`. A request routed by a peer to its
+server-selected orchestrator is `peer / orchestration_request / non-null-policy-UUID`. Every other
+combination is invalid.
 
 Hosted `tenant_sequence` and `read_at` are intentionally excluded: the sequence is allocated only
 when a row becomes visible at commit, and read state is mutable. Both remain validated transport

@@ -73,7 +73,11 @@ import {
   type E2eeEntitlementRecord,
 } from "../hosted/e2ee-entitlement.js";
 import type { EffectiveOrchestratorDto } from "../hosted/orchestration-contracts.js";
-import type { E2eeMessageStore, E2eeWriteAuthorization } from "../storage/e2ee-message-store.js";
+import type {
+  E2eeMessageStore,
+  E2eeOrchestrationScope,
+  E2eeWriteAuthorization,
+} from "../storage/e2ee-message-store.js";
 import type { InboxSubscription } from "../storage/message-store.js";
 import { toolResult } from "./murmur-tool-results.js";
 
@@ -82,6 +86,7 @@ export type E2eeToolContext = {
   readonly boundAgentId: AgentId | null;
   readonly capability: E2eeCapabilityConfiguration;
   readonly entitlement: E2eeEntitlementRecord;
+  readonly orchestrationScope: E2eeOrchestrationScope | null;
   readonly resolveOrchestrator: (() => Promise<EffectiveOrchestratorDto | null>) | null;
   readonly senderAuthority: SenderAuthority;
   readonly sleep: (milliseconds: number) => Promise<void>;
@@ -94,6 +99,7 @@ function writeAuthorization(
 ): E2eeWriteAuthorization {
   return {
     boundSenderId: context.boundAgentId === null ? null : context.boundAgentId.value,
+    orchestrationScope: context.orchestrationScope,
     provenance,
   };
 }
@@ -274,8 +280,16 @@ export async function callE2eeTool(
     case "put_encrypted_message": {
       const input: PutEncryptedMessageInput = PutEncryptedMessageInputSchema.parse(argumentsValue);
       await authorizeAgent(input.envelope.header.sender_id, context);
+      const provenance: ClaimedProvenanceDto = {
+        message_kind: input.envelope.header.message_kind,
+        orchestrator_policy_id: input.envelope.header.orchestrator_policy_id,
+        sender_authority: input.envelope.header.sender_authority,
+      };
       const output: PutEncryptedMessageOutput = PutEncryptedMessageOutputSchema.parse(
-        await dataStore(context).putEncryptedMessage(input),
+        await dataStore(context).putEncryptedMessage(
+          input,
+          writeAuthorization(context, provenance),
+        ),
       );
       return result(output);
     }

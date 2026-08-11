@@ -11,7 +11,7 @@ import {
   type ClaimEncryptionPrekeyOutput,
   ClaimEncryptionPrekeyOutputSchema,
 } from "../e2ee/wire-tools.js";
-import { senderChainFromBundle } from "./e2ee-store-validation.js";
+import { requireCurrentClaimRecipient, senderChainFromBundle } from "./e2ee-store-validation.js";
 import { type SqliteE2eeClaimRow, SqliteE2eeClaimRowSchema } from "./sqlite-e2ee-rows.js";
 
 export type SqliteHostedEnvelopeValidationContext = {
@@ -19,6 +19,25 @@ export type SqliteHostedEnvelopeValidationContext = {
   readonly claimOutput: ClaimEncryptionPrekeyOutput;
   readonly senderChain: PublicAgentSigningChainDto;
 };
+
+function currentBundle(
+  database: Database,
+  agentId: string,
+  generation: number,
+): PublicAgentKeyBundleDto {
+  const rawBundle: unknown = database
+    .query<unknown, [string, number]>(`
+      SELECT bundle_json FROM e2ee_key_bundles
+      WHERE agent_id = ? AND agent_generation = ?
+    `)
+    .get(agentId, generation);
+  if (rawBundle === null || typeof rawBundle !== "object") {
+    throw new Error("Agent has no current E2E signing bundle");
+  }
+  const bundleJson: unknown = Reflect.get(rawBundle, "bundle_json");
+  if (typeof bundleJson !== "string") throw new Error("Stored E2E agent bundle is invalid");
+  return PublicAgentKeyBundleDtoSchema.parse(JSON.parse(bundleJson));
+}
 
 export function sqliteHostedEnvelopeValidationContext(
   database: Database,
@@ -39,19 +58,14 @@ export function sqliteHostedEnvelopeValidationContext(
   const claimOutput: ClaimEncryptionPrekeyOutput = ClaimEncryptionPrekeyOutputSchema.parse(
     JSON.parse(row.claim_json),
   );
-  const rawBundle: unknown = database
-    .query<unknown, [string, number]>(`
-      SELECT bundle_json FROM e2ee_key_bundles
-      WHERE agent_id = ? AND agent_generation = ?
-    `)
-    .get(claimInput.sender_id, row.sender_generation);
-  if (rawBundle === null || typeof rawBundle !== "object") {
-    throw new Error("Sender has no current E2E signing bundle");
-  }
-  const bundleJson: unknown = Reflect.get(rawBundle, "bundle_json");
-  if (typeof bundleJson !== "string") throw new Error("Stored E2E sender bundle is invalid");
-  const bundle: PublicAgentKeyBundleDto = PublicAgentKeyBundleDtoSchema.parse(
-    JSON.parse(bundleJson),
+  requireCurrentClaimRecipient(
+    claimOutput.bundle,
+    currentBundle(database, claimInput.recipient_id, row.recipient_generation),
+  );
+  const bundle: PublicAgentKeyBundleDto = currentBundle(
+    database,
+    claimInput.sender_id,
+    row.sender_generation,
   );
   return { claimInput, claimOutput, senderChain: senderChainFromBundle(bundle) };
 }

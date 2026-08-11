@@ -37,8 +37,11 @@ const DATA_TOOLS: readonly string[] = [
 ];
 const TENANT_ADMIN_TOOLS: readonly string[] = [
   "create_access_token",
+  "get_e2ee_entitlement",
   "list_access_tokens",
+  "reset_e2ee_identity",
   "revoke_access_token",
+  "transition_e2ee",
 ];
 const WORKER_ORCHESTRATION_TOOLS: readonly string[] = ["ask_orchestrator", "get_orchestrator"];
 const ADMIN_ORCHESTRATION_TOOLS: readonly string[] = [
@@ -88,7 +91,7 @@ describe("MCP role-to-tool exposure", (): void => {
     expect(names(exposure(tenantAgent))).toEqual(DATA_TOOLS);
   });
 
-  test("tenant administrators add only tenant token lifecycle tools", (): void => {
+  test("tenant administrators add only tenant lifecycle tools", (): void => {
     const principal: HostedPrincipal = {
       kind: "tenant",
       role: "tenant_admin",
@@ -110,6 +113,7 @@ describe("MCP role-to-tool exposure", (): void => {
       retainedCiphertextMessages: 0,
       state: "enforced",
       trustPolicyVersion: 1,
+      unprovisionedActiveAgents: 0,
       unreadPlaintextMessages: 0,
     });
     expect(names({ ...exposure(principal), e2eeEntitlement: entitlement })).toEqual(
@@ -171,6 +175,7 @@ describe("MCP role-to-tool exposure", (): void => {
       retainedCiphertextMessages: 0,
       state: "enforced",
       trustPolicyVersion: 1,
+      unprovisionedActiveAgents: 0,
       unreadPlaintextMessages: 0,
     });
     const worker: HostedPrincipal = {

@@ -1,9 +1,12 @@
 import { expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage, MessageExtraInfo } from "@modelcontextprotocol/sdk/types.js";
 
-import { formatSetupResult, runCli, type SetupAction, setup } from "../src/cli.js";
+import { formatSetupResult, runCli, runCliAsync, type SetupAction, setup } from "../src/cli.js";
 import {
   type AgentClient,
   AgentId,
@@ -65,6 +68,48 @@ test("CLI setup parsing fails before mutation for incomplete or unsafe input", (
       "/definitely/missing/murmur-e2ee-proxy",
     ]),
   ).toThrow("E2E proxy executable not found");
+  expect((): readonly string[] =>
+    setup([
+      "--user",
+      "--claude",
+      "--replace",
+      "--hook-executable",
+      "/definitely/missing/murmur-hook",
+    ]),
+  ).toThrow("Hook executable not found");
+});
+
+test("async CLI dispatch exposes E2E help without opening a vault", async (): Promise<void> => {
+  expect(await runCliAsync(["e2ee", "--help"])).toContain("Murmur local end-to-end encryption");
+});
+
+test("direct setup installs E2E configuration only inside the selected user directories", (): void => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-entrypoint-"));
+  const originalClaude: string | undefined = process.env["CLAUDE_CONFIG_DIR"];
+  const originalCodex: string | undefined = process.env["CODEX_HOME"];
+  const originalHome: string | undefined = process.env["HOME"];
+  try {
+    process.env["CLAUDE_CONFIG_DIR"] = join(directory, "claude");
+    process.env["CODEX_HOME"] = join(directory, "codex");
+    process.env["HOME"] = directory;
+    expect(
+      setup([
+        "--user",
+        "--codex",
+        "--e2ee",
+        "--replace",
+        "--hook-executable",
+        import.meta.path,
+        "--proxy-executable",
+        import.meta.path,
+      ]),
+    ).toHaveLength(2);
+  } finally {
+    process.env["CLAUDE_CONFIG_DIR"] = originalClaude;
+    process.env["CODEX_HOME"] = originalCodex;
+    process.env["HOME"] = originalHome;
+    rmSync(directory, { force: true, recursive: true });
+  }
 });
 
 test("stdio entrypoint installs deterministic signal shutdown handlers", async (): Promise<void> => {

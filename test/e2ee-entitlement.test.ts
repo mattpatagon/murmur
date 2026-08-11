@@ -21,6 +21,7 @@ function entitlement(
     retainedCiphertextMessages: 0,
     state,
     trustPolicyVersion: state === "enforced" ? 1 : null,
+    unprovisionedActiveAgents: 0,
     unreadPlaintextMessages: 0,
     ...overrides,
   });
@@ -34,6 +35,7 @@ test("validates stored entitlement invariants at the database boundary", (): voi
         retainedCiphertextMessages: 0,
         state: "off",
         trustPolicyVersion: null,
+        unprovisionedActiveAgents: 0,
         unreadPlaintextMessages: 0,
       }),
   ).toThrow("cannot block plaintext writes");
@@ -44,6 +46,7 @@ test("validates stored entitlement invariants at the database boundary", (): voi
         retainedCiphertextMessages: 1,
         state: "enforced",
         trustPolicyVersion: 1,
+        unprovisionedActiveAgents: 0,
         unreadPlaintextMessages: 1,
       }),
   ).toThrow("incomplete");
@@ -54,12 +57,13 @@ test("validates stored entitlement invariants at the database boundary", (): voi
         retainedCiphertextMessages: -1,
         state: "off",
         trustPolicyVersion: null,
+        unprovisionedActiveAgents: 0,
         unreadPlaintextMessages: 0,
       }),
   ).toThrow();
 });
 
-test("cuts over only after blocking writes, draining backlog, and installing trust", (): void => {
+test("cuts over only after write blocking, key provisioning, backlog drain, and trust", (): void => {
   const provisioning: E2eeEntitlementRecord = beginE2eeProvisioning(entitlement("off"));
   expect(provisioning).toMatchObject({ plaintextWritesBlocked: false, state: "provisioning" });
   expect((): E2eeEntitlementRecord => completeE2eeEnforcement(provisioning)).toThrow(
@@ -73,9 +77,17 @@ test("cuts over only after blocking writes, draining backlog, and installing tru
   expect((): E2eeEntitlementRecord => completeE2eeEnforcement(blocked)).toThrow(
     "backlog to be drained",
   );
-  const enforced: E2eeEntitlementRecord = completeE2eeEnforcement({
+  const undrainedKeys: E2eeEntitlementRecord = {
     ...blocked,
+    unprovisionedActiveAgents: 1,
     unreadPlaintextMessages: 0,
+  };
+  expect((): E2eeEntitlementRecord => completeE2eeEnforcement(undrainedKeys)).toThrow(
+    "every active agent to publish keys",
+  );
+  const enforced: E2eeEntitlementRecord = completeE2eeEnforcement({
+    ...undrainedKeys,
+    unprovisionedActiveAgents: 0,
   });
   expect(enforced).toMatchObject({
     plaintextWritesBlocked: true,

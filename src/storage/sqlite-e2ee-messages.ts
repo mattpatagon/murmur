@@ -38,8 +38,8 @@ import {
 import {
   e2eeEnvelopeJson,
   encryptedCiphertextBytes,
-  senderChainFromBundle,
   type StoredEncryptionClaim,
+  senderChainFromBundle,
   validateEnvelopeForClaim,
 } from "./e2ee-store-validation.js";
 import {

@@ -35,6 +35,7 @@ import type {
 } from "../src/e2ee/wire-tools.js";
 import type { E2eeMessageStore } from "../src/storage/e2ee-message-store.js";
 import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
+import { testE2eeBundleWithRevokedAgentKey } from "./support/e2ee-hosted-crypto.js";
 
 const NOW: string = "2026-08-10T20:00:00.000Z";
 const CREATED: string = "2026-08-10T19:00:00.000Z";
@@ -262,6 +263,20 @@ test("SQLite stores verified direct ciphertext with atomic retry and inbox seman
       sender_id: "alice",
     });
     expect(fallbackClaim.prekey_class).toBe("fallback");
+    const fallbackPut: PutEncryptedMessageInput = await encryptedPut(alice, bob, fallbackClaim, {
+      broadcastId: null,
+      idempotencyKey: "revoked-direct",
+      messageId: "22222222-2222-4222-8222-222222222222",
+      pairCounter: 2,
+      threadId: "thread-revoked",
+    });
+    await encrypted.publishAgentKeyBundle({
+      agent_id: "bob",
+      bundle: await testE2eeBundleWithRevokedAgentKey(bob, "bob", new Date(NOW)),
+    });
+    await expect(encrypted.putEncryptedMessage(fallbackPut)).rejects.toThrow(
+      "recipient signing key was revoked",
+    );
   } finally {
     store.close();
   }
@@ -446,6 +461,27 @@ test("SQLite keeps encrypted broadcasts invisible until complete atomic commit",
     expect(
       await encrypted.commitEncryptedBroadcast({ broadcast_id: prepared.broadcast_id }),
     ).toMatchObject({ duplicate: true });
+
+    const cancelled: PrepareEncryptedBroadcastOutput = await encrypted.prepareEncryptedBroadcast({
+      audience: { repository: "mattpatagon/murmur" },
+      context: {
+        branch: "feature/e2ee",
+        client: "codex",
+        repository: "mattpatagon/murmur",
+      },
+      idempotency_key: "broadcast-cancelled",
+      sender_id: "alice",
+    });
+    expect(
+      await encrypted.cancelEncryptedBroadcast({ broadcast_id: cancelled.broadcast_id }),
+    ).toEqual({ cancelled: true });
+    expect(
+      await encrypted.cancelEncryptedBroadcast({ broadcast_id: cancelled.broadcast_id }),
+    ).toEqual({ cancelled: true });
+    expect(
+      (): ReturnType<E2eeMessageStore["commitEncryptedBroadcast"]> =>
+        encrypted.commitEncryptedBroadcast({ broadcast_id: cancelled.broadcast_id }),
+    ).toThrow("unavailable or expired");
   } finally {
     store.close();
   }

@@ -1,5 +1,6 @@
 import { RETENTION_DAYS } from "../domain/contracts.js";
 import type {
+  AgentKeyRevocationDto,
   EncryptedEnvelopeDto,
   PrekeyCertificateDto,
   PublicAgentKeyBundleDto,
@@ -52,6 +53,53 @@ export function senderChainFromBundle(bundleInput: unknown): PublicAgentSigningC
     root_key_id: bundle.root_key_id,
     root_public_key: bundle.root_public_key,
   });
+}
+
+export function claimablePublicBundle(
+  bundleInput: unknown,
+  nowIso: string,
+): PublicAgentKeyBundleDto {
+  const bundle: PublicAgentKeyBundleDto = PublicAgentKeyBundleDtoSchema.parse(bundleInput);
+  const now: number = Date.parse(nowIso);
+  const agentCreatedAt: number = Date.parse(bundle.agent_certificate.created_at);
+  const agentExpiresAt: number = Date.parse(bundle.agent_certificate.expires_at);
+  const fallbackCreatedAt: number = Date.parse(bundle.fallback_prekey.created_at);
+  const fallbackExpiresAt: number = Date.parse(bundle.fallback_prekey.expires_at);
+  if (
+    !Number.isFinite(now) ||
+    agentCreatedAt > now ||
+    agentExpiresAt <= now ||
+    fallbackCreatedAt > now ||
+    fallbackExpiresAt <= now
+  ) {
+    throw new Error("Published E2E certificate window is not currently valid");
+  }
+  return PublicAgentKeyBundleDtoSchema.parse({
+    ...bundle,
+    one_time_prekeys: bundle.one_time_prekeys.filter(
+      (prekey: PrekeyCertificateDto): boolean =>
+        Date.parse(prekey.created_at) <= now && Date.parse(prekey.expires_at) > now,
+    ),
+  });
+}
+
+export function requireCurrentClaimRecipient(
+  claimedBundleInput: unknown,
+  currentBundleInput: unknown,
+): void {
+  const claimed: PublicAgentKeyBundleDto = PublicAgentKeyBundleDtoSchema.parse(claimedBundleInput);
+  const current: PublicAgentKeyBundleDto = PublicAgentKeyBundleDtoSchema.parse(currentBundleInput);
+  const currentRevocations: readonly AgentKeyRevocationDto[] =
+    current.agent_key_revocations === undefined ? [] : current.agent_key_revocations;
+  if (
+    claimed.root_key_id !== current.root_key_id ||
+    currentRevocations.some(
+      (revocation: AgentKeyRevocationDto): boolean =>
+        revocation.revoked_signing_key_id === claimed.agent_certificate.signing_key_id,
+    )
+  ) {
+    throw new Error("Encryption claim recipient signing key was revoked");
+  }
 }
 
 export function e2eeEnvelopeJson(envelopeInput: unknown): string {

@@ -81,7 +81,9 @@ export type CachedMessage = {
   readonly plaintext: string;
   readonly recipientId: string;
   readonly senderId: string;
+  readonly tenantSequence: number;
   readonly tenantId: string;
+  readonly wireDigest: Uint8Array;
 };
 
 type RootKeyRow = {
@@ -161,7 +163,9 @@ type CachedMessageRow = {
   readonly plaintext: string;
   readonly recipient_id: string;
   readonly sender_id: string;
+  readonly tenant_sequence: number;
   readonly tenant_id: string;
+  readonly wire_digest: Uint8Array;
 };
 
 type SentReceiptRow = {
@@ -248,7 +252,9 @@ const CachedMessageRowSchema: z.ZodType<CachedMessageRow> = z.strictObject({
   plaintext: z.string(),
   recipient_id: z.string(),
   sender_id: z.string(),
+  tenant_sequence: SafeSqlIntegerSchema,
   tenant_id: z.string(),
+  wire_digest: BytesSchema.refine((value: Uint8Array): boolean => value.byteLength === 32),
 });
 const SentReceiptRowSchema: z.ZodType<SentReceiptRow> = z.strictObject({
   claim_id: z.string(),
@@ -371,7 +377,9 @@ export function mapCachedMessageRow(input: unknown): CachedMessage {
     plaintext: row.plaintext,
     recipientId: row.recipient_id,
     senderId: row.sender_id,
+    tenantSequence: row.tenant_sequence,
     tenantId: row.tenant_id,
+    wireDigest: row.wire_digest,
   };
 }
 

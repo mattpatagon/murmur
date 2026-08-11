@@ -41,7 +41,6 @@ import {
   CreateOperatorTokenInputSchema,
   CreateTenantInputSchema,
   CreateTenantOutputSchema,
-  CreateTokenInputSchema,
   IssuedOperatorTokenOutputSchema,
   IssuedTokenOutputSchema,
   ListAdminAuditInputSchema,
@@ -50,8 +49,6 @@ import {
   ListOperatorTokensOutputSchema,
   ListTenantsInputSchema,
   ListTenantsOutputSchema,
-  ListTokensInputSchema,
-  ListTokensOutputSchema,
   MintTenantAdminTokenInputSchema,
   RevokeTokenInputSchema,
   RevokeTokenOutputSchema,
@@ -66,6 +63,7 @@ import {
   tenantAdminOrchestrationTools,
   workerOrchestrationTools,
 } from "./murmur-orchestration-tool-definitions.js";
+import { tenantAdminTools } from "./murmur-tenant-admin-tool-definitions.js";
 import type { E2eeEntitlementRecord, ToolExposure } from "./murmur-tool-exposure.js";
 import { toolDefinition } from "./tool-definition.js";
 
@@ -249,49 +247,6 @@ function dataTools(): Tool[] {
         idempotentHint: true,
         readOnlyHint: false,
         title: "Withdraw coordination notice",
-      },
-    ),
-  ];
-}
-function tenantAdminTools(): Tool[] {
-  return [
-    toolDefinition(
-      "create_access_token",
-      "Create tenant access token",
-      "Create an agent or tenant-administrator token for the authenticated tenant. The secret is returned exactly once; store it securely.",
-      CreateTokenInputSchema,
-      IssuedTokenOutputSchema,
-      {
-        destructiveHint: false,
-        idempotentHint: false,
-        readOnlyHint: false,
-        title: "Create tenant access token",
-      },
-    ),
-    toolDefinition(
-      "list_access_tokens",
-      "List tenant access tokens",
-      "List one cursor-paginated page of token identifiers and lifecycle timestamps for the authenticated tenant. Token secrets are never returned.",
-      ListTokensInputSchema,
-      ListTokensOutputSchema,
-      {
-        destructiveHint: false,
-        idempotentHint: true,
-        readOnlyHint: true,
-        title: "List tenant access tokens",
-      },
-    ),
-    toolDefinition(
-      "revoke_access_token",
-      "Revoke tenant access token",
-      "Immediately revoke one access token in the authenticated tenant and close its live MCP sessions.",
-      RevokeTokenInputSchema,
-      RevokeTokenOutputSchema,
-      {
-        destructiveHint: true,
-        idempotentHint: true,
-        readOnlyHint: false,
-        title: "Revoke tenant access token",
       },
     ),
   ];

@@ -36,6 +36,7 @@ import {
 } from "./wire-tools.js";
 
 const MAX_CLOCK_SKEW_MS: number = 5 * 60 * 1000;
+const utf8Encoder: TextEncoder = new TextEncoder();
 
 export type EncryptionProof = {
   readonly contextBinding: "verified";
@@ -165,13 +166,31 @@ async function verifySender(
   return { chain, verificationMode: pin.verificationMode };
 }
 
-function cachedMatches(cached: CachedMessage, envelope: EncryptedEnvelope): boolean {
+function receivedWireDigest(message: EncryptedMessageDto): Uint8Array {
+  const bytes: Uint8Array = utf8Encoder.encode(
+    JSON.stringify({ envelope: message.envelope, sender_chain: message.sender_chain }),
+  );
+  try {
+    return sodium.crypto_generichash(32, bytes, null);
+  } finally {
+    sodium.memzero(bytes);
+  }
+}
+
+function cachedMatches(
+  cached: CachedMessage,
+  envelope: EncryptedEnvelope,
+  message: EncryptedMessageDto,
+  wireDigest: Uint8Array,
+): boolean {
   return (
     cached.tenantId === envelope.header.tenantId &&
     cached.senderId === envelope.header.senderId &&
     cached.recipientId === envelope.header.recipientId &&
     cached.pairCounter === envelope.header.pairCounter &&
-    cached.expiresAt === envelope.header.expiresAt
+    cached.expiresAt === envelope.header.expiresAt &&
+    cached.tenantSequence === message.tenant_sequence &&
+    sodium.memcmp(cached.wireDigest, wireDigest)
   );
 }
 
@@ -196,10 +215,13 @@ async function decryptOne(
     trustOnFirstUse,
   );
   await verifyEnvelopeSignature(envelope, sender.chain.agentCertificate.signingPublicKey);
+  const wireDigest: Uint8Array = receivedWireDigest(message);
   const cached: CachedMessage | null = vault.getCachedMessage(envelope.header.messageId);
   let plaintext: string;
   if (cached !== null) {
-    if (!cachedMatches(cached, envelope)) throw new Error("Encrypted message verification failed");
+    if (!cachedMatches(cached, envelope, message, wireDigest)) {
+      throw new Error("Encrypted message verification failed");
+    }
     plaintext = cached.plaintext;
   } else {
     const prekey: StoredPrekey | null = vault.keys.getPrekey(envelope.header.recipientPrekeyId);
@@ -225,8 +247,10 @@ async function decryptOne(
       prekeyId: envelope.header.recipientPrekeyId,
       recipientId,
       senderId: envelope.header.senderId,
+      tenantSequence: message.tenant_sequence,
       tenantId,
       verifiedAt: now.toISOString(),
+      wireDigest,
     });
   }
   return {

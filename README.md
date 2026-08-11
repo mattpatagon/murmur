@@ -137,7 +137,10 @@ the cumulative revocation set. Moving to a new machine creates a new installatio
 the private vault as part of setup: import the organization trust policy, independently verify its
 issuer, then use the tenant's audited identity-reset procedure when retaining the same agent ID.
 See the [E2E protocol](docs/e2ee-protocol.md) for canonical bytes, verification rules, metadata
-exposure, retries, and broadcast atomicity.
+exposure, retries, and broadcast atomicity. Tenant administrators must follow the
+[hosted E2E cutover and recovery runbook](docs/hosted-e2ee-operations.md); every state change closes
+the tenant's live sessions, and enforcement fails until active endpoints publish keys and the
+plaintext backlog is drained.
 
 ## Local stdio mode
 
@@ -222,7 +225,7 @@ generation is unavailable, the hook makes no destructive lifecycle call and the 
 | --- | --- |
 | Agent | Data tools (`register_agent`, lifecycle, inbox, history, messaging, and notices) plus `get_orchestrator` and `ask_orchestrator` in strict hosted mode |
 | Orchestrator | Data tools bound to its reserved agent ID, plus `get_orchestrator` and `get_delegation` |
-| Tenant admin | Agent tools plus token lifecycle and orchestrator token/policy administration |
+| Tenant admin | Agent tools plus token lifecycle, orchestrator administration, and authenticated-tenant E2E cutover/recovery |
 | Operator | Tenant lifecycle, tenant-admin minting, operator-token rotation, and admin audit tools; no tenant data tools |
 | Bootstrap | `bootstrap_operator` only, until the first operator is committed |
 
@@ -257,6 +260,7 @@ Notice storage is capped at 10,000 records and 64 MiB of content per tenant. Mes
 notice content remain separate quotas.
 
 See [Hosted deployment](docs/hosted-deployment.md),
+[hosted E2E operations](docs/hosted-e2ee-operations.md),
 [operator recovery](docs/operator-recovery.md), and `.env.example` for the
 deployment, break-glass, TLS, and tuning contracts.
 
@@ -294,6 +298,7 @@ Dependencies are exact-pinned, installs use the frozen Bun lockfile, and
 - [Code of conduct](CODE_OF_CONDUCT.md)
 - [Architecture](docs/architecture.md)
 - [End-to-end encryption protocol](docs/e2ee-protocol.md)
+- [Hosted E2E cutover and recovery](docs/hosted-e2ee-operations.md)
 - [Orchestrator authority and delegation](docs/orchestration.md)
 - [Observability](docs/observability.md)
 - [Upgrade policy](docs/upgrading.md)

@@ -8,8 +8,8 @@ import {
   MessageHistoryOutputSchema,
   toHistoryMessageDto,
 } from "../domain/history-contracts.js";
-import type { GetMessagesQuery, Message } from "../domain/models.js";
 import type { AgentGeneration } from "../domain/lifecycle-values.js";
+import type { GetMessagesQuery, Message } from "../domain/models.js";
 import type { AgentId } from "../domain/value-objects.js";
 import type { MessageStore } from "../storage/message-store.js";
 import { toolResult } from "./murmur-tool-results.js";

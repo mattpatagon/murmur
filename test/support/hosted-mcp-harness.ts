@@ -35,14 +35,18 @@ const ResourceUpdatedEnvelopeSchema: z.ZodType<{
   params: z.object({ uri: z.string() }),
 });
 
-export function headers(token: string, sessionId: string | null = null): Headers {
+export function headers(
+  token: string,
+  sessionId: string | null = null,
+  repository: string = "mattpatagon/murmur",
+): Headers {
   const value: Headers = new Headers({
     Accept: "application/json, text/event-stream",
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
     "X-Murmur-Branch": "feature/hosted-isolation",
     "X-Murmur-Client": "codex",
-    "X-Murmur-Repository": "mattpatagon/murmur",
+    "X-Murmur-Repository": repository,
   });
   if (sessionId !== null) {
     value.set("Mcp-Session-Id", sessionId);
@@ -72,12 +76,50 @@ export async function post(
   token: string,
   sessionId: string | null,
   body: Record<string, unknown>,
+  repository: string = "mattpatagon/murmur",
 ): Promise<Response> {
   return await fetch(url, {
     body: JSON.stringify(body),
-    headers: headers(token, sessionId),
+    headers: headers(token, sessionId, repository),
     method: "POST",
   });
+}
+
+export async function initializeForRepository(
+  url: URL,
+  token: string,
+  clientName: string,
+  repository: string,
+): Promise<string> {
+  const response: Response = await post(
+    url,
+    token,
+    null,
+    {
+      id: 1,
+      jsonrpc: "2.0",
+      method: "initialize",
+      params: {
+        capabilities: {},
+        clientInfo: { name: clientName, version: "1.0.0" },
+        protocolVersion: LATEST_PROTOCOL_VERSION,
+      },
+    },
+    repository,
+  );
+  expect(response.status).toBe(200);
+  JsonRpcEnvelopeSchema.parse(await payload(response));
+  const sessionId: string | null = response.headers.get("mcp-session-id");
+  if (sessionId === null) throw new Error("Hosted MCP initialize omitted its session ID");
+  const initialized: Response = await post(
+    url,
+    token,
+    sessionId,
+    { jsonrpc: "2.0", method: "notifications/initialized" },
+    repository,
+  );
+  expect(initialized.status).toBe(202);
+  return sessionId;
 }
 
 export async function initialize(url: URL, token: string, clientName: string): Promise<string> {

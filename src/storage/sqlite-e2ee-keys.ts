@@ -12,7 +12,10 @@ import type {
   PrekeyCertificateDto,
   PublicAgentKeyBundleDto,
 } from "../e2ee/wire-contracts.js";
-import { PublicAgentKeyBundleDtoSchema } from "../e2ee/wire-contracts.js";
+import {
+  PrekeyCertificateDtoSchema,
+  PublicAgentKeyBundleDtoSchema,
+} from "../e2ee/wire-contracts.js";
 import {
   type ClaimEncryptionPrekeyInput,
   ClaimEncryptionPrekeyInputSchema,
@@ -24,6 +27,8 @@ import {
   type PublishAgentKeyBundleOutput,
   PublishAgentKeyBundleOutputSchema,
 } from "../e2ee/wire-tools.js";
+import { claimablePublicBundle } from "./e2ee-store-validation.js";
+import { renewSqliteSession } from "./sqlite-agent-lifecycle-store.js";
 import {
   type SqliteE2eeAgentRow,
   SqliteE2eeAgentRowSchema,
@@ -32,7 +37,6 @@ import {
   SqliteE2eeCountRowSchema,
 } from "./sqlite-e2ee-rows.js";
 import { updateSqliteE2eeUsage } from "./sqlite-e2ee-usage.js";
-import { renewSqliteSession } from "./sqlite-agent-lifecycle-store.js";
 
 const CLAIM_MINUTES: number = 5;
 type PrekeyRow = {
@@ -294,27 +298,35 @@ function selectedPrekey(
   database: Database,
   recipient: SqliteE2eeAgentRow,
   bundle: PublicAgentKeyBundleDto,
+  now: Instant,
 ): PrekeyCertificateDto {
-  const raw: unknown = database
+  const rawRows: unknown[] = database
     .query<unknown, [string, number]>(`
-      SELECT certificate_json FROM e2ee_prekeys
-      WHERE agent_id = ? AND agent_generation = ? AND prekey_class = 'one_time'
+      SELECT certificate_json, claimed_at, prekey_class FROM e2ee_prekeys
+      WHERE agent_id = ? AND agent_generation = ?
         AND claimed_at IS NULL AND retired_at IS NULL
-      ORDER BY prekey_id ASC LIMIT 1
+      ORDER BY CASE WHEN prekey_class = 'one_time' THEN 0 ELSE 1 END, prekey_id ASC
     `)
-    .get(recipient.agent_id, recipient.generation);
-  if (raw === null) return bundle.fallback_prekey;
-  if (typeof raw !== "object") throw new Error("Stored E2E prekey is invalid");
-  const certificateJson: unknown = Reflect.get(raw, "certificate_json");
-  if (typeof certificateJson !== "string") throw new Error("Stored E2E prekey is invalid");
-  const parsed: unknown = JSON.parse(certificateJson);
-  const match: PrekeyCertificateDto | undefined = bundle.one_time_prekeys.find(
-    (candidate: PrekeyCertificateDto): boolean =>
-      candidate.prekey_id ===
-      (typeof parsed === "object" && parsed !== null ? Reflect.get(parsed, "prekey_id") : null),
-  );
-  if (match === undefined) throw new Error("Stored E2E prekey is absent from its bundle");
-  return match;
+    .all(recipient.agent_id, recipient.generation);
+  for (const raw of rawRows) {
+    const row: PrekeyRow = PrekeyRowSchema.parse(raw);
+    const certificate: PrekeyCertificateDto = PrekeyCertificateDtoSchema.parse(
+      JSON.parse(row.certificate_json),
+    );
+    if (Date.parse(certificate.expires_at) <= now.toEpochMilliseconds()) continue;
+    const match: PrekeyCertificateDto | undefined =
+      row.prekey_class === "fallback"
+        ? bundle.fallback_prekey
+        : bundle.one_time_prekeys.find(
+            (candidate: PrekeyCertificateDto): boolean =>
+              candidate.prekey_id === certificate.prekey_id,
+          );
+    if (match === undefined || JSON.stringify(match) !== row.certificate_json) {
+      throw new Error("Stored E2E prekey is absent from its bundle");
+    }
+    return match;
+  }
+  throw new Error("Recipient has no currently valid E2E prekey");
 }
 
 export function claimSqliteEncryptionPrekeyInTransaction(
@@ -332,9 +344,11 @@ export function claimSqliteEncryptionPrekeyInTransaction(
     input.session_key === undefined ? SessionKey.default() : SessionKey.parse(input.session_key),
   );
   const recipient: SqliteE2eeAgentRow = activeAgent(database, input.recipient_id, now, null);
-  const bundle: PublicAgentKeyBundleDto = currentBundle(database, recipient);
-  validateBundleWindow(bundle, now);
-  const prekey: PrekeyCertificateDto = selectedPrekey(database, recipient, bundle);
+  const bundle: PublicAgentKeyBundleDto = claimablePublicBundle(
+    currentBundle(database, recipient),
+    now.toISOString(),
+  );
+  const prekey: PrekeyCertificateDto = selectedPrekey(database, recipient, bundle, now);
   if (prekey.prekey_class === "one_time") {
     const changes: number = database
       .query<unknown, [string, string]>(`

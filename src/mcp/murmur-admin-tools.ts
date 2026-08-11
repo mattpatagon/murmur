@@ -63,11 +63,13 @@ import type {
   TenantSummary,
   TokenSummary,
 } from "../hosted/control-plane.js";
+import { callE2eeAdminTool } from "./murmur-e2ee-admin-tools.js";
 import { toolResult } from "./murmur-tool-results.js";
 
 export type AdminToolContext = {
   readonly controlPlane: HostedControlPlane;
   readonly legacyCredentialHash: Buffer | null;
+  readonly onE2eeStateChanged: ((tenantId: TenantId) => Promise<void>) | null;
   readonly onTenantSuspended: ((tenantId: TenantId) => Promise<void>) | null;
   readonly onTokenRevoked: ((tokenId: string) => Promise<void>) | null;
   readonly tenantOnboardingEnabled: boolean;
@@ -84,6 +86,14 @@ export async function callTenantAdminTool(
   context: AdminToolContext,
 ): Promise<CallToolResult | null> {
   const controlPlane: HostedControlPlane = context.controlPlane;
+  const e2eeResult: CallToolResult | null = await callE2eeAdminTool(
+    name,
+    argumentsValue,
+    principal,
+    controlPlane,
+    context.onE2eeStateChanged,
+  );
+  if (e2eeResult !== null) return e2eeResult;
   switch (name) {
     case "create_access_token": {
       const input: CreateTokenInput = CreateTokenInputSchema.parse(argumentsValue);

@@ -18,6 +18,7 @@ import {
 } from "../src/hosted/authenticator.js";
 import { type HttpServerConfig, parseHttpServerConfig } from "../src/http/http-config.js";
 import { createStore } from "../src/storage/create-store.js";
+import type { E2eeMessageStore } from "../src/storage/e2ee-message-store.js";
 import type { MessageStore } from "../src/storage/message-store.js";
 import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
 
@@ -164,6 +165,14 @@ test("SQLite scope and shutdown boundaries fail closed", (): void => {
   expect(store.scope(TenantId.founding())).toBe(store);
   expect(
     (): MessageStore => store.scope(TenantId.parse("00000000-0000-4000-8000-000000000002")),
+  ).toThrow("SQLite storage supports only the founding tenant");
+  expect((): unknown =>
+    store.scopeE2ee(TenantId.parse("00000000-0000-4000-8000-000000000002")),
+  ).toThrow("SQLite storage supports only the founding tenant");
+  const encrypted: E2eeMessageStore = store.scopeE2ee(TenantId.founding());
+  expect(
+    (): E2eeMessageStore =>
+      encrypted.scopeE2ee(TenantId.parse("00000000-0000-4000-8000-000000000002")),
   ).toThrow("SQLite storage supports only the founding tenant");
   store.close();
   store.close();

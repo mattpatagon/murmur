@@ -28,8 +28,9 @@ import {
   toEffectiveOrchestratorDto,
 } from "../hosted/orchestration-contracts.js";
 import { logSafeError } from "../safe-errors.js";
-import type { E2eeMessageStore } from "../storage/e2ee-message-store.js";
+import type { E2eeMessageStore, E2eeOrchestrationScope } from "../storage/e2ee-message-store.js";
 import type { MessageStore } from "../storage/message-store.js";
+import { normalizePostgresStorageError } from "../storage/postgres-storage-errors.js";
 import {
   type AdminToolContext,
   callBootstrapTool,
@@ -60,6 +61,7 @@ export type MurmurApplicationDependencies = {
   readonly e2eeSleep?: ((milliseconds: number) => Promise<void>) | undefined;
   readonly e2eeStore?: E2eeMessageStore | null | undefined;
   readonly legacyCredentialHash?: Buffer | null;
+  readonly onE2eeStateChanged?: ((tenantId: TenantId) => Promise<void>) | undefined;
   readonly onTenantSuspended?: ((tenantId: TenantId) => Promise<void>) | undefined;
   readonly onTokenRevoked?: ((tokenId: string) => Promise<void>) | undefined;
   readonly onRepositoryDivergence?: (() => void) | undefined;
@@ -83,6 +85,7 @@ export class MurmurApplication {
   private readonly e2eeStore: E2eeMessageStore | null;
   private readonly exposedToolNames: ReadonlySet<string>;
   private readonly legacyCredentialHash: Buffer | null;
+  private readonly onE2eeStateChanged: ((tenantId: TenantId) => Promise<void>) | null;
   private readonly onTenantSuspended: ((tenantId: TenantId) => Promise<void>) | null;
   private readonly onTokenRevoked: ((tokenId: string) => Promise<void>) | null;
   private readonly onRepositoryDivergence: () => void;
@@ -110,6 +113,7 @@ export class MurmurApplication {
       (async (milliseconds: number): Promise<void> => await Bun.sleep(milliseconds));
     this.e2eeStore = dependencies.e2eeStore ?? null;
     this.legacyCredentialHash = dependencies.legacyCredentialHash ?? null;
+    this.onE2eeStateChanged = dependencies.onE2eeStateChanged ?? null;
     this.onTenantSuspended = dependencies.onTenantSuspended ?? null;
     this.onTokenRevoked = dependencies.onTokenRevoked ?? null;
     this.onRepositoryDivergence = dependencies.onRepositoryDivergence ?? ((): void => undefined);
@@ -218,6 +222,7 @@ export class MurmurApplication {
           boundAgentId: this.boundAgentId(),
           capability: this.e2eeCapability,
           entitlement: this.e2eeEntitlement,
+          orchestrationScope: this.e2eeOrchestrationScope(),
           resolveOrchestrator: this.e2eeOrchestratorResolver(),
           senderAuthority: this.senderAuthority(),
           sleep: this.e2eeSleep,
@@ -272,6 +277,7 @@ export class MurmurApplication {
         const adminContext: AdminToolContext = {
           controlPlane: this.controlPlane,
           legacyCredentialHash: this.legacyCredentialHash,
+          onE2eeStateChanged: this.onE2eeStateChanged,
           onTenantSuspended: this.onTenantSuspended,
           onTokenRevoked: this.onTokenRevoked,
           tenantOnboardingEnabled: this.tenantOnboardingEnabled,
@@ -306,7 +312,7 @@ export class MurmurApplication {
       }
       return toolError(new Error(`Unknown tool '${name}'`));
     } catch (error: unknown) {
-      return toolError(error);
+      return toolError(normalizePostgresStorageError(error));
     }
   }
 
@@ -332,6 +338,25 @@ export class MurmurApplication {
 
   private senderAuthority(): "orchestrator" | "peer" {
     return this.boundAgentId() === null ? "peer" : "orchestrator";
+  }
+
+  private e2eeOrchestrationScope(): E2eeOrchestrationScope | null {
+    if (
+      this.principal === null ||
+      this.principal.kind !== "tenant" ||
+      this.principal.personalId === undefined ||
+      this.principal.personalId === null
+    ) {
+      return null;
+    }
+    const repositoryName: string | null =
+      this.principal.repositoryName === undefined || this.principal.repositoryName === null
+        ? null
+        : this.principal.repositoryName.value;
+    return {
+      personalId: this.principal.personalId.value,
+      repositoryName,
+    };
   }
 
   private e2eeOrchestratorResolver(): (() => Promise<EffectiveOrchestratorDto | null>) | null {

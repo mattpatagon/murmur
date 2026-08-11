@@ -362,8 +362,10 @@ test("atomically caches plaintext, records replay state, and deletes a one-time 
         prekeyId: prekey.certificate.prekeyId,
         recipientId: "bob",
         senderId: "alice",
+        tenantSequence: 1,
         tenantId: "11111111-1111-4111-8111-111111111111",
         verifiedAt: "2026-08-10T17:01:00.000Z",
+        wireDigest: new Uint8Array(32).fill(9),
       };
       const cached: CachedMessage = first.cacheDecryptedAndConsumePrekey(input);
       expect(cached.plaintext).toBe(input.plaintext);
@@ -475,7 +477,7 @@ test("rejects a vault schema newer than the running binary", async (): Promise<v
     const path: string = join(directory, "future.sqlite");
     mkdirSync(directory, { recursive: true });
     const database: Database = new Database(path, { create: true, readwrite: true });
-    database.exec("PRAGMA user_version = 10");
+    database.exec("PRAGMA user_version = 11");
     database.close(false);
     expect((): LocalE2eeVault => new LocalE2eeVault(path, "linux")).toThrow("newer");
   });

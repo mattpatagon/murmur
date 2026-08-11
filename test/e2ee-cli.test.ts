@@ -79,9 +79,7 @@ test("local E2E CLI binds trust to the authenticated tenant and exports public d
       await runE2eeCli(["rotate-agent-key", "--agent", AGENT_ID], cliRuntime),
     );
     expect(rotated).toMatchObject({ agent_id: AGENT_ID, root_key_id: fingerprint });
-    const replenished: unknown = JSON.parse(
-      await runE2eeCli(["replenish", "--agent", AGENT_ID], cliRuntime),
-    );
+    const replenished: unknown = JSON.parse(await runE2eeCli(["replenish"], cliRuntime));
     expect(replenished).toMatchObject({ fallback_available: 1, one_time_available: 20 });
     const revoked: unknown = JSON.parse(
       await runE2eeCli(
@@ -117,6 +115,47 @@ test("local E2E trust fails without a credential-derived active tenant", async (
     await expect(runE2eeCli(["status", "--unknown", "value"], runtime(path))).rejects.toThrow(
       "Unknown E2E command option",
     );
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("local E2E CLI rejects malformed options and ambiguous local identity", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-e2ee-cli-boundaries-"));
+  const path: string = join(directory, "vault.sqlite");
+  const cliRuntime: E2eeCliRuntime = runtime(path);
+  try {
+    await expect(runE2eeCli(["status", "unexpected"], cliRuntime)).rejects.toThrow(
+      "Unexpected E2E command argument",
+    );
+    await expect(runE2eeCli(["status", "--vault-path"], cliRuntime)).rejects.toThrow(
+      "--vault-path requires a value",
+    );
+    await expect(
+      runE2eeCli(["rotate-agent-key", "--agent", AGENT_ID, "--agent", PEER_ID], cliRuntime),
+    ).rejects.toThrow("Duplicate E2E command option");
+    await expect(runE2eeCli(["rotate-agent-key"], cliRuntime)).rejects.toThrow(
+      "No local E2E agent key exists",
+    );
+    const ambiguous: LocalE2eeVault = new LocalE2eeVault(path, "linux");
+    try {
+      await ambiguous.keys.getOrCreateAgent(
+        AGENT_ID,
+        "2026-08-10T19:59:00.000Z",
+        "2026-11-08T19:59:00.000Z",
+      );
+      await ambiguous.keys.getOrCreateAgent(
+        PEER_ID,
+        "2026-08-10T19:59:00.000Z",
+        "2026-11-08T19:59:00.000Z",
+      );
+    } finally {
+      ambiguous.close();
+    }
+    await expect(runE2eeCli(["rotate-agent-key"], cliRuntime)).rejects.toThrow(
+      "More than one local E2E agent exists",
+    );
+    await expect(runE2eeCli(["unsupported"], cliRuntime)).rejects.toThrow("Unknown E2E command");
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }
