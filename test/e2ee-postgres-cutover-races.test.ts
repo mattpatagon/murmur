@@ -252,11 +252,17 @@ test.skipIf(!postgresConfigured)(
         );
       });
       await waitForBlockedQuery(observer, claimApplication, "e2ee_prekeys");
-      rollbackTask = tenant.rollback();
+      const pendingRollback: Promise<void> = tenant.rollback();
+      rollbackTask = pendingRollback;
+      const rollbackFailure: Promise<string> = pendingRollback.then(
+        (): string => "tenant E2E rollback unexpectedly succeeded",
+        (error: unknown): string =>
+          error instanceof Error ? error.message : "tenant E2E rollback rejected without an error",
+      );
       await waitForBlockedQuery(observer, tenant.applicationName, "tenant_transition_e2ee");
       releasePrekey.resolve();
       await claimTask;
-      await expect(rollbackTask).rejects.toThrow(
+      expect(await rollbackFailure).toBe(
         "tenant E2E rollback is unavailable while ciphertext is retained",
       );
       const raw: unknown = await observer`
