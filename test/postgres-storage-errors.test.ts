@@ -41,3 +41,17 @@ test("new lifecycle constraints never expose schema names while unrelated errors
   const unrelated: Error = postgresError("23505", "existing compatibility error");
   expect(normalizePostgresStorageError(unrelated)).toBe(unrelated);
 });
+
+test("E2E database failures preserve allowlisted guidance and hide schema details", (): void => {
+  const lifecycle: unknown = normalizePostgresStorageError(
+    postgresError("55000", "tenant E2E rollback is unavailable while ciphertext is retained"),
+  );
+  expect(lifecycle).toHaveProperty(
+    "message",
+    "tenant E2E rollback is unavailable while ciphertext is retained",
+  );
+  const constraint: unknown = normalizePostgresStorageError(
+    postgresError("23514", "internal check detail", "e2ee_messages_internal_check"),
+  );
+  expect(constraint).toHaveProperty("message", "Encrypted storage rejected the request");
+});

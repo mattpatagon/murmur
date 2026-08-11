@@ -7,6 +7,10 @@ import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 
 import { FOUNDING_TENANT_ID } from "../src/domain/value-objects.js";
 import {
+  type ProductionE2eeCanaryResult,
+  runProductionE2eeCanary,
+} from "./lib/production-e2ee-canary.js";
+import {
   assertCondition as assert,
   callProductionTool as call,
   callProductionToolExpectingError as callExpectingError,
@@ -39,6 +43,7 @@ async function main(): Promise<void> {
   let foundingSecret: string | null = null;
   let tenantId: string | null = null;
   let verified: boolean = false;
+  let e2eeResult: ProductionE2eeCanaryResult | null = null;
   let operationFailed: boolean = false;
   let operationError: unknown;
   const cleanupErrors: string[] = [];
@@ -377,6 +382,8 @@ async function main(): Promise<void> {
       "Operator audit trail omitted canary lifecycle events",
     );
 
+    e2eeResult = await runProductionE2eeCanary(operator, url, unique);
+
     const finalSuspension: Record<string, unknown> = await call(operator, "suspend_tenant", {
       tenant_id: tenantId,
     });
@@ -432,6 +439,7 @@ async function main(): Promise<void> {
         agent_lifecycle: true,
         cross_tenant_denials: true,
         direct_message: true,
+        e2ee: e2eeResult,
         generation_history: true,
         organization_broadcast: true,
         repository_notices: true,

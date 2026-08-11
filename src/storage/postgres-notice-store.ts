@@ -7,6 +7,7 @@ import {
   NoticeStateConflictError,
 } from "../domain/errors.js";
 import { NOTICE_AUDIT_DAYS, NoticeId, SessionKey } from "../domain/lifecycle-values.js";
+import type { Agent } from "../domain/models.js";
 import type {
   ListNoticesQuery,
   ListNoticesResult,
@@ -18,10 +19,9 @@ import type {
   WithdrawNoticeCommand,
   WithdrawNoticeResult,
 } from "../domain/notice-models.js";
-import type { Agent } from "../domain/models.js";
 import { Instant, type TenantId } from "../domain/value-objects.js";
-import { renewPostgresSessionInTransaction } from "./postgres-agent-lifecycle-store.js";
 import { mapNoticeRow, type NoticeRow, NoticeRowSchema } from "./notice-rows.js";
+import { renewPostgresSessionInTransaction } from "./postgres-agent-lifecycle-store.js";
 import {
   lockPostgresRecipientCommitOrder,
   setPostgresTenantContext,

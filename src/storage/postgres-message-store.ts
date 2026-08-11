@@ -44,9 +44,8 @@ import {
   postgresSslOptions,
 } from "../postgres-tls.js";
 import { logSafeError } from "../safe-errors.js";
+import type { E2eeMessageStore, E2eeMessageStoreProvider } from "./e2ee-message-store.js";
 import type { InboxSubscription, InboxUpdateHandler, MessageStore } from "./message-store.js";
-import { broadcastPostgresMessage } from "./postgres-broadcast-store.js";
-import { sendPostgresMessage } from "./postgres-direct-message-store.js";
 import {
   closePostgresAgent,
   endPostgresSession,
@@ -54,14 +53,23 @@ import {
   listPostgresAgents,
   registerPostgresAgent,
 } from "./postgres-agent-lifecycle-store.js";
+import { broadcastPostgresMessage } from "./postgres-broadcast-store.js";
+import { sendPostgresMessage } from "./postgres-direct-message-store.js";
+import {
+  createPostgresE2eeMessageStore,
+  type PostgresPlaintextInboxWatcher,
+} from "./postgres-e2ee-message-store.js";
+import { verifyPostgresE2eeSchema } from "./postgres-e2ee-schema.js";
 import {
   getPostgresInboxVersion,
   getPostgresMessages,
   markPostgresMessagesRead,
   pruneExpiredPostgresMessages,
 } from "./postgres-inbox-store.js";
-import { type InboxNotification, InboxNotificationSchema } from "./postgres-message-rows.js";
 import { prunePostgresLifecycle } from "./postgres-lifecycle-prune.js";
+import { type InboxNotification, InboxNotificationSchema } from "./postgres-message-rows.js";
+import { verifyPostgresMessageSchema } from "./postgres-message-schema.js";
+import { setPostgresTenantContext } from "./postgres-message-transactions.js";
 import {
   listPostgresNotices,
   postPostgresNotice,
@@ -69,8 +77,6 @@ import {
   resolvePostgresNotice,
   withdrawPostgresNotice,
 } from "./postgres-notice-store.js";
-import { verifyPostgresMessageSchema } from "./postgres-message-schema.js";
-import { setPostgresTenantContext } from "./postgres-message-transactions.js";
 import { normalizePostgresStorageError } from "./postgres-storage-errors.js";
 
 export { POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED } from "./postgres-message-transactions.js";
@@ -113,7 +119,7 @@ class CallbackInboxSubscription implements InboxSubscription {
   }
 }
 
-export class PostgresMessageStore implements MessageStore {
+export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvider {
   private readonly clock: Clock;
   private readonly database: Sql;
   private readonly ownsDatabase: boolean;
@@ -177,6 +183,29 @@ export class PostgresMessageStore implements MessageStore {
     return new PostgresMessageStore(this.database, this.clock, tenantId, this.shared, false);
   }
 
+  public scopeE2ee(tenantId: TenantId): E2eeMessageStore {
+    this.ensureOpen();
+    const scopedParent: PostgresMessageStore = new PostgresMessageStore(
+      this.database,
+      this.clock,
+      tenantId,
+      this.shared,
+      false,
+    );
+    const watcher: PostgresPlaintextInboxWatcher = async (
+      agentId: AgentId,
+      afterSequence: Sequence,
+      handler: InboxUpdateHandler,
+    ): Promise<InboxSubscription> => await scopedParent.watchInbox(agentId, afterSequence, handler);
+    return createPostgresE2eeMessageStore(
+      this.database,
+      this.clock,
+      tenantId,
+      (): void => this.ensureOpen(),
+      watcher,
+    );
+  }
+
   private async setTenantContext(transaction: TransactionSql): Promise<void> {
     await setPostgresTenantContext(transaction, this.tenantId);
   }
@@ -194,6 +223,7 @@ export class PostgresMessageStore implements MessageStore {
 
   private async ensureSchema(): Promise<void> {
     await verifyPostgresMessageSchema(this.database, this.tenantId);
+    await verifyPostgresE2eeSchema(this.database);
   }
 
   private enqueueNotification(payload: string): void {

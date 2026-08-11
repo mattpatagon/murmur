@@ -22,6 +22,7 @@ import {
   verifyHostedAgentLifecycleStorage,
 } from "./scenarios/hosted-agent-lifecycle.js";
 import { verifyHostedAgentLifecycleHardening } from "./scenarios/hosted-agent-lifecycle-hardening.js";
+import { verifyHostedE2ee } from "./scenarios/hosted-e2ee.js";
 import {
   type HostedOrchestrationResult,
   verifyHostedOrchestration,
@@ -359,7 +360,7 @@ test.skipIf(
         "register_agent",
         { agent_id: `operator-forbidden-${unique}`, display_name: "Forbidden" },
       );
-      expect(operatorDataError).toContain("cannot access tenant data");
+      expect(operatorDataError).toContain("Unknown tool");
       const operatorBootstrapError: string = await callToolExpectingError(
         server.mcpUrl,
         operatorToken,
@@ -385,9 +386,10 @@ test.skipIf(
       await verifyHostedTenantLifecycle(scenario);
       await verifyHostedAgentLifecycleStorage(scenario);
       await verifyHostedAgentLifecycleHardening(scenario);
+      await verifyHostedE2ee(scenario);
     } finally {
       await server.stop();
     }
   },
-  30_000,
+  60_000,
 );

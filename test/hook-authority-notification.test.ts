@@ -80,3 +80,32 @@ test("renders notification authority from the parsed inbox summary", async (): P
     rmSync(directory, { force: true, recursive: true });
   }
 });
+
+test("renders a singular coordination notice on session start", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-hook-notice-"));
+  try {
+    const output: HookOutput | null = await handleHook(
+      { cwd: "/work/repo", hook_event_name: "SessionStart" },
+      "codex",
+      {
+        cacheDirectory: directory,
+        checkInbox: async (): Promise<InboxSummary> => ({
+          inboxVersion: 1,
+          messageCount: 0,
+          noticeCount: 1,
+          senderIds: [],
+        }),
+        environment: {
+          HOME: directory,
+          MURMUR_API_TOKEN: "test-token",
+          MURMUR_MACHINE_ID: "vm",
+        },
+        now: 20_000,
+      },
+    );
+    if (output === null) throw new Error("Expected a hook notice");
+    expect(output.systemMessage).toBe("Murmur: 0 unread messages. 1 open coordination notice.");
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});

@@ -103,3 +103,41 @@ test("selects one client and reports an idempotent second setup", (): void => {
     rmSync(directory, { force: true, recursive: true });
   }
 });
+
+test("configures E2E clients through a local proxy without copying the token", (): void => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-cli-e2ee-"));
+  const proxyPath: string = join(directory, "murmur-e2ee-proxy");
+  try {
+    writeFileSync(proxyPath, "#!/usr/bin/env bun\n");
+    const result: CliResult = runCli(
+      [
+        "setup",
+        "--user",
+        "--e2ee",
+        "--replace",
+        "--hook-executable",
+        hookPath,
+        "--proxy-executable",
+        proxyPath,
+      ],
+      {
+        CLAUDE_CONFIG_DIR: join(directory, "claude"),
+        CODEX_HOME: join(directory, "codex"),
+        HOME: directory,
+        MURMUR_API_TOKEN: "must-not-be-written",
+      },
+    );
+    expect(result.exitCode).toBe(0);
+    const combined: string = [
+      readFileSync(join(directory, "claude", ".claude.json"), "utf8"),
+      readFileSync(join(directory, "claude", "settings.json"), "utf8"),
+      readFileSync(join(directory, "codex", "config.toml"), "utf8"),
+      readFileSync(join(directory, "codex", "hooks.json"), "utf8"),
+    ].join("\n");
+    expect(combined).toContain(proxyPath);
+    expect(combined).toContain("--e2ee");
+    expect(combined).not.toContain("must-not-be-written");
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});

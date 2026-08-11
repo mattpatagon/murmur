@@ -41,6 +41,7 @@ const ClaudeConfigurationSchema: z.ZodType<{
 const PackageManifestSchema: z.ZodType<{
   readonly bin: {
     readonly murmur: string;
+    readonly "murmur-e2ee-proxy": string;
     readonly "murmur-hook": string;
     readonly "murmur-mcp": string;
   };
@@ -53,6 +54,7 @@ const PackageManifestSchema: z.ZodType<{
   .object({
     bin: z.strictObject({
       murmur: z.string(),
+      "murmur-e2ee-proxy": z.string(),
       "murmur-hook": z.string(),
       "murmur-mcp": z.string(),
     }),
@@ -109,6 +111,7 @@ test("the package exposes a location-independent MCP executable", (): void => {
   const manifest: z.infer<typeof PackageManifestSchema> = PackageManifestSchema.parse(rawManifest);
 
   expect(manifest.bin.murmur).toBe("./src/cli.ts");
+  expect(manifest.bin["murmur-e2ee-proxy"]).toBe("./src/e2ee-proxy.ts");
   expect(manifest.bin["murmur-hook"]).toBe("./src/hook.ts");
   expect(manifest.bin["murmur-mcp"]).toBe("./src/server.ts");
   expect(manifest.engines.bun).toBe(">=1.3.11");

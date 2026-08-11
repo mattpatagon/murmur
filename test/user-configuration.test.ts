@@ -147,6 +147,20 @@ test("merges one owned hook per event and preserves other hooks", (): void => {
   );
 });
 
+test("configures portable content-free hooks for E2E setup", (): void => {
+  const configured: Record<string, unknown> = configureHooks(
+    {},
+    "codex",
+    "/usr/local/bin/murmur-hook",
+    true,
+  );
+  const events: Record<string, unknown> = requireRecord(configured["hooks"]);
+  expect(JSON.stringify(events["SessionStart"])).toContain(
+    "/usr/local/bin/murmur-hook --client codex --e2ee",
+  );
+  expect(JSON.stringify(configured)).not.toContain("MURMUR_E2EE=1");
+});
+
 test("installs both clients and a second run changes nothing", (): void => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-setup-"));
   const paths: UserConfigurationPaths = {

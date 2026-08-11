@@ -1,6 +1,6 @@
 import type { Sql, TransactionSql } from "postgres";
 import { z } from "zod";
-
+import type { AgentGeneration } from "../domain/lifecycle-values.js";
 import type {
   Agent,
   GetMessagesQuery,
@@ -8,7 +8,6 @@ import type {
   MarkMessagesReadResult,
   Message,
 } from "../domain/models.js";
-import type { AgentGeneration } from "../domain/lifecycle-values.js";
 import {
   type AgentId,
   type Instant,
@@ -152,12 +151,20 @@ export async function getPostgresInboxVersion(
     await setPostgresTenantContext(transaction, tenantId);
     const agent: Agent = await postgresAgentInTransaction(transaction, tenantId, agentId, now);
     const raw: unknown = await transaction`
-      SELECT COALESCE(MAX(tenant_sequence), 0)::bigint AS version
-      FROM murmur.messages
-      WHERE tenant_id = ${tenantId.value}::uuid
-        AND recipient_id = ${agentId.value}
-        AND recipient_generation = ${generation === null ? agent.generation.value : generation.value}
-        AND expires_at > ${now.toISOString()}::timestamptz
+      SELECT COALESCE(MAX(active.tenant_sequence), 0)::bigint AS version
+      FROM (
+        SELECT tenant_sequence FROM murmur.messages
+        WHERE tenant_id = ${tenantId.value}::uuid
+          AND recipient_id = ${agentId.value}
+          AND recipient_generation = ${generation === null ? agent.generation.value : generation.value}
+          AND expires_at > ${now.toISOString()}::timestamptz
+        UNION ALL
+        SELECT tenant_sequence FROM murmur.e2ee_messages
+        WHERE tenant_id = ${tenantId.value}::uuid
+          AND recipient_id = ${agentId.value}
+          AND recipient_generation = ${generation === null ? agent.generation.value : generation.value}
+          AND expires_at > ${now.toISOString()}::timestamptz
+      ) AS active
     `;
     const rows: { readonly version: number }[] = z.array(InboxVersionRowSchema).parse(raw);
     return Sequence.parse(firstRow(rows, "inbox version").version);

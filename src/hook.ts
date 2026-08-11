@@ -54,6 +54,7 @@ type CheckInbox = (
   identity: AgentIdentity,
   options: {
     readonly afterSequence: number;
+    readonly e2ee: boolean;
     readonly includeNotices: boolean;
     readonly sessionKey: string;
     readonly token: string;
@@ -283,9 +284,11 @@ export async function handleHook(
     lastCheckedAt: now,
     lastNotifiedInboxVersion: cache.lastNotifiedInboxVersion,
   });
+  const e2ee: boolean = environment["MURMUR_E2EE"] === "1";
   const summary: InboxSummary = await (options.checkInbox ?? checkRemoteInbox)(identity, {
     afterSequence: eventName === "SessionStart" ? 0 : cache.lastNotifiedInboxVersion,
-    includeNotices: eventName === "SessionStart",
+    e2ee,
+    includeNotices: eventName === "SessionStart" && !e2ee,
     sessionKey,
     timeoutMs,
     token,
@@ -312,11 +315,30 @@ export async function handleHook(
   });
 }
 
-function parseClient(arguments_: readonly string[]): MurmurClient {
-  const index: number = arguments_.indexOf("--client");
-  const value: string | undefined = index === -1 ? undefined : arguments_[index + 1];
-  if (value === "claude" || value === "codex") return value;
-  throw new Error("Usage: murmur-hook --client <claude|codex>");
+type HookArguments = { readonly client: MurmurClient; readonly e2ee: boolean };
+
+function parseHookArguments(arguments_: readonly string[]): HookArguments {
+  let client: MurmurClient | null = null;
+  let e2ee: boolean = false;
+  for (let index: number = 0; index < arguments_.length; index += 1) {
+    const argument: string | undefined = arguments_[index];
+    if (argument === "--e2ee") {
+      e2ee = true;
+      continue;
+    }
+    if (argument === "--client") {
+      const value: string | undefined = arguments_[index + 1];
+      if (value !== "claude" && value !== "codex") {
+        throw new Error("Usage: murmur-hook --client <claude|codex> [--e2ee]");
+      }
+      client = value;
+      index += 1;
+      continue;
+    }
+    throw new Error("Usage: murmur-hook --client <claude|codex> [--e2ee]");
+  }
+  if (client === null) throw new Error("Usage: murmur-hook --client <claude|codex> [--e2ee]");
+  return { client, e2ee };
 }
 
 async function readHookInput(): Promise<HookInput> {
@@ -334,8 +356,14 @@ async function readHookInput(): Promise<HookInput> {
 
 async function main(): Promise<void> {
   try {
-    const client: MurmurClient = parseClient(process.argv.slice(2));
-    const output: HookOutput | null = await handleHook(await readHookInput(), client);
+    const parsedArguments: HookArguments = parseHookArguments(process.argv.slice(2));
+    const input: HookInput = await readHookInput();
+    const environment: NodeJS.ProcessEnv = parsedArguments.e2ee
+      ? { ...process.env, MURMUR_E2EE: "1" }
+      : process.env;
+    const output: HookOutput | null = await handleHook(input, parsedArguments.client, {
+      environment,
+    });
     if (output !== null && Object.keys(output).length > 0) {
       process.stdout.write(`${JSON.stringify(output)}\n`);
     }

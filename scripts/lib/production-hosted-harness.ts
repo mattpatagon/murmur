@@ -15,6 +15,7 @@ const UnknownRecordSchema: z.ZodRecord<z.ZodString, z.ZodUnknown> = z.record(
 
 export type ProductionHarness = {
   readonly clientName: "claude" | "codex";
+  readonly repositoryName: string;
   readonly sessionId: string;
   readonly token: string;
   readonly url: URL;
@@ -46,14 +47,19 @@ async function retry<T>(operation: () => Promise<T>): Promise<T> {
   throw lastError;
 }
 
-function headers(token: string, sessionId: string | null, clientName: "claude" | "codex"): Headers {
+function headers(
+  token: string,
+  sessionId: string | null,
+  clientName: "claude" | "codex",
+  repositoryName: string,
+): Headers {
   const result: Headers = new Headers({
     Accept: "application/json, text/event-stream",
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
     "X-Murmur-Branch": "production-canary",
     "X-Murmur-Client": clientName,
-    "X-Murmur-Repository": "mattpatagon/murmur",
+    "X-Murmur-Repository": repositoryName,
   });
   if (sessionId !== null) {
     result.set("MCP-Protocol-Version", LATEST_PROTOCOL_VERSION);
@@ -93,11 +99,12 @@ async function post(
   token: string,
   sessionId: string | null,
   clientName: "claude" | "codex",
+  repositoryName: string,
   body: Record<string, unknown>,
 ): Promise<Response> {
   return await fetch(url, {
     body: JSON.stringify(body),
-    headers: headers(token, sessionId, clientName),
+    headers: headers(token, sessionId, clientName, repositoryName),
     method: "POST",
   });
 }
@@ -114,9 +121,10 @@ export async function connectProductionHarness(
   token: string,
   name: string,
   clientName: "claude" | "codex" = "codex",
+  repositoryName: string = "mattpatagon/murmur",
 ): Promise<ProductionHarness> {
   return await retry(async (): Promise<ProductionHarness> => {
-    const response: Response = await post(url, token, null, clientName, {
+    const response: Response = await post(url, token, null, clientName, repositoryName, {
       id: 1,
       jsonrpc: "2.0",
       method: "initialize",
@@ -130,13 +138,13 @@ export async function connectProductionHarness(
     const sessionId: string | null = response.headers.get("mcp-session-id");
     assertCondition(sessionId !== null, "Murmur initialization omitted a session ID");
     await retry(async (): Promise<void> => {
-      const initialized: Response = await post(url, token, sessionId, clientName, {
+      const initialized: Response = await post(url, token, sessionId, clientName, repositoryName, {
         jsonrpc: "2.0",
         method: "notifications/initialized",
       });
       await responsePayload(initialized);
     });
-    return { clientName, sessionId, token, url };
+    return { clientName, repositoryName, sessionId, token, url };
   });
 }
 
@@ -147,6 +155,7 @@ async function rpc(harness: ProductionHarness, body: Record<string, unknown>): P
       harness.token,
       harness.sessionId,
       harness.clientName,
+      harness.repositoryName,
       body,
     );
     return envelopeResult(await responsePayload(response));
@@ -219,7 +228,12 @@ export async function closeProductionHarnesses(
   await Promise.allSettled(
     harnesses.map(async (harness: ProductionHarness): Promise<void> => {
       await fetch(harness.url, {
-        headers: headers(harness.token, harness.sessionId, harness.clientName),
+        headers: headers(
+          harness.token,
+          harness.sessionId,
+          harness.clientName,
+          harness.repositoryName,
+        ),
         method: "DELETE",
       });
     }),
@@ -279,7 +293,7 @@ export async function ensureTenantSuspended(
 
 async function credentialIsRevoked(url: URL, token: string): Promise<boolean> {
   return await retry(async (): Promise<boolean> => {
-    const response: Response = await post(url, token, null, "codex", {
+    const response: Response = await post(url, token, null, "codex", "mattpatagon/murmur", {
       id: randomUUID(),
       jsonrpc: "2.0",
       method: "initialize",
@@ -294,7 +308,7 @@ async function credentialIsRevoked(url: URL, token: string): Promise<boolean> {
     const sessionId: string | null = response.headers.get("mcp-session-id");
     if (sessionId !== null) {
       await fetch(url, {
-        headers: headers(token, sessionId, "codex"),
+        headers: headers(token, sessionId, "codex", "mattpatagon/murmur"),
         method: "DELETE",
       }).catch((): undefined => undefined);
     }

@@ -3,6 +3,7 @@ import packageMetadata from "../package.json" with { type: "json" };
 
 import type { RegisterAgentOutput } from "./domain/agent-contracts.js";
 import { type ListNoticesOutput, ListNoticesOutputSchema } from "./domain/notice-contracts.js";
+import { type GetInboxSummaryOutput, GetInboxSummaryOutputSchema } from "./e2ee/wire-tools.js";
 import { parseHookRegistration, summarizeHookInbox } from "./hook-message-compatibility.js";
 import { type HookOrchestrationState, hookOrchestrationState } from "./hook-orchestration.js";
 import type { AgentIdentity, InboxSummary, JsonRpcExchange } from "./hook-types.js";
@@ -20,6 +21,7 @@ export async function checkRemoteInbox(
   identity: AgentIdentity,
   options: {
     readonly afterSequence?: number | undefined;
+    readonly e2ee?: boolean | undefined;
     readonly includeNotices?: boolean | undefined;
     readonly sessionKey?: string | undefined;
     readonly token: string;
@@ -105,16 +107,22 @@ export async function checkRemoteInbox(
         jsonrpc: "2.0",
         id: 4,
         method: "tools/call",
-        params: {
-          name: "get_messages",
-          arguments: {
-            after_sequence: afterSequence,
-            agent_id: identity.agentId,
-            limit: 100,
-            session_key: sessionKey,
-            unread_only: true,
-          },
-        },
+        params:
+          options.e2ee === true
+            ? {
+                name: "get_inbox_summary",
+                arguments: { agent_id: identity.agentId, session_key: sessionKey },
+              }
+            : {
+                name: "get_messages",
+                arguments: {
+                  after_sequence: afterSequence,
+                  agent_id: identity.agentId,
+                  limit: 100,
+                  session_key: sessionKey,
+                  unread_only: true,
+                },
+              },
       },
       headers,
       timeoutMs: remainingTimeoutMs(deadline),
@@ -122,6 +130,21 @@ export async function checkRemoteInbox(
     });
     const toolResult: unknown = rpcResult(inboxResponse.body);
     if (!isRecord(toolResult)) throw new Error("Murmur returned an invalid tool result");
+    if (options.e2ee === true) {
+      const summary: GetInboxSummaryOutput = GetInboxSummaryOutputSchema.parse(
+        toolResult["structuredContent"],
+      );
+      if (summary.agent_id !== identity.agentId) {
+        throw new Error("Murmur returned an inconsistent inbox summary identity");
+      }
+      return {
+        agentGeneration: registered.agent.generation,
+        inboxVersion: summary.inbox_version,
+        messageCount: summary.unread_count,
+        orchestration,
+        senderIds: [],
+      };
+    }
     const inbox: ReturnType<typeof summarizeHookInbox> = summarizeHookInbox(
       toolResult["structuredContent"],
       afterSequence,

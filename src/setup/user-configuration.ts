@@ -16,6 +16,7 @@ import {
   pathJoinForPlatform,
   userHomeDirectory,
 } from "../platform-paths.js";
+import { configureClaudeE2eeMcp, configureCodexE2eeMcp } from "./e2ee-client-configuration.js";
 
 export const DEFAULT_MURMUR_URL: string = "https://api.usemurmur.dev/mcp";
 export const MURMUR_TOKEN_ENV: string = "MURMUR_API_TOKEN";
@@ -339,10 +340,11 @@ export function configureHooks(
   current: JsonRecord,
   client: MurmurClient,
   hookExecutable: string,
+  e2ee: boolean = false,
 ): JsonRecord {
   const result: JsonRecord = cloneRecord(current);
   const hooks: JsonRecord = isRecord(result["hooks"]) ? cloneRecord(result["hooks"]) : {};
-  const command: string = `${shellQuote(hookExecutable)} --client ${client}`;
+  const command: string = `${shellQuote(hookExecutable)} --client ${client}${e2ee ? " --e2ee" : ""}`;
   for (const event of HOOK_EVENTS) {
     const existing: unknown = hooks[event];
     const groups: unknown[] = Array.isArray(existing) ? existing : [];
@@ -386,6 +388,8 @@ export function defaultUserConfigurationPaths(
 
 export function installUserConfiguration(options: {
   readonly clients: readonly MurmurClient[];
+  readonly e2ee?: boolean | undefined;
+  readonly e2eeProxyExecutable?: string | undefined;
   readonly hookExecutable: string;
   readonly paths?: UserConfigurationPaths | undefined;
   readonly replace?: boolean | undefined;
@@ -395,17 +399,30 @@ export function installUserConfiguration(options: {
   const replace: boolean = options.replace ?? false;
   const url: string = options.url ?? DEFAULT_MURMUR_URL;
   const pendingWrites: PendingWrite[] = [];
+  const e2ee: boolean = options.e2ee === true;
+  const proxyExecutable: string | undefined = options.e2eeProxyExecutable;
+  if (e2ee && proxyExecutable === undefined) {
+    throw new Error("E2E setup requires the local proxy executable");
+  }
 
   if (options.clients.includes("codex")) {
     const currentConfig: string = existsSync(paths.codexConfig)
       ? readFileSync(paths.codexConfig, "utf8")
       : "";
-    const nextConfig: string = configureCodexMcp(currentConfig, url, replace);
+    const nextConfig: string =
+      e2ee && proxyExecutable !== undefined
+        ? configureCodexE2eeMcp(currentConfig, url, proxyExecutable, replace)
+        : configureCodexMcp(currentConfig, url, replace);
     if (nextConfig !== currentConfig) {
       pendingWrites.push({ content: nextConfig, path: paths.codexConfig });
     }
     const currentHooks: JsonRecord = readJsonRecord(paths.codexHooks);
-    const nextHooks: JsonRecord = configureHooks(currentHooks, "codex", options.hookExecutable);
+    const nextHooks: JsonRecord = configureHooks(
+      currentHooks,
+      "codex",
+      options.hookExecutable,
+      e2ee,
+    );
     if (JSON.stringify(nextHooks) !== JSON.stringify(currentHooks)) {
       pendingWrites.push({
         content: `${JSON.stringify(nextHooks, null, 2)}\n`,
@@ -416,7 +433,10 @@ export function installUserConfiguration(options: {
 
   if (options.clients.includes("claude")) {
     const currentMcp: JsonRecord = readJsonRecord(paths.claudeMcp);
-    const nextMcp: JsonRecord = configureClaudeMcp(currentMcp, url, replace);
+    const nextMcp: JsonRecord =
+      e2ee && proxyExecutable !== undefined
+        ? configureClaudeE2eeMcp(currentMcp, url, proxyExecutable, replace)
+        : configureClaudeMcp(currentMcp, url, replace);
     if (JSON.stringify(nextMcp) !== JSON.stringify(currentMcp)) {
       pendingWrites.push({
         content: `${JSON.stringify(nextMcp, null, 2)}\n`,
@@ -428,6 +448,7 @@ export function installUserConfiguration(options: {
       currentSettings,
       "claude",
       options.hookExecutable,
+      e2ee,
     );
     if (JSON.stringify(nextSettings) !== JSON.stringify(currentSettings)) {
       pendingWrites.push({

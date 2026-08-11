@@ -17,6 +17,11 @@ import type {
   ThreadId,
 } from "../domain/value-objects.js";
 import type { PostgresTlsConfiguration } from "../postgres-tls.js";
+import type {
+  E2eeEntitlementRecord,
+  E2eeTransitionAction,
+  E2eeTransitionResult,
+} from "./e2ee-entitlement.js";
 
 export type TenantTokenRole = "agent" | "orchestrator" | "tenant_admin";
 export type TenantStatus = "active" | "suspended";
@@ -221,6 +226,7 @@ export interface HostedControlPlane {
     principal: TenantPrincipal,
     policyId: OrchestratorPolicyId,
   ): Promise<OrchestratorPolicy | null>;
+  getE2eeEntitlement(principal: TenantPrincipal): Promise<E2eeEntitlementRecord>;
   hasActiveOperator(): Promise<boolean>;
   listAdminAudit(principal: OperatorPrincipal, limit: number): Promise<readonly AdminAuditEvent[]>;
   listOperatorTokens(
@@ -245,6 +251,18 @@ export interface HostedControlPlane {
     expiresAt: Instant | null,
   ): Promise<IssuedToken>;
   restoreTenant(principal: OperatorPrincipal, tenantId: TenantId): Promise<boolean>;
+  resetE2eeIdentity(
+    principal: TenantPrincipal,
+    agentId: AgentId,
+    expectedRootKeyId: string,
+    reason: string,
+  ): Promise<boolean>;
+  transitionE2ee(
+    principal: TenantPrincipal,
+    action: E2eeTransitionAction,
+    expectedState: E2eeEntitlementRecord["state"],
+    trustPolicyVersion: number | null,
+  ): Promise<E2eeTransitionResult>;
   revokeOperatorToken(principal: OperatorPrincipal, keyId: string): Promise<string | null>;
   revokeToken(principal: TenantPrincipal, keyId: string): Promise<string | null>;
   suspendTenant(principal: OperatorPrincipal, tenantId: TenantId): Promise<boolean>;

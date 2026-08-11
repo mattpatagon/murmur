@@ -1,6 +1,11 @@
 import { z } from "zod";
 
 import { StorageCorruptionError } from "../domain/errors.js";
+import {
+  AgentCloseReasonSchema,
+  AgentGeneration,
+  AgentStateSchema,
+} from "../domain/lifecycle-values.js";
 import type { Agent, Message } from "../domain/models.js";
 import {
   MessageKindSchema,
@@ -22,11 +27,6 @@ import {
   Sequence,
   ThreadId,
 } from "../domain/value-objects.js";
-import {
-  AgentCloseReasonSchema,
-  AgentGeneration,
-  AgentStateSchema,
-} from "../domain/lifecycle-values.js";
 
 export type AgentRow = {
   readonly agent_id: string;

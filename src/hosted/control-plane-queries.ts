@@ -33,8 +33,12 @@ export async function verifyHostedControlPlaneSchema(database: Sql): Promise<voi
       to_regprocedure('murmur.authenticate_principal(bytea)') IS NOT NULL
       AND to_regprocedure('murmur.authenticate_principal_v2(bytea)') IS NOT NULL
       AND to_regprocedure('murmur.active_credential_hints()') IS NOT NULL
+      AND to_regprocedure('murmur.tenant_transition_e2ee(uuid,uuid,text,text,bigint)') IS NOT NULL
+      AND to_regprocedure('murmur.tenant_reset_e2ee_identity(uuid,uuid,text,text,text)') IS NOT NULL
       AND to_regclass('murmur.operator_tokens') IS NOT NULL
-      AND to_regclass('murmur.orchestrator_policies') IS NOT NULL AS changed,
+      AND to_regclass('murmur.orchestrator_policies') IS NOT NULL
+      AND to_regclass('murmur.tenant_e2ee_state') IS NOT NULL
+      AND to_regclass('murmur.tenant_e2ee_usage') IS NOT NULL AS changed,
       current_user AS current_role,
       role.rolsuper AS is_superuser,
       role.rolbypassrls AS bypasses_rls

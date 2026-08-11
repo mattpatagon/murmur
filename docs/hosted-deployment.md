@@ -224,6 +224,21 @@ legacy, or local mode disables every orchestration tool, including for retained 
 credentials; this is a capability rollback, not a database rollback. See
 [orchestration.md](orchestration.md) for precedence and trust boundaries.
 
+## Tenant E2E cutover
+
+Apply every hosted E2E migration and deploy the matching application on all replicas before a
+tenant administrator begins provisioning. Then follow
+[hosted-e2ee-operations.md](hosted-e2ee-operations.md). The cutover is tenant-scoped and audited;
+operators cannot perform it or read tenant encryption data. Do not enforce from a database console,
+skip endpoint fingerprint verification, or leave an older replica serving a stale plaintext tool
+matrix. Every effective transition closes the tenant's sessions so clients reconnect against the
+new server-derived capability.
+
+Treat enforcement as forward-only until ciphertext, claims, and pending broadcasts have expired and
+bounded pruning reports zero. An application rollback target must understand the E2E schema and
+continue honoring the durable entitlement and database plaintext-write trigger. Never drop E2E
+tables, disable forced RLS, or reset entitlement rows to restore plaintext behavior.
+
 ## Manual strict deployment
 
 Use this fallback only after operator bootstrap, legacy adoption, and tenant
@@ -283,8 +298,10 @@ The canary obtains and masks the operator credential through the deploy
 identity. It creates a short-lived tenant credential, verifies operator/admin/
 agent tool separation, intra-tenant direct and broadcast delivery,
 cross-tenant denial, session binding, lifecycle state, historical inbox isolation,
-repository notices, suspension and restoration, and audit history. It revokes the temporary
-credential and leaves its uniquely named tenant suspended for inspection.
+repository notices, suspension and restoration, and audit history. A separate disposable E2E
+tenant proves repository-bound key provisioning, state cutover, ciphertext-only tool exposure,
+recipient decryption, rollback refusal, and plaintext-fallback denial. It revokes the temporary
+credential and leaves its uniquely named tenants suspended for inspection.
 
 ## Rollback and recovery
 

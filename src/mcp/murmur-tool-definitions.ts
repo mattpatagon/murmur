@@ -1,5 +1,4 @@
-import type { Tool, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 import {
@@ -42,7 +41,6 @@ import {
   CreateOperatorTokenInputSchema,
   CreateTenantInputSchema,
   CreateTenantOutputSchema,
-  CreateTokenInputSchema,
   IssuedOperatorTokenOutputSchema,
   IssuedTokenOutputSchema,
   ListAdminAuditInputSchema,
@@ -51,8 +49,6 @@ import {
   ListOperatorTokensOutputSchema,
   ListTenantsInputSchema,
   ListTenantsOutputSchema,
-  ListTokensInputSchema,
-  ListTokensOutputSchema,
   MintTenantAdminTokenInputSchema,
   RevokeTokenInputSchema,
   RevokeTokenOutputSchema,
@@ -60,41 +56,17 @@ import {
   TenantStatusOutputSchema,
 } from "../hosted/contracts.js";
 import type { HostedPrincipal } from "../hosted/control-plane.js";
+import { entitledDataTools } from "./murmur-e2ee-tool-exposure.js";
 import {
   bossOrchestrationTools,
+  orchestratorLookupTool,
   tenantAdminOrchestrationTools,
   workerOrchestrationTools,
 } from "./murmur-orchestration-tool-definitions.js";
-export type ToolExposure = {
-  readonly bootstrapEnabled: boolean;
-  readonly legacyAdoptionEnabled: boolean;
-  readonly orchestrationEnabled?: boolean | undefined;
-  readonly principal: HostedPrincipal | null;
-  readonly tenantOnboardingEnabled: boolean;
-};
-export function toolDefinition<Input, Output>(
-  name: string,
-  title: string,
-  description: string,
-  inputSchema: z.ZodType<Input>,
-  outputSchema: z.ZodType<Output>,
-  annotations: ToolAnnotations,
-): Tool {
-  const generatedInput: unknown = z.toJSONSchema(inputSchema);
-  const generatedOutput: unknown = z.toJSONSchema(outputSchema);
-  const validatedInput: Tool["inputSchema"] = ToolSchema.shape.inputSchema.parse(generatedInput);
-  const validatedOutput: NonNullable<Tool["outputSchema"]> = ToolSchema.shape.outputSchema
-    .unwrap()
-    .parse(generatedOutput);
-  return {
-    annotations,
-    description,
-    inputSchema: validatedInput,
-    name,
-    outputSchema: validatedOutput,
-    title,
-  };
-}
+import { tenantAdminTools } from "./murmur-tenant-admin-tool-definitions.js";
+import type { E2eeEntitlementRecord, ToolExposure } from "./murmur-tool-exposure.js";
+import { toolDefinition } from "./tool-definition.js";
+
 function dataTools(): Tool[] {
   return [
     toolDefinition(
@@ -279,49 +251,6 @@ function dataTools(): Tool[] {
     ),
   ];
 }
-function tenantAdminTools(): Tool[] {
-  return [
-    toolDefinition(
-      "create_access_token",
-      "Create tenant access token",
-      "Create an agent or tenant-administrator token for the authenticated tenant. The secret is returned exactly once; store it securely.",
-      CreateTokenInputSchema,
-      IssuedTokenOutputSchema,
-      {
-        destructiveHint: false,
-        idempotentHint: false,
-        readOnlyHint: false,
-        title: "Create tenant access token",
-      },
-    ),
-    toolDefinition(
-      "list_access_tokens",
-      "List tenant access tokens",
-      "List one cursor-paginated page of token identifiers and lifecycle timestamps for the authenticated tenant. Token secrets are never returned.",
-      ListTokensInputSchema,
-      ListTokensOutputSchema,
-      {
-        destructiveHint: false,
-        idempotentHint: true,
-        readOnlyHint: true,
-        title: "List tenant access tokens",
-      },
-    ),
-    toolDefinition(
-      "revoke_access_token",
-      "Revoke tenant access token",
-      "Immediately revoke one access token in the authenticated tenant and close its live MCP sessions.",
-      RevokeTokenInputSchema,
-      RevokeTokenOutputSchema,
-      {
-        destructiveHint: true,
-        idempotentHint: true,
-        readOnlyHint: false,
-        title: "Revoke tenant access token",
-      },
-    ),
-  ];
-}
 function bootstrapTools(): Tool[] {
   return [
     toolDefinition(
@@ -484,10 +413,20 @@ export function toolsForPrincipal(exposure: ToolExposure): Tool[] {
   ) {
     return [];
   }
-  const tools: Tool[] = dataTools();
+  const entitlement: E2eeEntitlementRecord | null = exposure.e2eeEntitlement ?? null;
+  const tools: Tool[] =
+    principal !== null && principal.kind === "tenant" && entitlement !== null
+      ? entitledDataTools(
+          entitlement,
+          dataTools(),
+          exposure.orchestrationEnabled === true && principal.role !== "orchestrator",
+        )
+      : dataTools();
   if (principal !== null && principal.kind === "tenant" && exposure.orchestrationEnabled === true) {
     if (principal.role === "orchestrator") {
       tools.push(...bossOrchestrationTools());
+    } else if (entitlement !== null && entitlement.state === "enforced") {
+      tools.push(orchestratorLookupTool());
     } else {
       tools.push(...workerOrchestrationTools());
     }

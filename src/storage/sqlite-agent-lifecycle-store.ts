@@ -34,12 +34,12 @@ import {
   type JsonObject,
   JsonObjectSchema,
 } from "../domain/value-objects.js";
-import { mapAgentRow } from "./sqlite-message-rows.js";
 import {
   endExpiredSqliteSessions,
   sqliteLiveSessionCount,
   trimRetainedSqliteSessions,
 } from "./sqlite-agent-session-rows.js";
+import { mapAgentRow } from "./sqlite-message-rows.js";
 
 type StoredAgentRow = {
   readonly agent_id: string;

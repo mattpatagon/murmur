@@ -33,11 +33,6 @@ import {
   JsonObjectSchema,
   type TenantId,
 } from "../domain/value-objects.js";
-import { type AgentRow, AgentRowSchema, mapAgentRow } from "./postgres-message-rows.js";
-import {
-  lockPostgresRecipientCommitOrder,
-  setPostgresTenantContext,
-} from "./postgres-message-transactions.js";
 import {
   endExpiredPostgresSessions,
   postgresLiveSessionCount,
@@ -47,6 +42,11 @@ import {
   supersedePostgresSessions,
   trimRetainedPostgresSessions,
 } from "./postgres-agent-lifecycle-rows.js";
+import { type AgentRow, AgentRowSchema, mapAgentRow } from "./postgres-message-rows.js";
+import {
+  lockPostgresRecipientCommitOrder,
+  setPostgresTenantContext,
+} from "./postgres-message-transactions.js";
 
 function agentSelect(now: Instant): string {
   return now.toISOString();

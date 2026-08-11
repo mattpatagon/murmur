@@ -112,6 +112,23 @@ non-owner, non-superuser without `BYPASSRLS`; forced RLS applies even if applica
 fails. Tenant context is set inside each transaction. Operators use a separate application role that
 can administer tenants and tokens but has no tenant message tools.
 
+Hosted E2E is a parallel ciphertext data plane selected only from the authenticated tenant's
+durable entitlement. An endpoint proxy owns private roots, signing keys, prekeys, trust pins, replay
+state, counters, and plaintext. PostgreSQL owns public bundles, one-time prekey claims, signed
+ciphertext envelopes, fixed-size metadata, delivery state, and bounded usage counters. A direct send
+claims a recipient prekey and commits its verified envelope atomically; a broadcast snapshots active
+recipient generations, stages one independently encrypted delivery per recipient, and makes every
+delivery visible in one transaction. Inbox notification remains only a reread hint.
+
+The cutover state machine is `off -> provisioning -> write-blocked provisioning -> enforced`.
+Application tool exposure and a database plaintext-insert trigger both fail closed. Enforcement
+requires no unread plaintext, a current bundle for every active endpoint generation, and a positive
+organization trust-policy version. Every state change invalidates live sessions so no client keeps a
+stale tool matrix. Rollback requires all encrypted messages and in-flight encryption work to expire
+and be pruned. Tenant-admin identity reset is exact-root guarded and audited; it removes public key
+state without mutating retained ciphertext. See
+[hosted-e2ee-operations.md](hosted-e2ee-operations.md).
+
 ## Resource bounds
 
 Hosted configuration sets independent limits for request bytes, authentication concurrency and

@@ -1,7 +1,7 @@
+import { toAgentDto, toMessageDto } from "../domain/contracts.js";
 import { AgentAuthorityConflictError } from "../domain/errors.js";
 import type { Agent, Message } from "../domain/models.js";
 import type { SenderAuthority } from "../domain/orchestration.js";
-import { toAgentDto, toMessageDto } from "../domain/contracts.js";
 import type { AgentId } from "../domain/value-objects.js";
 import type { MessageStore } from "../storage/message-store.js";
 

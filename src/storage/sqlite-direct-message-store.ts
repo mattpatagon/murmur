@@ -1,12 +1,12 @@
 import type { Changes, Database, Statement } from "bun:sqlite";
 
 import { RETENTION_DAYS } from "../domain/contracts.js";
-import { SessionKey } from "../domain/lifecycle-values.js";
 import {
   AgentClosedError,
   IdempotencyConflictError,
   IdempotencyWinnerMissingError,
 } from "../domain/errors.js";
+import { SessionKey } from "../domain/lifecycle-values.js";
 import type { Agent, Message, SendMessageCommand, SendMessageResult } from "../domain/models.js";
 import { type MessageProvenance, ordinaryMessageProvenance } from "../domain/orchestration.js";
 import { type Instant, MessageId, ThreadId } from "../domain/value-objects.js";

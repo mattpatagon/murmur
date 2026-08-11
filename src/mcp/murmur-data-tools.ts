@@ -8,18 +8,19 @@ import {
   BroadcastMessageOutputSchema,
   branchNameFromInput,
   broadcastAudienceFromInput,
-  type GetMessagesInput,
-  GetMessagesInputSchema,
   type GetAgentInput,
   GetAgentInputSchema,
   type GetAgentOutput,
   GetAgentOutputSchema,
+  type GetMessagesInput,
+  GetMessagesInputSchema,
   type InboxOutput,
   InboxOutputSchema,
   type ListAgentsInput,
   ListAgentsInputSchema,
   type ListAgentsOutput,
   ListAgentsOutputSchema,
+  listAgentsQuery,
   type MarkMessagesReadInput,
   MarkMessagesReadInputSchema,
   type MarkMessagesReadOutput,
@@ -37,7 +38,6 @@ import {
   type RegisterAgentOutput,
   RegisterAgentOutputSchema,
   registerAgentCommand,
-  listAgentsQuery,
   repositoryNameFromInput,
   type SendMessageInput,
   SendMessageInputSchema,
@@ -51,8 +51,8 @@ import {
   type WaitForMessagesOutput,
   WaitForMessagesOutputSchema,
 } from "../domain/contracts.js";
-import { AGENT_LEASE_MINUTES, SessionKey } from "../domain/lifecycle-values.js";
 import { UnknownAgentError } from "../domain/errors.js";
+import { AGENT_LEASE_MINUTES, SessionKey } from "../domain/lifecycle-values.js";
 import type {
   Agent,
   BroadcastMessageCommand,
@@ -81,7 +81,6 @@ import type {
   InboxUpdateHandler,
   MessageStore,
 } from "../storage/message-store.js";
-import { toolResult } from "./murmur-tool-results.js";
 import {
   agentDtoForClient,
   authorizedActorId,
@@ -90,6 +89,7 @@ import {
 import { callHistoryTool } from "./murmur-history-tools.js";
 import { callLifecycleTool } from "./murmur-lifecycle-tools.js";
 import { callNoticeTool } from "./murmur-notice-tools.js";
+import { toolResult } from "./murmur-tool-results.js";
 
 const INBOX_PREFIX: string = "murmur://inbox/";
 

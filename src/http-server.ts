@@ -43,15 +43,21 @@ import {
   cleanupStoreStartup,
   shutdownHttpResources,
 } from "./http/http-server-resources.js";
+import type { HostedApplicationRequest } from "./http/murmur-application-factory.js";
+import { createHostedMurmurApplication } from "./http/murmur-application-factory.js";
 import type { RemoteSession } from "./http/remote-session.js";
 import { responseWithFinish, trackedResponse } from "./http/response-lifecycle.js";
-import { MurmurApplication } from "./mcp/murmur-application.js";
+import {
+  RemoteSessionInvalidator,
+  type SessionAuthorizationEpoch,
+} from "./http/session-invalidation.js";
+import type { MurmurApplication } from "./mcp/murmur-application.js";
+import { recordRepositoryDivergence } from "./observability/lifecycle-metrics.js";
 import {
   createDefaultHttpObservability,
   type HttpObservability,
   type RequestObservation,
 } from "./observability/request-observation.js";
-import { recordRepositoryDivergence } from "./observability/lifecycle-metrics.js";
 import { logSafeError } from "./safe-errors.js";
 import { createStore } from "./storage/create-store.js";
 import type { MessageStore } from "./storage/message-store.js";
@@ -63,6 +69,9 @@ export type MurmurHttpServer = {
 };
 
 export type HttpServerDependencies = {
+  readonly applicationFactory?:
+    | ((request: HostedApplicationRequest) => Promise<MurmurApplication>)
+    | undefined;
   readonly authenticator?: HostedAuthenticator;
   readonly observability?: HttpObservability;
   readonly timeSource?: TimeSource;
@@ -86,6 +95,8 @@ export async function startHttpServer(
     dependencies.timeSource ?? SYSTEM_TIME_SOURCE,
   );
   const store: MessageStore = await createStore(environment);
+  const applicationFactory: (request: HostedApplicationRequest) => Promise<MurmurApplication> =
+    dependencies.applicationFactory ?? createHostedMurmurApplication;
   let authenticator: HostedAuthenticator | undefined = dependencies.authenticator;
   if (authenticator === undefined) {
     try {
@@ -108,70 +119,16 @@ export async function startHttpServer(
   }
   const sessions: Map<string, RemoteSession> = new Map<string, RemoteSession>();
   const initializingByTenant: Map<string, number> = new Map<string, number>();
+  const invalidator: RemoteSessionInvalidator = new RemoteSessionInvalidator(sessions);
   let initializingSessions: number = 0;
   let stopped: boolean = false;
-  const closeSessions: (
-    matches: readonly [string, RemoteSession][],
-    context: string,
-  ) => Promise<void> = async (
-    matches: readonly [string, RemoteSession][],
-    context: string,
-  ): Promise<void> => {
-    matches.forEach((entry: [string, RemoteSession]): void => {
-      sessions.delete(entry[0]);
-    });
-    const results: PromiseSettledResult<void>[] = await Promise.allSettled(
-      matches.map(
-        async (entry: [string, RemoteSession]): Promise<void> => await entry[1].application.close(),
-      ),
-    );
-    results.forEach((result: PromiseSettledResult<void>): void => {
-      if (result.status === "rejected") logSafeError(context, result.reason);
-    });
-  };
-  const closeSessionsForToken: (tokenId: string) => Promise<void> = async (
-    tokenId: string,
-  ): Promise<void> => {
-    const matches: [string, RemoteSession][] = Array.from(sessions.entries()).filter(
-      (entry: [string, RemoteSession]): boolean => entry[1].tokenId === tokenId,
-    );
-    await closeSessions(matches, "Murmur revoked-session shutdown failed");
-  };
-  const closeSessionsForTenant: (tenantId: TenantId) => Promise<void> = async (
-    tenantId: TenantId,
-  ): Promise<void> => {
-    const matches: [string, RemoteSession][] = Array.from(sessions.entries()).filter(
-      (entry: [string, RemoteSession]): boolean => entry[1].tenantId === tenantId.value,
-    );
-    await closeSessions(matches, "Murmur suspended-tenant session shutdown failed");
-  };
-  const scheduleCloseSessionsForToken: (tokenId: string) => Promise<void> = async (
-    tokenId: string,
-  ): Promise<void> => {
-    setTimeout((): void => {
-      void closeSessionsForToken(tokenId).catch((error: unknown): void => {
-        logSafeError("Murmur revoked-session shutdown failed", error);
-      });
-    }, 0);
-  };
-
-  const scheduleCloseSessionsForTenant: (tenantId: TenantId) => Promise<void> = async (
-    tenantId: TenantId,
-  ): Promise<void> => {
-    setTimeout((): void => {
-      void closeSessionsForTenant(tenantId).catch((error: unknown): void => {
-        logSafeError("Murmur suspended-tenant session shutdown failed", error);
-      });
-    }, 0);
-  };
-
   const expireIdleSessions: (now: number) => Promise<void> = async (now: number): Promise<void> => {
     const expired: [string, RemoteSession][] = Array.from(sessions.entries()).filter(
       (entry: [string, RemoteSession]): boolean =>
         entry[1].activeResponses === 0 && now - entry[1].lastSeenAt >= sessionIdleMs,
     );
     capacity.pruneRateWindows();
-    await closeSessions(expired, "Murmur idle-session shutdown failed");
+    await invalidator.close(expired, "Murmur idle-session shutdown failed");
   };
 
   const handleMcpRequest: (request: Request, observation: RequestObservation) => Promise<Response> =
@@ -349,25 +306,23 @@ export async function startHttpServer(
               keepAliveMs: SSE_KEEP_ALIVE_MS,
               sessionIdGenerator: randomUUID,
             });
-          const application: MurmurApplication = new MurmurApplication({
+          const initializationEpoch: SessionAuthorizationEpoch = invalidator.capture(
+            tenantId,
+            principal.tokenId,
+          );
+          const application: MurmurApplication = await applicationFactory({
+            authenticator,
             branchName,
-            bootstrapCredentialHash: authenticator.bootstrapCredentialHash(principal, token),
             client,
-            closeStoreOnClose: false,
-            controlPlane: authenticator.controlPlane,
-            legacyCredentialHash: authenticator.legacyCredentialHash(principal),
-            onTenantSuspended: scheduleCloseSessionsForTenant,
-            onTokenRevoked: scheduleCloseSessionsForToken,
+            onTenantSuspended: async (changedTenantId: TenantId): Promise<void> =>
+              await invalidator.invalidateTenant(changedTenantId),
+            onTokenRevoked: async (tokenId: string): Promise<void> =>
+              await invalidator.invalidateToken(tokenId),
             onRepositoryDivergence: (): void => recordRepositoryDivergence(observability),
             principal,
             repositoryName,
-            store:
-              principal.kind === "tenant" &&
-              (principal.role !== "orchestrator" || authenticator.orchestrationEnabled)
-                ? store.scope(principal.tenantId)
-                : null,
-            tenantOnboardingEnabled: authenticator.tenantOnboardingEnabled,
-            orchestrationEnabled: authenticator.orchestrationEnabled,
+            store,
+            token,
           });
           const session: RemoteSession = {
             activeResponses: 0,
@@ -394,6 +349,11 @@ export async function startHttpServer(
             const initializedSessionId: string | undefined = transport.sessionId;
             if (initializedSessionId === undefined) {
               await application.close();
+            } else if (invalidator.changed(initializationEpoch)) {
+              await application.close();
+              return jsonResponse(409, {
+                error: "MCP session authorization changed during initialization; retry",
+              });
             } else {
               observation.recordSession(initializedSessionId);
               observation.recordSessionLookup("found");
@@ -462,7 +422,7 @@ export async function startHttpServer(
       await shutdownHttpResources(
         bunServer,
         async (): Promise<void> =>
-          await closeSessions(activeSessions, "Murmur active-session shutdown failed"),
+          await invalidator.close(activeSessions, "Murmur active-session shutdown failed"),
         authenticator,
         store,
         observability,

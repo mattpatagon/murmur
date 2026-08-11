@@ -2,7 +2,7 @@ import type { Database, Statement } from "bun:sqlite";
 
 import { type UserVersionRow, UserVersionRowSchema } from "./sqlite-message-rows.js";
 
-const SUPPORTED_SCHEMA_VERSION: number = 9;
+const SUPPORTED_SCHEMA_VERSION: number = 10;
 
 function schemaVersion(database: Database): number {
   const statement: Statement<unknown, []> = database.query("PRAGMA user_version");
@@ -243,6 +243,114 @@ export function migrateSqliteDatabase(database: Database): void {
     }
     if (version === 8) {
       database.exec(`
+        CREATE TABLE e2ee_key_bundles (
+          agent_id TEXT PRIMARY KEY REFERENCES agents(agent_id) ON DELETE CASCADE,
+          agent_generation INTEGER NOT NULL CHECK(agent_generation >= 1),
+          root_key_id TEXT NOT NULL,
+          agent_key_id TEXT NOT NULL UNIQUE,
+          bundle_json TEXT NOT NULL,
+          published_at TEXT NOT NULL
+        );
+        CREATE TABLE e2ee_prekeys (
+          prekey_id TEXT PRIMARY KEY,
+          agent_id TEXT NOT NULL REFERENCES agents(agent_id) ON DELETE CASCADE,
+          agent_generation INTEGER NOT NULL CHECK(agent_generation >= 1),
+          prekey_class TEXT NOT NULL CHECK(prekey_class IN ('fallback', 'one_time')),
+          certificate_json TEXT NOT NULL,
+          published_at TEXT NOT NULL,
+          retired_at TEXT,
+          claimed_at TEXT,
+          CHECK(prekey_class = 'one_time' OR claimed_at IS NULL)
+        );
+        CREATE INDEX e2ee_prekeys_available
+          ON e2ee_prekeys(agent_id, agent_generation, prekey_class, claimed_at, retired_at, prekey_id);
+        CREATE TABLE e2ee_claims (
+          claim_id TEXT PRIMARY KEY,
+          sender_id TEXT NOT NULL REFERENCES agents(agent_id),
+          sender_generation INTEGER NOT NULL CHECK(sender_generation >= 1),
+          recipient_id TEXT NOT NULL REFERENCES agents(agent_id),
+          recipient_generation INTEGER NOT NULL CHECK(recipient_generation >= 1),
+          prekey_id TEXT NOT NULL REFERENCES e2ee_prekeys(prekey_id),
+          prekey_class TEXT NOT NULL CHECK(prekey_class IN ('fallback', 'one_time')),
+          request_json TEXT NOT NULL,
+          claim_json TEXT NOT NULL,
+          broadcast_id TEXT,
+          claimed_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          consumed_at TEXT
+        );
+        CREATE INDEX e2ee_claims_expiration ON e2ee_claims(expires_at, consumed_at);
+        CREATE INDEX e2ee_claims_broadcast ON e2ee_claims(broadcast_id, recipient_id);
+        CREATE TABLE e2ee_broadcasts (
+          broadcast_id TEXT PRIMARY KEY,
+          sender_id TEXT NOT NULL REFERENCES agents(agent_id),
+          sender_generation INTEGER NOT NULL CHECK(sender_generation >= 1),
+          thread_id TEXT NOT NULL,
+          audience_repository_name TEXT,
+          audience_machine_name TEXT,
+          idempotency_key TEXT,
+          request_json TEXT NOT NULL,
+          recipient_count INTEGER NOT NULL CHECK(recipient_count BETWEEN 0 AND 100),
+          state TEXT NOT NULL CHECK(state IN ('pending', 'committed', 'cancelled')),
+          created_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          committed_at TEXT,
+          UNIQUE(sender_id, idempotency_key)
+        );
+        CREATE INDEX e2ee_broadcasts_expiration ON e2ee_broadcasts(expires_at, state);
+        CREATE TABLE e2ee_broadcast_deliveries (
+          broadcast_id TEXT NOT NULL REFERENCES e2ee_broadcasts(broadcast_id) ON DELETE CASCADE,
+          recipient_id TEXT NOT NULL REFERENCES agents(agent_id),
+          recipient_generation INTEGER NOT NULL CHECK(recipient_generation >= 1),
+          claim_id TEXT NOT NULL UNIQUE REFERENCES e2ee_claims(claim_id),
+          envelope_json TEXT,
+          sender_chain_json TEXT,
+          ciphertext_bytes INTEGER CHECK(ciphertext_bytes IS NULL OR ciphertext_bytes > 0),
+          accepted_at TEXT,
+          PRIMARY KEY(broadcast_id, recipient_id),
+          CHECK((envelope_json IS NULL) = (accepted_at IS NULL)),
+          CHECK((sender_chain_json IS NULL) = (accepted_at IS NULL)),
+          CHECK((ciphertext_bytes IS NULL) = (accepted_at IS NULL))
+        );
+        CREATE TABLE e2ee_messages (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          message_id TEXT NOT NULL UNIQUE,
+          thread_id TEXT NOT NULL,
+          sender_id TEXT NOT NULL REFERENCES agents(agent_id),
+          sender_generation INTEGER NOT NULL CHECK(sender_generation >= 1),
+          recipient_id TEXT NOT NULL REFERENCES agents(agent_id),
+          recipient_generation INTEGER NOT NULL CHECK(recipient_generation >= 1),
+          broadcast_id TEXT,
+          idempotency_key TEXT NOT NULL,
+          pair_counter INTEGER NOT NULL CHECK(pair_counter >= 1),
+          envelope_json TEXT NOT NULL,
+          sender_chain_json TEXT NOT NULL,
+          ciphertext_bytes INTEGER NOT NULL CHECK(ciphertext_bytes > 0),
+          created_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          read_at TEXT,
+          UNIQUE(sender_id, idempotency_key),
+          UNIQUE(sender_id, recipient_id, pair_counter)
+        );
+        CREATE INDEX e2ee_messages_recipient_sequence
+          ON e2ee_messages(recipient_id, recipient_generation, sequence);
+        CREATE INDEX e2ee_messages_recipient_unread
+          ON e2ee_messages(recipient_id, recipient_generation, read_at, sequence);
+        CREATE INDEX e2ee_messages_thread_sequence ON e2ee_messages(thread_id, sequence);
+        CREATE INDEX e2ee_messages_expiration ON e2ee_messages(expires_at);
+        CREATE INDEX e2ee_messages_broadcast_recipient
+          ON e2ee_messages(broadcast_id, recipient_id);
+        CREATE TABLE e2ee_usage (
+          singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+          claim_count INTEGER NOT NULL DEFAULT 0 CHECK(claim_count >= 0),
+          pending_broadcast_count INTEGER NOT NULL DEFAULT 0 CHECK(pending_broadcast_count >= 0),
+          pending_ciphertext_bytes INTEGER NOT NULL DEFAULT 0 CHECK(pending_ciphertext_bytes >= 0),
+          pending_delivery_count INTEGER NOT NULL DEFAULT 0 CHECK(pending_delivery_count >= 0),
+          public_prekey_count INTEGER NOT NULL DEFAULT 0 CHECK(public_prekey_count >= 0),
+          retained_ciphertext_bytes INTEGER NOT NULL DEFAULT 0 CHECK(retained_ciphertext_bytes >= 0),
+          retained_message_count INTEGER NOT NULL DEFAULT 0 CHECK(retained_message_count >= 0)
+        );
+        INSERT INTO e2ee_usage(singleton) VALUES (1);
         ALTER TABLE agents ADD COLUMN authority TEXT NOT NULL DEFAULT 'peer'
           CHECK(authority = 'peer');
         ALTER TABLE broadcasts ADD COLUMN sender_authority TEXT NOT NULL DEFAULT 'peer'
@@ -254,6 +362,14 @@ export function migrateSqliteDatabase(database: Database): void {
         ALTER TABLE messages ADD COLUMN orchestrator_policy_id TEXT
           CHECK(orchestrator_policy_id IS NULL);
         PRAGMA user_version = 9;
+      `);
+      version = 9;
+    }
+    if (version === 9) {
+      database.exec(`
+        ALTER TABLE e2ee_broadcasts ADD COLUMN sender_authority TEXT NOT NULL DEFAULT 'peer'
+          CHECK(sender_authority IN ('peer', 'orchestrator'));
+        PRAGMA user_version = 10;
       `);
     }
     database.exec("COMMIT");
