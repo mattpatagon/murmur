@@ -52,6 +52,7 @@ an owner, and a deterministic removal condition.
 ## Repository map
 
 - `src/domain/`: branded value objects, data contracts, and protocol models.
+- `src/e2ee/`: canonical encryption, endpoint vaults, trust, proxy flows, and public wire contracts.
 - `src/mcp/`: MCP application composition, tools, resources, and safe result mapping.
 - `src/storage/`: SQLite/PostgreSQL adapters, transactions, rows, and migrations.
 - `src/hosted/`: multi-tenant authentication, authorization, quotas, and control plane.
