@@ -402,6 +402,7 @@ test("routes every enforced ciphertext mutation through bounded validated output
     recipient_id: "bob",
   };
   const put: PutEncryptedMessageInput = await encryptCanaryE2eeMessage({
+    branch: "production-canary",
     claim,
     idempotencyKey: "mcp-enforced-complete",
     pairCounter: 1,
@@ -412,6 +413,7 @@ test("routes every enforced ciphertext mutation through bounded validated output
     senderId: "alice",
     tenantId: TENANT_ID,
   });
+  expect(put.envelope.header.branch_name).toBe("production-canary");
   const aliceBundle: ReturnType<typeof canaryE2eeBundle> = canaryE2eeBundle(alice);
   const message: EncryptedMessageDto = {
     envelope: put.envelope,

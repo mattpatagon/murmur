@@ -206,6 +206,7 @@ test("SQLite physically reclaims cancelled encrypted broadcast artifacts", async
       const claim: ClaimEncryptionPrekeyOutput | undefined = prepared.claims[0];
       if (claim === undefined) throw new Error("Broadcast prune claim is missing");
       const put: PutEncryptedMessageInput = await encryptCanaryE2eeMessage({
+        branch: "feature/hosted-e2ee",
         broadcastId: prepared.broadcast_id,
         claim,
         idempotencyKey: "broadcast-prune",

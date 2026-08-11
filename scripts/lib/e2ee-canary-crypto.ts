@@ -128,6 +128,7 @@ function recipientPrivateKey(
 }
 
 export async function encryptCanaryE2eeMessage(input: {
+  readonly branch: string;
   readonly broadcastId?: string | undefined;
   readonly claim: ClaimEncryptionPrekeyOutput;
   readonly idempotencyKey: string;
@@ -143,7 +144,7 @@ export async function encryptCanaryE2eeMessage(input: {
 }): Promise<PutEncryptedMessageInput> {
   const now: Date = input.now ?? new Date();
   const header: EnvelopeHeaderInput = {
-    branchName: "feature/hosted-e2ee",
+    branchName: input.branch,
     broadcastId: input.broadcastId ?? null,
     client: "codex",
     createdAt: now.toISOString(),

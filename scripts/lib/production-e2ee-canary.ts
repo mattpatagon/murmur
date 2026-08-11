@@ -202,6 +202,7 @@ async function executeEncryptedDelivery(
   );
   const sentinel: string = `paid-e2ee-production-secret-${unique}`;
   const encryptedInput: PutEncryptedMessageInput = await encryptCanaryE2eeMessage({
+    branch: "production-canary",
     claim,
     idempotencyKey: `production-e2ee-${unique}`,
     pairCounter: 1,

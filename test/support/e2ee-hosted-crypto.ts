@@ -90,6 +90,7 @@ export async function testE2eeBundleWithRevokedAgentKey(
 }
 
 export async function encryptTestE2eeMessage(input: {
+  readonly branch: string;
   readonly claim: ClaimEncryptionPrekeyOutput;
   readonly idempotencyKey: string;
   readonly pairCounter: number;

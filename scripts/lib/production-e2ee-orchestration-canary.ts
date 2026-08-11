@@ -105,6 +105,7 @@ export async function executeProductionEncryptedOrchestration(options: {
   assertOrchestrationClaim(claimed.claim, orchestrator);
   const question: string = `paid-e2ee-production-orchestrator-question-${options.unique}`;
   const encryptedQuestion: PutEncryptedMessageInput = await encryptCanaryE2eeMessage({
+    branch: "production-canary",
     claim: claimed.claim,
     idempotencyKey: `production-e2ee-orchestrator-question-${options.unique}`,
     pairCounter: 2,
@@ -152,6 +153,7 @@ export async function executeProductionEncryptedOrchestration(options: {
   assertReplyClaim(replyClaim, options.senderId);
   const reply: string = `paid-e2ee-production-orchestrator-reply-${options.unique}`;
   const encryptedReply: PutEncryptedMessageInput = await encryptCanaryE2eeMessage({
+    branch: "production-canary",
     claim: replyClaim,
     idempotencyKey: `production-e2ee-orchestrator-reply-${options.unique}`,
     pairCounter: 1,
