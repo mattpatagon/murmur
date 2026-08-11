@@ -1,19 +1,8 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import process from "node:process";
-import { fileURLToPath } from "node:url";
-
-import { z } from "zod";
-
-import type { PrekeyCertificateDto } from "../../src/e2ee/wire-contracts.js";
 import {
   type ClaimEncryptionPrekeyOutput,
   ClaimEncryptionPrekeyOutputSchema,
   type E2eeCapabilityOutput,
   E2eeCapabilityOutputSchema,
-  type EncryptedInboxOutput,
-  EncryptedInboxOutputSchema,
   type EncryptedMessageDto,
   type PutEncryptedMessageInput,
   type PutEncryptedMessageOutput,
@@ -33,12 +22,26 @@ import {
   TransitionE2eeOutputSchema,
 } from "../../src/hosted/e2ee-admin-contracts.js";
 import {
+  type CreateOrchestratorTokenOutput,
+  CreateOrchestratorTokenOutputSchema,
+  type SetOrchestratorPolicyOutput,
+  SetOrchestratorPolicyOutputSchema,
+} from "../../src/hosted/orchestration-contracts.js";
+import {
   type CanaryE2eeIdentity,
   canaryE2eeBundle,
   createCanaryE2eeIdentity,
   decryptCanaryE2eeMessage,
   encryptCanaryE2eeMessage,
 } from "./e2ee-canary-crypto.js";
+import { executeProductionEncryptedBroadcast } from "./production-e2ee-broadcast-canary.js";
+import {
+  type ProductionE2eeCanaryState as CanaryState,
+  type ProductionE2eeEndpoints as ConnectedEndpoints,
+  independentlyVerifyLiveEnvelope,
+  liveEncryptedMessage,
+} from "./production-e2ee-canary-support.js";
+import { executeProductionEncryptedOrchestration } from "./production-e2ee-orchestration-canary.js";
 import {
   assertCondition as assert,
   callProductionTool as call,
@@ -55,38 +58,11 @@ export type ProductionE2eeCanaryResult = {
   readonly ciphertext_only_tool_matrix: true;
   readonly cross_repository_delivery: true;
   readonly decrypted_at_recipient: true;
+  readonly encrypted_broadcast_fanout: true;
+  readonly encrypted_orchestrator_round_trip: true;
   readonly independent_signature_verified: true;
   readonly plaintext_fallback_rejected: true;
   readonly tenant_id: string;
-};
-
-const IndependentVerificationSchema: z.ZodType<{
-  readonly message_id: string;
-  readonly outer_header_blake2b_256: string;
-  readonly protocol: "murmur-e2ee-v1";
-  readonly recipient_root_key_id: string;
-  readonly sender_root_key_id: string;
-  readonly signature_verified: true;
-}> = z.strictObject({
-  message_id: z.string().uuid(),
-  outer_header_blake2b_256: z.string().regex(/^[a-f0-9]{64}$/u),
-  protocol: z.literal("murmur-e2ee-v1"),
-  recipient_root_key_id: z.string().regex(/^mrk_[A-Za-z0-9_-]{43}$/u),
-  sender_root_key_id: z.string().regex(/^mrk_[A-Za-z0-9_-]{43}$/u),
-  signature_verified: z.literal(true),
-});
-
-type CanaryState = {
-  readonly adminSecret: string;
-  readonly receiverSecret: string;
-  readonly senderSecret: string;
-  readonly tenantId: string;
-};
-
-type ConnectedEndpoints = {
-  readonly admin: Harness;
-  readonly receiver: Harness;
-  readonly sender: Harness;
 };
 
 async function createCanaryState(
@@ -122,8 +98,18 @@ async function createCanaryState(
       role: "agent",
     }),
   );
+  const orchestratorToken: CreateOrchestratorTokenOutput =
+    CreateOrchestratorTokenOutputSchema.parse(
+      await call(admin, "create_orchestrator_token", {
+        agent_id: `live-e2ee-orchestrator-${unique}`,
+        name: "Production E2E orchestrator",
+        repository: "canary/orchestrator",
+      }),
+    );
   return {
     adminSecret: created.token.secret,
+    orchestratorKeyId: orchestratorToken.token.key_id,
+    orchestratorSecret: orchestratorToken.token.secret,
     receiverSecret: receiverToken.token.secret,
     senderSecret: senderToken.token.secret,
     tenantId: created.tenant.tenant_id,
@@ -156,8 +142,15 @@ async function connectEndpoints(
     "claude",
     "canary/destination",
   );
-  harnesses.push(admin, sender, receiver);
-  return { admin, receiver, sender };
+  const orchestrator: Harness = await connect(
+    url,
+    state.orchestratorSecret,
+    `live-e2ee-orchestrator-${phase}-${unique}`,
+    "codex",
+    "canary/orchestrator",
+  );
+  harnesses.push(admin, sender, receiver, orchestrator);
+  return { admin, orchestrator, receiver, sender };
 }
 
 async function publishIdentity(
@@ -173,63 +166,6 @@ async function publishIdentity(
     published["root_key_id"] === identity.agentCertificate.rootKeyId,
     "Published E2E root was not acknowledged",
   );
-}
-
-function claimedPrekey(claim: ClaimEncryptionPrekeyOutput): PrekeyCertificateDto {
-  if (claim.prekey_class === "fallback") return claim.bundle.fallback_prekey;
-  const certificate: PrekeyCertificateDto | undefined = claim.bundle.one_time_prekeys.find(
-    (candidate: PrekeyCertificateDto): boolean => candidate.prekey_id === claim.prekey_id,
-  );
-  if (certificate === undefined) throw new Error("Production E2E claim omitted its prekey");
-  return certificate;
-}
-
-async function independentlyVerifyLiveEnvelope(
-  message: EncryptedMessageDto,
-  claim: ClaimEncryptionPrekeyOutput,
-): Promise<void> {
-  const capture: Record<string, unknown> = {
-    envelope: message.envelope,
-    recipient: {
-      agent_certificate: claim.bundle.agent_certificate,
-      prekey_certificate: claimedPrekey(claim),
-      root_public_key: claim.bundle.root_public_key,
-    },
-    sender: {
-      agent_certificate: message.sender_chain.agent_certificate,
-      root_public_key: message.sender_chain.root_public_key,
-    },
-  };
-  const verificationTime: string = new Date().toISOString();
-  const directory: string = await mkdtemp(join(tmpdir(), "murmur-e2ee-canary-"));
-  const capturePath: string = join(directory, "capture.json");
-  try {
-    await writeFile(capturePath, JSON.stringify(capture), {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    });
-    const verifierPath: string = fileURLToPath(
-      new URL("../verify-e2ee-capture.ts", import.meta.url),
-    );
-    const child: Bun.Subprocess<"ignore", "pipe", "pipe"> = Bun.spawn(
-      [process.execPath, verifierPath, capturePath, verificationTime],
-      { stderr: "pipe", stdin: "ignore", stdout: "pipe" },
-    );
-    const output: string = await new Response(child.stdout).text();
-    await new Response(child.stderr).text();
-    if ((await child.exited) !== 0) {
-      throw new Error("Independent production envelope verifier failed");
-    }
-    const verified: z.infer<typeof IndependentVerificationSchema> =
-      IndependentVerificationSchema.parse(JSON.parse(output));
-    assert(
-      verified.message_id === message.envelope.header.message_id,
-      "Independent verifier returned a different production message",
-    );
-  } finally {
-    await rm(directory, { force: true, recursive: true });
-  }
 }
 
 async function executeEncryptedDelivery(
@@ -284,16 +220,11 @@ async function executeEncryptedDelivery(
     await call(endpoints.sender, "put_encrypted_message", encryptedInput),
   );
   assert(!stored.duplicate, "Production encrypted delivery was unexpectedly a duplicate");
-  const inbox: EncryptedInboxOutput = EncryptedInboxOutputSchema.parse(
-    await call(endpoints.receiver, "get_encrypted_messages", {
-      after_sequence: 0,
-      agent_id: receiverId,
-      limit: 10,
-      unread_only: false,
-    }),
+  const received: EncryptedMessageDto = await liveEncryptedMessage(
+    endpoints.receiver,
+    receiverId,
+    encryptedInput.envelope.header.message_id,
   );
-  const received: EncryptedMessageDto | undefined = inbox.messages[0];
-  assert(received !== undefined && inbox.messages.length === 1, "Encrypted inbox is incomplete");
   await independentlyVerifyLiveEnvelope(received, claim);
   assert(
     (await decryptCanaryE2eeMessage(received, senderIdentity, receiverIdentity)) === sentinel,
@@ -331,6 +262,7 @@ export async function runProductionE2eeCanary(
   const tenantSlug: string = `production-e2ee-${unique}`;
   const senderId: string = `live-e2ee-source-${unique}`;
   const receiverId: string = `live-e2ee-destination-${unique}`;
+  const orchestratorId: string = `live-e2ee-orchestrator-${unique}`;
   const harnesses: Harness[] = [];
   let tenantId: string | null = null;
   let result: ProductionE2eeCanaryResult | null = null;
@@ -363,11 +295,15 @@ export async function runProductionE2eeCanary(
       agent_id: receiverId,
       metadata: { machine: "production-machine-destination" },
     });
+    await call(initial.orchestrator, "register_agent", {
+      agent_id: orchestratorId,
+      metadata: { machine: "production-machine-orchestrator" },
+    });
     const off: E2eeEntitlementOutput = E2eeEntitlementOutputSchema.parse(
       await call(initial.admin, "get_e2ee_entitlement", {}),
     );
     assert(
-      off.entitlement.state === "off" && off.entitlement.unprovisioned_active_agents === 2,
+      off.entitlement.state === "off" && off.entitlement.unprovisioned_active_agents === 3,
       "Production E2E prerequisites did not detect active endpoints",
     );
     TransitionE2eeOutputSchema.parse(
@@ -387,8 +323,25 @@ export async function runProductionE2eeCanary(
     const now: Date = new Date();
     const senderIdentity: CanaryE2eeIdentity = await createCanaryE2eeIdentity(senderId, now);
     const receiverIdentity: CanaryE2eeIdentity = await createCanaryE2eeIdentity(receiverId, now);
+    const orchestratorIdentity: CanaryE2eeIdentity = await createCanaryE2eeIdentity(
+      orchestratorId,
+      now,
+    );
     await publishIdentity(provisioning.sender, senderId, senderIdentity);
     await publishIdentity(provisioning.receiver, receiverId, receiverIdentity);
+    await publishIdentity(provisioning.orchestrator, orchestratorId, orchestratorIdentity);
+    const policy: SetOrchestratorPolicyOutput = SetOrchestratorPolicyOutputSchema.parse(
+      await call(provisioning.admin, "set_orchestrator_policy", {
+        instructions: "Answer the encrypted production canary and preserve its thread.",
+        orchestrator_key_id: state.orchestratorKeyId,
+        repository: "canary/source",
+        scope_kind: "organization",
+      }),
+    );
+    assert(
+      policy.policy.agent_id === orchestratorId,
+      "Production orchestrator policy crossed agents",
+    );
     const ready: E2eeEntitlementOutput = E2eeEntitlementOutputSchema.parse(
       await call(provisioning.admin, "get_e2ee_entitlement", {}),
     );
@@ -431,6 +384,27 @@ export async function runProductionE2eeCanary(
       senderIdentity,
       receiverIdentity,
     );
+    await executeProductionEncryptedBroadcast({
+      endpoints: enforced,
+      orchestratorId,
+      orchestratorIdentity,
+      receiverId,
+      receiverIdentity,
+      senderId,
+      senderIdentity,
+      state,
+      unique,
+    });
+    await executeProductionEncryptedOrchestration({
+      endpoints: enforced,
+      orchestratorId,
+      orchestratorIdentity,
+      policyId: policy.policy.policy_id,
+      senderId,
+      senderIdentity,
+      state,
+      unique,
+    });
     const operatorReset: string = await callExpectingError(operator, "reset_e2ee_identity", {
       agent_id: receiverId,
       expected_root_key_id: receiverIdentity.agentCertificate.rootKeyId,
@@ -442,6 +416,8 @@ export async function runProductionE2eeCanary(
       ciphertext_only_tool_matrix: true,
       cross_repository_delivery: true,
       decrypted_at_recipient: true,
+      encrypted_broadcast_fanout: true,
+      encrypted_orchestrator_round_trip: true,
       independent_signature_verified: true,
       plaintext_fallback_rejected: true,
       tenant_id: state.tenantId,

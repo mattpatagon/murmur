@@ -15,7 +15,7 @@ All notable changes to Murmur are documented in this file.
 
 - Store only bounded ciphertext, public certificates, routing metadata, and signed provenance for enforced tenants across SQLite and forced-RLS PostgreSQL, including atomic per-recipient broadcasts and commit-time inbox visibility.
 - Route content-free lifecycle, inbox-summary, notification, and orchestration operations through the encrypted endpoint without copying credentials or private keys into client configuration.
-- Verify live production canary envelopes in an isolated process and document strict setup, trust, recovery, migration, observability, and platform-support contracts.
+- Verify live direct, atomic broadcast, and orchestrator request/reply canary envelopes in an isolated process and document strict setup, trust, recovery, migration, observability, and platform-support contracts.
 
 ### Fixed
 

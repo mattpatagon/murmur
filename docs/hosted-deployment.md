@@ -300,7 +300,9 @@ agent tool separation, intra-tenant direct and broadcast delivery,
 cross-tenant denial, session binding, lifecycle state, historical inbox isolation,
 repository notices, suspension and restoration, and audit history. A separate disposable E2E
 tenant proves repository-bound key provisioning, state cutover, ciphertext-only tool exposure,
-recipient decryption, rollback refusal, and plaintext-fallback denial. It revokes the temporary
+recipient decryption, atomic two-recipient encrypted broadcast fan-out, encrypted orchestrator
+request/reply provenance, rollback refusal, and plaintext-fallback denial. Every live envelope is
+checked by the isolated verifier before local decryption. The canary revokes the temporary
 credential and leaves its uniquely named tenants suspended for inspection.
 
 ## Rollback and recovery
