@@ -86,6 +86,7 @@ test.skipIf(!postgresConfigured)(
         authorization,
       );
       const put: PutEncryptedMessageInput = await encryptCanaryE2eeMessage({
+        branch: "feature/hosted-e2ee",
         claim,
         idempotencyKey: `orchestrator-rotation-${unique}`,
         pairCounter: 1,

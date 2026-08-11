@@ -190,6 +190,7 @@ test("forwards every bounded encrypted and orchestration operation", async (): P
     recipient_id: "bob",
   };
   const encryptedInput: PutEncryptedMessageInput = await encryptCanaryE2eeMessage({
+    branch: "feature/hosted-e2ee",
     claim,
     idempotencyKey: "http-remote-complete",
     pairCounter: 1,

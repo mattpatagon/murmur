@@ -358,7 +358,7 @@ export async function verifyHostedE2ee(scenario: HostedTenantScenario): Promise<
     816,
     "claim_encryption_prekey",
     {
-      context: { branch: "feature/hosted-e2ee", client: "codex", repository: "mattpatagon/murmur" },
+      context: { branch: "production-canary", client: "codex", repository: "mattpatagon/murmur" },
       recipient_id: bobId,
       sender_id: aliceId,
     },
@@ -366,6 +366,7 @@ export async function verifyHostedE2ee(scenario: HostedTenantScenario): Promise<
   );
   const sentinel: string = `paid-e2ee-secret-${scenario.unique}`;
   const encryptedInput: PutEncryptedMessageInput = await encryptTestE2eeMessage({
+    branch: "production-canary",
     claim,
     idempotencyKey: `hosted-e2ee-${scenario.unique}`,
     pairCounter: 1,

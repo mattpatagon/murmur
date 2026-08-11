@@ -119,6 +119,7 @@ export async function executeProductionEncryptedBroadcast(options: {
       receiverIdentity: options.receiverIdentity,
     });
     const input: PutEncryptedMessageInput = await encryptCanaryE2eeMessage({
+      branch: "production-canary",
       broadcastId: prepared.broadcast_id,
       claim,
       idempotencyKey: `production-e2ee-broadcast-${options.unique}-${claim.recipient_id}`,
