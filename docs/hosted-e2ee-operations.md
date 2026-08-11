@@ -158,6 +158,8 @@ ciphertext decryption, checks zero plaintext persistence, probes same- and cross
 direct state mutation and plaintext insertion, verifies public-role denial, exercises a populated
 upgrade, runs security advisors, and enforces hosted coverage. Production canaries also confirm the
 current tenant tool matrix, deliver a sentinel between independently authenticated cross-repository
-endpoints, and pass the captured live envelope through the isolated independent verifier process.
+endpoints, atomically fan encrypted broadcast ciphertext to two recipients, complete an encrypted
+orchestrator request/reply with server-issued provenance, and pass every captured live envelope
+through the isolated independent verifier process.
 When an operator claims cross-machine coverage, run the sender and receiver endpoints from separate
 hosts; machine metadata alone is not evidence of host isolation.

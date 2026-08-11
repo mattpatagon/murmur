@@ -277,6 +277,30 @@ test("production smoke masks privileged credentials before live isolation checks
   expect(workflow).not.toContain("MURMUR_LIVE_FOUNDING_TOKEN");
 });
 
+test("production E2E smoke proves direct, broadcast, and orchestrator ciphertext paths", async (): Promise<void> => {
+  const canary: string = await Bun.file("scripts/lib/production-e2ee-canary.ts").text();
+  const broadcast: string = await Bun.file(
+    "scripts/lib/production-e2ee-broadcast-canary.ts",
+  ).text();
+  const orchestration: string = await Bun.file(
+    "scripts/lib/production-e2ee-orchestration-canary.ts",
+  ).text();
+  const verifier: string = await Bun.file("scripts/lib/production-e2ee-canary-support.ts").text();
+  expect(canary).toContain("executeProductionEncryptedBroadcast");
+  expect(canary).toContain("executeProductionEncryptedOrchestration");
+  expect(canary).toContain("encrypted_broadcast_fanout: true");
+  expect(canary).toContain("encrypted_orchestrator_round_trip: true");
+  expect(broadcast).toContain('"prepare_encrypted_broadcast"');
+  expect(broadcast).toContain('"put_encrypted_broadcast_delivery"');
+  expect(broadcast).toContain('"commit_encrypted_broadcast"');
+  expect(broadcast).toContain("A partial encrypted broadcast became visible before commit");
+  expect(orchestration).toContain('"claim_orchestrator_prekey"');
+  expect(orchestration).toContain("Orchestrator question plaintext reached the server");
+  expect(orchestration).toContain("Orchestrator reply plaintext reached the server");
+  expect(orchestration).toContain('!senderTools.includes("ask_orchestrator")');
+  expect(verifier).toContain('new URL("../verify-e2ee-capture.ts", import.meta.url)');
+});
+
 test("workflows pin every GitHub Action to an immutable commit", async (): Promise<void> => {
   const workflowPaths: readonly string[] = [
     ".github/workflows/ci.yml",
