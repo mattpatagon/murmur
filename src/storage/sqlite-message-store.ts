@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 import { AgentClosedError, UnknownAgentError } from "../domain/errors.js";
+import type { SubmitFeedbackCommand, SubmitFeedbackResult } from "../domain/feedback-models.js";
 import type {
   Agent,
   BroadcastMessageCommand,
@@ -60,6 +61,7 @@ import {
 import { broadcastSqliteMessage } from "./sqlite-broadcast-store.js";
 import { sendSqliteMessage } from "./sqlite-direct-message-store.js";
 import { SqliteE2eeMessageStore } from "./sqlite-e2ee-message-store.js";
+import { submitSqliteFeedback } from "./sqlite-feedback-store.js";
 import { pruneSqliteLifecycle } from "./sqlite-lifecycle-prune.js";
 import { migrateSqliteDatabase } from "./sqlite-message-migrations.js";
 import {
@@ -269,6 +271,11 @@ export class SqliteMessageStore implements MessageStore {
     const now: Instant = this.clock.now();
     this.pruneExpired(now);
     return sendSqliteMessage(this.database, command, now);
+  }
+
+  public submitFeedback(command: SubmitFeedbackCommand): SubmitFeedbackResult {
+    this.ensureOpen();
+    return submitSqliteFeedback(this.database, command, this.clock.now());
   }
 
   public getMessages(query: GetMessagesQuery): readonly Message[] {

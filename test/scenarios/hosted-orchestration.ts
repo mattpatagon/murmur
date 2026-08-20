@@ -28,6 +28,7 @@ import {
   toolNames,
 } from "../support/hosted-mcp-harness.js";
 import { verifyExpiredOrchestratorRotation } from "./hosted-orchestration-expiry.js";
+import { verifyFeedbackAuthorityBoundary } from "./hosted-feedback-security.js";
 import {
   verifyAskIdempotencyConflicts,
   verifyConcurrentSameScopePolicies,
@@ -122,6 +123,7 @@ export async function verifyHostedOrchestration(
   );
   expect(workerTools).toContain("get_orchestrator");
   expect(workerTools).toContain("ask_orchestrator");
+  await verifyFeedbackAuthorityBoundary(scenario, bossAgentId);
   await verifyOfflineOrchestratorReservation({
     bossAgentId,
     bossKeyId: boss.token.key_id,

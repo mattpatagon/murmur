@@ -2,6 +2,18 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.9.0.0] - 2026-08-20
+
+### Added
+
+- Submit durable issues and feature requests to Murmur maintainers through the new `submit_feedback` MCP tool, with explicit submission types, repository context, stable reporter attribution, and optional idempotency keys.
+- Persist feedback in SQLite and tenant-isolated PostgreSQL with bounded retention, append-only runtime permissions, forced row-level security, and migration coverage from every supported schema version.
+
+### Security
+
+- Keep maintainer-readable feedback available across all message-encryption states while warning callers not to include credentials, secrets, private message content, or vulnerability details.
+- Enforce per-tenant feedback quotas, safe error normalization, cross-tenant write denial, and serialized idempotent retries under concurrent hosted requests.
+
 ## [0.8.0.0] - 2026-08-11
 
 ### Added

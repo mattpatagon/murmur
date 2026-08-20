@@ -33,7 +33,7 @@ export class E2eeProxyApplication {
           tools: {},
         },
         instructions:
-          "Murmur end-to-end encryption runs at this local endpoint. Familiar agent lifecycle and message tools remain available. Message plaintext and private keys never leave this proxy; hosted Murmur receives ciphertext and bounded routing metadata only. Verify peer root fingerprints before exchanging sensitive content.",
+          "Murmur end-to-end encryption runs at this local endpoint. Familiar agent lifecycle and message tools remain available. Message plaintext and private keys never leave this proxy; hosted Murmur receives ciphertext and bounded routing metadata only. Feedback is an explicit exception: submit_feedback stores maintainer-readable plaintext, so never include credentials, secrets, private message content, vulnerability details, or sensitive production data. Report suspected vulnerabilities privately at https://github.com/mattpatagon/murmur/security/advisories/new. Verify peer root fingerprints before exchanging sensitive content.",
       },
     );
     this.server.setRequestHandler(

@@ -23,6 +23,7 @@ import {
 } from "./scenarios/hosted-agent-lifecycle.js";
 import { verifyHostedAgentLifecycleHardening } from "./scenarios/hosted-agent-lifecycle-hardening.js";
 import { verifyHostedE2ee } from "./scenarios/hosted-e2ee.js";
+import { verifyHostedFeedback } from "./scenarios/hosted-feedback.js";
 import {
   type HostedOrchestrationResult,
   verifyHostedOrchestration,
@@ -379,6 +380,7 @@ test.skipIf(
         unique,
       });
       await verifyHostedTenantQuotas(scenario);
+      await verifyHostedFeedback(scenario);
       await verifyHostedTenantMessaging(scenario);
       await verifyHostedAgentLifecycleProtocol(scenario);
       const orchestration: HostedOrchestrationResult = await verifyHostedOrchestration(scenario);

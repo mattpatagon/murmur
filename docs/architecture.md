@@ -90,6 +90,13 @@ stable creator identity may withdraw it. Notice reads use stable keyset cursors 
 default session. Creator, resolver, and withdrawer references preserve identity generation lineage
 until the notice leaves its audit window.
 
+Murmur feedback is also separate from inbox messages. `submit_feedback` writes an append-only,
+tenant-scoped `issue` or `feature_request` record with the reporter generation and required
+repository, branch, and client context. An optional idempotency key makes exact retries return the
+original record and rejects semantic conflicts. Feedback is a deliberate maintainer-readable
+communication source, remains plaintext when message E2E is enforced, and has independent count
+and byte quotas.
+
 PostgreSQL ties each persisted sender-authority value to the registered tenant agent through a
 composite foreign key, so broadcast fan-out validates authority without a row-trigger lookup for
 every delivery.
@@ -144,6 +151,10 @@ identities become eligible for deletion 30 days later. Destructive lifecycle mut
 exact current-generation guard, and dormant pruning serializes with registration and delivery before
 rechecking eligibility. Notices allow one- through 90-day lifetimes, default to 14 days, retain
 terminal audit state for 30 days, and are capped per tenant at 10,000 rows and 64 MiB of content.
+Feedback is independently capped at 10,000 append-only rows and 64 MiB of title-plus-description
+content per tenant.
+Reporter identities remain retained while append-only feedback references their generation, so
+garbage collection cannot make a later identity reuse ambiguous.
 
 Queues are finite and waits have deadlines. Shutdown stops new admission, closes the HTTP server,
 closes applications and stores, then flushes telemetry within a bounded timeout. Cleanup remains

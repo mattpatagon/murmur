@@ -1,8 +1,16 @@
 import { expect } from "bun:test";
 import postgres, { type Sql } from "postgres";
 
+import {
+  type SubmitFeedbackOutput,
+  SubmitFeedbackOutputSchema,
+} from "../../src/domain/feedback-contracts.js";
 import { postgresSslOptions } from "../../src/postgres-tls.js";
-import { callToolExpectingError, testTlsConfiguration } from "../support/hosted-mcp-harness.js";
+import {
+  callTool,
+  callToolExpectingError,
+  testTlsConfiguration,
+} from "../support/hosted-mcp-harness.js";
 import type { HostedTenantScenario } from "./hosted-tenant-provisioning.js";
 
 export async function verifyHostedTenantQuotas(scenario: HostedTenantScenario): Promise<void> {
@@ -63,7 +71,125 @@ export async function verifyHostedTenantQuotas(scenario: HostedTenantScenario): 
     ).toContain("Open agent capacity reached");
     await quotaDatabase`
       UPDATE murmur.tenant_resource_usage
-      SET notice_content_bytes = 67108864
+      SET
+        feedback_submission_count = 0,
+        feedback_content_bytes = 67108858
+      WHERE tenant_id = ${scenario.tenantA.tenant.tenant_id}::uuid
+    `;
+    const byteBoundaryArguments: Record<string, unknown> = {
+      description: "🙂",
+      idempotency_key: `feedback-byte-boundary-${scenario.unique}`,
+      reporter_id: scenario.senderA,
+      title: "é",
+      type: "issue",
+    };
+    const byteBoundary: SubmitFeedbackOutput = await callTool(
+      scenario.server.mcpUrl,
+      scenario.agentAToken.token.secret,
+      scenario.agentASession,
+      416,
+      "submit_feedback",
+      byteBoundaryArguments,
+      SubmitFeedbackOutputSchema,
+    );
+    expect(byteBoundary.duplicate).toBe(false);
+    const byteUsage: { readonly bytes: number; readonly count: number }[] = await quotaDatabase`
+        SELECT feedback_submission_count::integer AS count,
+          feedback_content_bytes::integer AS bytes
+        FROM murmur.tenant_resource_usage
+        WHERE tenant_id = ${scenario.tenantA.tenant.tenant_id}::uuid
+      `;
+    expect(byteUsage).toEqual([{ bytes: 67_108_864, count: 1 }]);
+    const byteRetry: SubmitFeedbackOutput = await callTool(
+      scenario.server.mcpUrl,
+      scenario.agentAToken.token.secret,
+      scenario.agentASession,
+      417,
+      "submit_feedback",
+      byteBoundaryArguments,
+      SubmitFeedbackOutputSchema,
+    );
+    expect(byteRetry.duplicate).toBe(true);
+    expect(byteRetry.submission.submission_id).toBe(byteBoundary.submission.submission_id);
+    expect(
+      await callToolExpectingError(
+        scenario.server.mcpUrl,
+        scenario.agentAToken.token.secret,
+        scenario.agentASession,
+        418,
+        "submit_feedback",
+        {
+          description: "one byte past the feedback boundary",
+          reporter_id: scenario.senderA,
+          title: "Overflow",
+          type: "issue",
+        },
+      ),
+    ).toContain("Retained feedback capacity reached");
+    await quotaDatabase`
+      UPDATE murmur.tenant_resource_usage AS usage
+      SET
+        feedback_submission_count = 9999,
+        feedback_content_bytes = (
+          SELECT coalesce(sum(octet_length(feedback.title) + octet_length(feedback.description)), 0)::bigint
+          FROM murmur.feedback_submissions AS feedback
+          WHERE feedback.tenant_id = usage.tenant_id
+        )
+      WHERE usage.tenant_id = ${scenario.tenantA.tenant.tenant_id}::uuid
+    `;
+    const countBoundaryArguments: Record<string, unknown> = {
+      description: "count boundary",
+      idempotency_key: `feedback-count-boundary-${scenario.unique}`,
+      reporter_id: scenario.senderA,
+      title: "Count boundary",
+      type: "feature_request",
+    };
+    const countBoundary: SubmitFeedbackOutput = await callTool(
+      scenario.server.mcpUrl,
+      scenario.agentAToken.token.secret,
+      scenario.agentASession,
+      419,
+      "submit_feedback",
+      countBoundaryArguments,
+      SubmitFeedbackOutputSchema,
+    );
+    expect(countBoundary.duplicate).toBe(false);
+    const countUsage: { readonly count: number }[] = await quotaDatabase`
+      SELECT feedback_submission_count::integer AS count
+      FROM murmur.tenant_resource_usage
+      WHERE tenant_id = ${scenario.tenantA.tenant.tenant_id}::uuid
+    `;
+    expect(countUsage).toEqual([{ count: 10_000 }]);
+    const countRetry: SubmitFeedbackOutput = await callTool(
+      scenario.server.mcpUrl,
+      scenario.agentAToken.token.secret,
+      scenario.agentASession,
+      420,
+      "submit_feedback",
+      countBoundaryArguments,
+      SubmitFeedbackOutputSchema,
+    );
+    expect(countRetry.duplicate).toBe(true);
+    expect(countRetry.submission.submission_id).toBe(countBoundary.submission.submission_id);
+    expect(
+      await callToolExpectingError(
+        scenario.server.mcpUrl,
+        scenario.agentAToken.token.secret,
+        scenario.agentASession,
+        421,
+        "submit_feedback",
+        {
+          description: "one row past the feedback boundary",
+          reporter_id: scenario.senderA,
+          title: "Overflow",
+          type: "issue",
+        },
+      ),
+    ).toContain("Retained feedback capacity reached");
+    await quotaDatabase`
+      UPDATE murmur.tenant_resource_usage
+      SET feedback_content_bytes = 67108864,
+        notice_content_bytes = 67108864
       WHERE tenant_id = ${scenario.tenantA.tenant.tenant_id}::uuid
     `;
     expect(
@@ -80,6 +206,21 @@ export async function verifyHostedTenantQuotas(scenario: HostedTenantScenario): 
         },
       ),
     ).toContain("Retained notice capacity reached");
+    expect(
+      await callToolExpectingError(
+        scenario.server.mcpUrl,
+        scenario.agentAToken.token.secret,
+        scenario.agentASession,
+        422,
+        "submit_feedback",
+        {
+          description: "feedback byte quota rejected",
+          reporter_id: scenario.senderA,
+          title: "Quota rejected",
+          type: "issue",
+        },
+      ),
+    ).toContain("Retained feedback capacity reached");
     expect(
       await callToolExpectingError(
         scenario.server.mcpUrl,
@@ -160,6 +301,15 @@ export async function verifyHostedTenantQuotas(scenario: HostedTenantScenario): 
           SELECT coalesce(sum(octet_length(notice.content)), 0)::bigint
           FROM murmur.notices AS notice
           WHERE notice.tenant_id = usage.tenant_id
+        ),
+        feedback_submission_count = (
+          SELECT count(*) FROM murmur.feedback_submissions AS feedback
+          WHERE feedback.tenant_id = usage.tenant_id
+        ),
+        feedback_content_bytes = (
+          SELECT coalesce(sum(octet_length(feedback.title) + octet_length(feedback.description)), 0)::bigint
+          FROM murmur.feedback_submissions AS feedback
+          WHERE feedback.tenant_id = usage.tenant_id
         )
       WHERE usage.tenant_id = ${scenario.tenantA.tenant.tenant_id}::uuid
     `;

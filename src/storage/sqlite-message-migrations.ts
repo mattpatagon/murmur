@@ -2,7 +2,7 @@ import type { Database, Statement } from "bun:sqlite";
 
 import { type UserVersionRow, UserVersionRowSchema } from "./sqlite-message-rows.js";
 
-const SUPPORTED_SCHEMA_VERSION: number = 10;
+const SUPPORTED_SCHEMA_VERSION: number = 11;
 
 function schemaVersion(database: Database): number {
   const statement: Statement<unknown, []> = database.query("PRAGMA user_version");
@@ -370,6 +370,56 @@ export function migrateSqliteDatabase(database: Database): void {
         ALTER TABLE e2ee_broadcasts ADD COLUMN sender_authority TEXT NOT NULL DEFAULT 'peer'
           CHECK(sender_authority IN ('peer', 'orchestrator'));
         PRAGMA user_version = 10;
+      `);
+      version = 10;
+    }
+    if (version === 10) {
+      database.exec(`
+        CREATE TABLE feedback_submissions (
+          feedback_id TEXT PRIMARY KEY,
+          submission_type TEXT NOT NULL
+            CHECK(submission_type IN ('issue', 'feature_request')),
+          reporter_id TEXT NOT NULL
+            CHECK(
+              length(reporter_id) BETWEEN 1 AND 200
+              AND substr(reporter_id, 1, 1) GLOB '[A-Za-z0-9]'
+              AND reporter_id NOT GLOB '*[^A-Za-z0-9._:-]*'
+            ),
+          reporter_generation INTEGER NOT NULL CHECK(reporter_generation >= 1),
+          repository_name TEXT NOT NULL
+            CHECK(
+              length(repository_name) BETWEEN 3 AND 500
+              AND repository_name GLOB '*/*'
+              AND repository_name NOT GLOB '*[^A-Za-z0-9._/-]*'
+              AND substr(repository_name, 1, 1) <> '/'
+              AND substr(repository_name, -1, 1) <> '/'
+              AND instr(repository_name, '//') = 0
+            ),
+          branch_name TEXT NOT NULL CHECK(length(branch_name) BETWEEN 1 AND 500),
+          client_name TEXT NOT NULL CHECK(client_name IN ('claude', 'codex')),
+          title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200),
+          description TEXT NOT NULL CHECK(length(description) BETWEEN 1 AND 100000),
+          idempotency_key TEXT CHECK(
+            idempotency_key IS NULL OR length(idempotency_key) BETWEEN 1 AND 200
+          ),
+          created_at TEXT NOT NULL,
+          UNIQUE(reporter_id, idempotency_key)
+        );
+        CREATE INDEX feedback_submissions_created
+          ON feedback_submissions(created_at DESC, feedback_id);
+        CREATE INDEX feedback_submissions_type_created
+          ON feedback_submissions(submission_type, created_at DESC, feedback_id);
+        CREATE INDEX feedback_submissions_reporter
+          ON feedback_submissions(reporter_id);
+        CREATE TABLE feedback_usage (
+          singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+          submission_count INTEGER NOT NULL DEFAULT 0
+            CHECK(submission_count BETWEEN 0 AND 10000),
+          content_bytes INTEGER NOT NULL DEFAULT 0
+            CHECK(content_bytes BETWEEN 0 AND 67108864)
+        );
+        INSERT INTO feedback_usage(singleton) VALUES (1);
+        PRAGMA user_version = 11;
       `);
     }
     database.exec("COMMIT");

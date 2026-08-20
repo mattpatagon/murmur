@@ -2,9 +2,16 @@ import { expect } from "bun:test";
 import postgres, { type Sql, type TransactionSql } from "postgres";
 
 import { AgentGeneration, NoticeContent, SessionKey } from "../../src/domain/lifecycle-values.js";
+import {
+  FeedbackDescription,
+  FeedbackTitle,
+  type SubmitFeedbackResult,
+} from "../../src/domain/feedback-models.js";
 import type { Agent, ListAgentsResult, RegisterAgentResult } from "../../src/domain/models.js";
 import {
   AgentId,
+  AgentClient,
+  BranchName,
   DisplayName,
   IdempotencyKey,
   Instant,
@@ -74,6 +81,47 @@ async function verifyNoticeRetainsGeneration(
   clock.set(clock.now().addDays(91));
   await store.pruneExpired(clock.now());
   expect(await store.getAgent(AgentId.parse(agentId))).toBeNull();
+}
+
+async function verifyFeedbackRetainsGeneration(
+  store: MessageStore,
+  clock: MutableClock,
+  agentId: string,
+): Promise<void> {
+  await register(store, agentId, "generation-one");
+  const first: SubmitFeedbackResult = await store.submitFeedback({
+    branchName: BranchName.parse("feature/feedback-lineage"),
+    client: AgentClient.parse("codex"),
+    description: FeedbackDescription.parse("retain hosted feedback reporter lineage"),
+    idempotencyKey: IdempotencyKey.parse("hosted-feedback-lineage-one"),
+    reporterId: AgentId.parse(agentId),
+    repositoryName: RepositoryName.parse("mattpatagon/murmur"),
+    sessionKey: SessionKey.parse("generation-one"),
+    title: FeedbackTitle.parse("Retain reporter lineage"),
+    type: "issue",
+  });
+  expect(first.submission.reporterGeneration.value).toBe(1);
+  await store.closeAgent({
+    agentId: AgentId.parse(agentId),
+    closeReason: "manual",
+    expectedGeneration: AgentGeneration.parse(1),
+  });
+  clock.set(clock.now().addDays(31));
+  await store.pruneExpired(clock.now());
+  const second: RegisterAgentResult = await register(store, agentId, "generation-two");
+  expect(second.agent.generation.value).toBe(2);
+  const feedback: SubmitFeedbackResult = await store.submitFeedback({
+    branchName: BranchName.parse("feature/feedback-lineage"),
+    client: AgentClient.parse("codex"),
+    description: FeedbackDescription.parse("record the next reporter generation"),
+    idempotencyKey: IdempotencyKey.parse("hosted-feedback-lineage-two"),
+    reporterId: AgentId.parse(agentId),
+    repositoryName: RepositoryName.parse("mattpatagon/murmur"),
+    sessionKey: SessionKey.parse("generation-two"),
+    title: FeedbackTitle.parse("Record reporter generation"),
+    type: "feature_request",
+  });
+  expect(feedback.submission.reporterGeneration.value).toBe(2);
 }
 
 async function waitForAdvisoryWaiter(transaction: TransactionSql): Promise<void> {
@@ -219,6 +267,11 @@ export async function verifyHostedAgentLifecycleHardening(
       store,
       clock,
       `lifecycle-notice-retention-${scenario.unique}`,
+    );
+    await verifyFeedbackRetainsGeneration(
+      store,
+      clock,
+      `lifecycle-feedback-retention-${scenario.unique}`,
     );
     await verifyPruneRechecksAfterLockedRenewal(
       admin,

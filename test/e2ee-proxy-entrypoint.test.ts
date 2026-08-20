@@ -19,6 +19,10 @@ import type {
   RegisterAgentInput,
   RegisterAgentOutput,
 } from "../src/domain/contracts.js";
+import type {
+  SubmitFeedbackInput,
+  SubmitFeedbackOutput,
+} from "../src/domain/feedback-contracts.js";
 import {
   AgentClient,
   BranchName,
@@ -109,6 +113,10 @@ class StartupRemote implements E2eeProxyRemoteClient {
 
   public async closeAgent(_input: CloseAgentInput): Promise<CloseAgentOutput> {
     throw new Error("unexpected close agent call");
+  }
+
+  public async submitFeedback(_input: SubmitFeedbackInput): Promise<SubmitFeedbackOutput> {
+    throw new Error("unexpected feedback call");
   }
 
   public async publishAgentKeyBundle(

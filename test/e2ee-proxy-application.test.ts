@@ -30,6 +30,11 @@ import type {
   SendMessageInput,
   WaitForMessagesInput,
 } from "../src/domain/contracts.js";
+import {
+  type SubmitFeedbackInput,
+  type SubmitFeedbackOutput,
+  SubmitFeedbackOutputSchema,
+} from "../src/domain/feedback-contracts.js";
 import { E2eeProxyApplication } from "../src/e2ee/proxy-application.js";
 import {
   type ProxyBroadcastOutput,
@@ -164,6 +169,28 @@ class FakeProxyOperations implements E2eeProxyOperations {
     };
   }
 
+  public async submitFeedback(input: SubmitFeedbackInput): Promise<SubmitFeedbackOutput> {
+    this.calls.push("submit_feedback");
+    return SubmitFeedbackOutputSchema.parse({
+      duplicate: false,
+      status: "stored",
+      submission: {
+        context: input.context ?? {
+          branch: "feature/e2ee",
+          client: "codex",
+          repository: "mattpatagon/murmur",
+        },
+        created_at: NOW,
+        description: input.description,
+        reporter_generation: 1,
+        reporter_id: input.reporter_id,
+        submission_id: "00000000-0000-4000-8000-000000000003",
+        title: input.title,
+        type: input.type,
+      },
+    });
+  }
+
   public async broadcastMessage(_input: BroadcastMessageInput): Promise<ProxyBroadcastOutput> {
     this.calls.push("broadcast_message");
     return {
@@ -248,6 +275,7 @@ test("local E2E MCP proxy preserves familiar data tools and verified plaintext o
       "list_agents",
       "end_session",
       "close_agent",
+      "submit_feedback",
       "send_message",
       "get_orchestrator",
       "ask_orchestrator",
@@ -262,6 +290,12 @@ test("local E2E MCP proxy preserves familiar data tools and verified plaintext o
         (tool: (typeof listed.tools)[number]): boolean => tool.name === "put_encrypted_message",
       ),
     ).toBe(false);
+    const feedbackTool: (typeof listed.tools)[number] | undefined = listed.tools.find(
+      (tool: (typeof listed.tools)[number]): boolean => tool.name === "submit_feedback",
+    );
+    if (feedbackTool === undefined) throw new Error("Missing encrypted proxy feedback tool");
+    expect(feedbackTool.description).toContain("maintainer-readable plaintext");
+    expect(feedbackTool.description).toContain("security/advisories/new");
 
     await callTool(client, "register_agent", {
       agent_id: SENDER_ID,
@@ -275,6 +309,16 @@ test("local E2E MCP proxy preserves familiar data tools and verified plaintext o
       expected_generation: 1,
       reason: "stop",
       session_key: "pane-1",
+    });
+    const feedback: CallToolResult = await callTool(client, "submit_feedback", {
+      description: "Keep feedback available through the encrypted proxy.",
+      reporter_id: SENDER_ID,
+      title: "Encrypted proxy feedback",
+      type: "feature_request",
+    });
+    expect(SubmitFeedbackOutputSchema.parse(feedback.structuredContent)).toMatchObject({
+      duplicate: false,
+      submission: { reporter_id: SENDER_ID, type: "feature_request" },
     });
     const sent: CallToolResult = await callTool(client, "send_message", {
       content: "endpoint plaintext",
@@ -328,6 +372,7 @@ test("local E2E MCP proxy preserves familiar data tools and verified plaintext o
       "get_agent",
       "list_agents",
       "end_session",
+      "submit_feedback",
       "send_message",
       "broadcast_message",
       "get_messages",

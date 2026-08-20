@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertNoE2eePlaintextLeak, type LeakScanResult } from "../scripts/e2ee-leak-detector.js";
 import type { MarkMessagesReadOutput, RegisterAgentOutput } from "../src/domain/contracts.js";
+import type { SubmitFeedbackOutput } from "../src/domain/feedback-contracts.js";
 import type { Clock, Instant } from "../src/domain/value-objects.js";
 import {
   AgentClient,
@@ -198,6 +199,20 @@ test("proxy service delegates bounded lifecycle operations and fails closed afte
     });
     expect((await proxy.listAgents({ limit: 10, state: "all" })).agents).toHaveLength(1);
     expect((await proxy.getAgent({ agent_id: SENDER_ID })).agent.state).toBe("active");
+    const feedback: SubmitFeedbackOutput = await proxy.submitFeedback({
+      description: "Forward the deliberate plaintext exception.",
+      reporter_id: SENDER_ID,
+      title: "E2EE proxy feedback",
+      type: "issue",
+    });
+    expect(feedback).toMatchObject({
+      duplicate: false,
+      submission: {
+        context: { branch: "feature/lifecycle", repository: "example/lifecycle" },
+        reporter_id: SENDER_ID,
+        type: "issue",
+      },
+    });
     expect(
       await proxy.endSession({
         agent_id: SENDER_ID,

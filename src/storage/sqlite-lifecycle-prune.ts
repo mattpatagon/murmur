@@ -53,6 +53,9 @@ export function pruneSqliteLifecycle(database: Database, now: Instant): number {
           AND NOT EXISTS (SELECT 1 FROM notices WHERE creator_id = candidate.agent_id)
           AND NOT EXISTS (SELECT 1 FROM notices WHERE resolved_by_id = candidate.agent_id)
           AND NOT EXISTS (SELECT 1 FROM notices WHERE withdrawn_by_id = candidate.agent_id)
+          AND NOT EXISTS (
+            SELECT 1 FROM feedback_submissions WHERE reporter_id = candidate.agent_id
+          )
           ORDER BY candidate.closed_at ASC, candidate.agent_id ASC
           LIMIT 1000
         )

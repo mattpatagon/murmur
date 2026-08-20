@@ -1,4 +1,5 @@
 import type { AgentGeneration } from "../domain/lifecycle-values.js";
+import type { SubmitFeedbackCommand, SubmitFeedbackResult } from "../domain/feedback-models.js";
 import type {
   Agent,
   BroadcastMessageCommand,
@@ -47,6 +48,7 @@ export interface MessageStore {
   closeAgent(command: CloseAgentCommand): Awaitable<CloseAgentResult>;
   broadcastMessage(command: BroadcastMessageCommand): Awaitable<BroadcastMessageResult>;
   sendMessage(command: SendMessageCommand): Awaitable<SendMessageResult>;
+  submitFeedback(command: SubmitFeedbackCommand): Awaitable<SubmitFeedbackResult>;
   getMessages(query: GetMessagesQuery): Awaitable<readonly Message[]>;
   markMessagesRead(command: MarkMessagesReadCommand): Awaitable<MarkMessagesReadResult>;
   postNotice(command: PostNoticeCommand): Awaitable<PostNoticeResult>;

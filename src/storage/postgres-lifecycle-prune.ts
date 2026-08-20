@@ -153,6 +153,10 @@ export async function prunePostgresLifecycle(
         WHERE notice.tenant_id = agent.tenant_id AND notice.withdrawn_by_id = agent.agent_id
       )
       AND NOT EXISTS (
+        SELECT 1 FROM murmur.feedback_submissions AS feedback
+        WHERE feedback.tenant_id = agent.tenant_id AND feedback.reporter_id = agent.agent_id
+      )
+      AND NOT EXISTS (
         SELECT 1 FROM murmur.access_tokens AS token
         WHERE token.tenant_id = agent.tenant_id
           AND token.token_role = 'orchestrator'
@@ -191,6 +195,10 @@ export async function prunePostgresLifecycle(
         AND NOT EXISTS (
           SELECT 1 FROM murmur.notices AS notice
           WHERE notice.tenant_id = agent.tenant_id AND notice.withdrawn_by_id = agent.agent_id
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM murmur.feedback_submissions AS feedback
+          WHERE feedback.tenant_id = agent.tenant_id AND feedback.reporter_id = agent.agent_id
         )
         AND NOT EXISTS (
           SELECT 1 FROM murmur.access_tokens AS token

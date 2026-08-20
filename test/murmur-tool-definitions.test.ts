@@ -10,6 +10,7 @@ import {
   listAgentsQuery,
   SendMessageInputSchema,
 } from "../src/domain/contracts.js";
+import { SubmitFeedbackInputSchema } from "../src/domain/feedback-contracts.js";
 import { PostNoticeInputSchema } from "../src/domain/notice-contracts.js";
 import { PersonalId } from "../src/domain/orchestration.js";
 import { AgentId, RepositoryName, TenantId } from "../src/domain/value-objects.js";
@@ -32,6 +33,7 @@ const DATA_TOOLS: readonly string[] = [
   "register_agent",
   "resolve_notice",
   "send_message",
+  "submit_feedback",
   "wait_for_messages",
   "withdraw_notice",
 ];
@@ -282,6 +284,36 @@ describe("MCP role-to-tool exposure", (): void => {
         repository: "not-a-repository",
       }).success,
     ).toBe(false);
+    expect(
+      SubmitFeedbackInputSchema.parse({
+        description: "  Explain the problem  ",
+        reporter_id: "agent-a",
+        title: "  Better diagnostics  ",
+        type: "feature_request",
+      }),
+    ).toEqual({
+      description: "Explain the problem",
+      reporter_id: "agent-a",
+      title: "Better diagnostics",
+      type: "feature_request",
+    });
+    expect(
+      SubmitFeedbackInputSchema.safeParse({
+        description: "Description",
+        reporter_id: "agent-a",
+        title: "Title",
+        type: "suggestion",
+      }).success,
+    ).toBe(false);
+    expect(
+      SubmitFeedbackInputSchema.safeParse({
+        description: "Description",
+        extra: true,
+        reporter_id: "agent-a",
+        title: "Title",
+        type: "issue",
+      }).success,
+    ).toBe(false);
   });
 
   test("agent discovery exposes validated opaque pagination cursors", (): void => {
@@ -314,6 +346,21 @@ describe("MCP role-to-tool exposure", (): void => {
       expect(annotations.readOnlyHint).toBe(false);
       expect(annotations.idempotentHint).toBe(false);
     }
+  });
+
+  test("feedback submission is a non-destructive plaintext mutation", (): void => {
+    const tool: Tool | undefined = toolsForPrincipal(exposure(null)).find(
+      (candidate: Tool): boolean => candidate.name === "submit_feedback",
+    );
+    if (tool === undefined || tool.annotations === undefined) {
+      throw new Error("Missing feedback tool annotations");
+    }
+    expect(tool.annotations.destructiveHint).toBe(false);
+    expect(tool.annotations.idempotentHint).toBe(false);
+    expect(tool.annotations.readOnlyHint).toBe(false);
+    expect(tool.description).toContain("maintainer-readable plaintext");
+    expect(tool.description).toContain("vulnerability details");
+    expect(tool.description).toContain("security/advisories/new");
   });
 
   test("advertises only retry-safe orchestration mutations as idempotent", (): void => {

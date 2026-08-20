@@ -1,5 +1,6 @@
 import {
   AgentCapacityError,
+  FeedbackCapacityError,
   NoticeCapacityError,
   StorageCorruptionError,
 } from "../domain/errors.js";
@@ -37,6 +38,9 @@ export function normalizePostgresStorageError(error: unknown): unknown {
   if (code === "54000" && message === "tenant retained-notice quota exceeded") {
     return new NoticeCapacityError();
   }
+  if (code === "54000" && message === "tenant retained-feedback quota exceeded") {
+    return new FeedbackCapacityError();
+  }
   if (code === "XX001") {
     return new StorageCorruptionError("tenant resource accounting", error);
   }
@@ -49,6 +53,9 @@ export function normalizePostgresStorageError(error: unknown): unknown {
     (constraint.startsWith("e2ee_") || constraint.startsWith("tenant_e2ee_"))
   ) {
     return new Error("Encrypted storage rejected the request");
+  }
+  if (code === "23514" && constraint !== null && constraint.startsWith("feedback_submissions_")) {
+    return new StorageCorruptionError("feedback submission", error);
   }
   if (
     code === "23514" &&

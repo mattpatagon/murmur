@@ -31,6 +31,11 @@ import {
   WaitForMessagesInputSchema,
 } from "../domain/contracts.js";
 import {
+  type SubmitFeedbackInput,
+  SubmitFeedbackInputSchema,
+  SubmitFeedbackOutputSchema,
+} from "../domain/feedback-contracts.js";
+import {
   type AskOrchestratorInput,
   AskOrchestratorInputSchema,
   type GetDelegationInput,
@@ -139,6 +144,19 @@ export function e2eeProxyTools(): readonly Tool[] {
         idempotentHint: true,
         readOnlyHint: false,
         title: "Close encrypted agent",
+      },
+    ),
+    toolDefinition(
+      "submit_feedback",
+      "Submit Murmur feedback",
+      "Persist an issue or feature request as maintainer-readable plaintext, even while messages use E2E encryption. Never include credentials, secrets, private message content, vulnerability details, or sensitive production data. Report suspected vulnerabilities privately at https://github.com/mattpatagon/murmur/security/advisories/new.",
+      SubmitFeedbackInputSchema,
+      SubmitFeedbackOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: false,
+        readOnlyHint: false,
+        title: "Submit Murmur feedback",
       },
     ),
     toolDefinition(
@@ -273,6 +291,10 @@ export async function callE2eeProxyTool(
     case "close_agent": {
       const input: CloseAgentInput = CloseAgentInputSchema.parse(argumentsValue);
       return toolResult(await operations.closeAgent(input));
+    }
+    case "submit_feedback": {
+      const input: SubmitFeedbackInput = SubmitFeedbackInputSchema.parse(argumentsValue);
+      return toolResult(await operations.submitFeedback(input));
     }
     case "send_message": {
       const input: SendMessageInput = SendMessageInputSchema.parse(argumentsValue);
