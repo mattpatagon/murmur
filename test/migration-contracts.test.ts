@@ -29,3 +29,19 @@ test("lifecycle migration phases are independently tracked and replayable", asyn
     expect(beginCount).toBe(commitCount);
   }
 });
+
+test("feedback migration is tenant-isolated, append-only at runtime, and quota bounded", async (): Promise<void> => {
+  const contents: string = await Bun.file(
+    "supabase/migrations/20260820010000_feedback_submissions.sql",
+  ).text();
+  expect(contents).toContain("alter table murmur.feedback_submissions force row level security");
+  expect(contents).toContain(
+    "grant select, insert on table murmur.feedback_submissions to murmur_app",
+  );
+  expect(contents).not.toContain(
+    "grant select, insert, update, delete on table murmur.feedback_submissions",
+  );
+  expect(contents).toContain("usage.feedback_submission_count < 10000");
+  expect(contents).toContain("usage.feedback_content_bytes + content_bytes <= 67108864");
+  expect(contents).toContain("tenant retained-feedback quota exceeded");
+});

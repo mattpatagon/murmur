@@ -27,6 +27,10 @@ import {
   GetMessageHistoryInputSchema,
   MessageHistoryOutputSchema,
 } from "../domain/history-contracts.js";
+import {
+  SubmitFeedbackInputSchema,
+  SubmitFeedbackOutputSchema,
+} from "../domain/feedback-contracts.js";
 import { AGENT_LEASE_MINUTES } from "../domain/lifecycle-values.js";
 import {
   ListNoticesInputSchema,
@@ -122,6 +126,19 @@ function dataTools(): Tool[] {
         idempotentHint: false,
         readOnlyHint: false,
         title: "Broadcast agent message",
+      },
+    ),
+    toolDefinition(
+      "submit_feedback",
+      "Submit Murmur feedback",
+      "Persist an issue or feature request for Murmur maintainers. Set type to issue or feature_request. Submissions are intentionally maintainer-readable plaintext even when agent messages use E2E encryption; never include credentials, secrets, private message content, vulnerability details, or sensitive production data. Report suspected vulnerabilities privately at https://github.com/mattpatagon/murmur/security/advisories/new.",
+      SubmitFeedbackInputSchema,
+      SubmitFeedbackOutputSchema,
+      {
+        destructiveHint: false,
+        idempotentHint: false,
+        readOnlyHint: false,
+        title: "Submit Murmur feedback",
       },
     ),
     toolDefinition(

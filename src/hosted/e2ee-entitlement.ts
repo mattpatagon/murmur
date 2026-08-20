@@ -35,6 +35,7 @@ export const TENANT_METADATA_TOOL_NAMES: readonly string[] = [
   "list_agents",
   "register_agent",
 ];
+export const TENANT_FEEDBACK_TOOL_NAMES: readonly string[] = ["submit_feedback"];
 export const PLAINTEXT_WRITE_TOOL_NAMES: readonly string[] = [
   "broadcast_message",
   "post_notice",
@@ -139,6 +140,7 @@ export function rollbackE2eeToOff(current: E2eeEntitlementRecord): E2eeEntitleme
 export function tenantDataToolNames(record: E2eeEntitlementRecord): readonly string[] {
   const names: Set<string> = new Set<string>([
     ...TENANT_METADATA_TOOL_NAMES,
+    ...TENANT_FEEDBACK_TOOL_NAMES,
     E2EE_CAPABILITY_TOOL_NAME,
   ]);
   if (record.state === "off") {

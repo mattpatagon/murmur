@@ -33,6 +33,15 @@ export class NoticeCapacityError extends Error {
   }
 }
 
+export class FeedbackCapacityError extends Error {
+  public constructor() {
+    super(
+      "Retained feedback capacity reached. Contact a Murmur maintainer before submitting more feedback.",
+    );
+    this.name = "FeedbackCapacityError";
+  }
+}
+
 export class NoticeStateConflictError extends Error {
   public constructor() {
     super("Notice is no longer open. Refresh it before changing its state.");
@@ -65,6 +74,14 @@ export class IdempotencyConflictError extends Error {
   public constructor(key: string) {
     super(`Idempotency key '${key}' was already used for a different message`);
     this.name = "IdempotencyConflictError";
+  }
+}
+
+export class FeedbackIdempotencyConflictError extends Error {
+  public constructor(key: string) {
+    super(`Idempotency key '${key}' was already used for different feedback`);
+    // biome-ignore lint/security/noSecrets: Stable error class identifier, not credential material.
+    this.name = "FeedbackIdempotencyConflictError";
   }
 }
 

@@ -385,6 +385,54 @@ test("generic MCP clients must provide complete message context", async (): Prom
       "Message repository context is required",
     );
 
+    const missingFeedbackRepository: CallToolResult = CallToolResultSchema.parse(
+      await sender.client.callTool({
+        arguments: {
+          description: "missing repository",
+          reporter_id: "generic-a",
+          title: "Missing context",
+          type: "issue",
+        },
+        name: "submit_feedback",
+      }),
+    );
+    expect(missingFeedbackRepository.isError).toBe(true);
+    expect(JSON.stringify(missingFeedbackRepository.content)).toContain(
+      "Feedback repository context is required",
+    );
+
+    const missingFeedbackBranch: CallToolResult = CallToolResultSchema.parse(
+      await sender.client.callTool({
+        arguments: {
+          context: { repository: "another/project" },
+          description: "missing branch",
+          reporter_id: "generic-a",
+          title: "Missing context",
+          type: "issue",
+        },
+        name: "submit_feedback",
+      }),
+    );
+    expect(JSON.stringify(missingFeedbackBranch.content)).toContain(
+      "Feedback branch context is required",
+    );
+
+    const missingFeedbackClient: CallToolResult = CallToolResultSchema.parse(
+      await sender.client.callTool({
+        arguments: {
+          context: { branch: "main", repository: "another/project" },
+          description: "missing client",
+          reporter_id: "generic-a",
+          title: "Missing context",
+          type: "feature_request",
+        },
+        name: "submit_feedback",
+      }),
+    );
+    expect(JSON.stringify(missingFeedbackClient.content)).toContain(
+      "Feedback client context is required",
+    );
+
     const broadcast: BroadcastMessageOutput = await callValidated(
       sender.client,
       "broadcast_message",

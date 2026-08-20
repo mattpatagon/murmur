@@ -1,12 +1,10 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import {
-  agentClientFromInput,
   type BroadcastMessageInput,
   BroadcastMessageInputSchema,
   type BroadcastMessageOutput,
   BroadcastMessageOutputSchema,
-  branchNameFromInput,
   broadcastAudienceFromInput,
   type GetAgentInput,
   GetAgentInputSchema,
@@ -25,7 +23,6 @@ import {
   MarkMessagesReadInputSchema,
   type MarkMessagesReadOutput,
   MarkMessagesReadOutputSchema,
-  type MessageContextDto,
   nullableIdempotencyKey,
   nullableSessionKey,
   nullableThreadId,
@@ -38,7 +35,6 @@ import {
   type RegisterAgentOutput,
   RegisterAgentOutputSchema,
   registerAgentCommand,
-  repositoryNameFromInput,
   type SendMessageInput,
   SendMessageInputSchema,
   type SendMessageOutput,
@@ -85,7 +81,10 @@ import {
   agentDtoForClient,
   authorizedActorId,
   messageDtoForClient,
+  requiredDataContext,
+  type RequiredDataContext,
 } from "./murmur-data-tool-helpers.js";
+import { callFeedbackTool } from "./murmur-feedback-tools.js";
 import { callHistoryTool } from "./murmur-history-tools.js";
 import { callLifecycleTool } from "./murmur-lifecycle-tools.js";
 import { callNoticeTool } from "./murmur-notice-tools.js";
@@ -118,16 +117,11 @@ const DATA_TOOL_NAMES: ReadonlySet<string> = new Set<string>([
   "post_notice",
   "register_agent",
   "send_message",
+  "submit_feedback",
   "resolve_notice",
   "wait_for_messages",
   "withdraw_notice",
 ]);
-
-type RequiredMessageContext = {
-  readonly branchName: BranchName;
-  readonly client: AgentClient;
-  readonly repositoryName: RepositoryName;
-};
 
 function inboxUri(agentId: AgentId): string {
   return `${INBOX_PREFIX}${encodeURIComponent(agentId.value)}`;
@@ -161,34 +155,6 @@ function machineNameFromAgentId(agentId: AgentId): MachineName | null {
   } catch (_error: unknown) {
     return null;
   }
-}
-
-function requiredMessageContext(
-  input: MessageContextDto | undefined,
-  context: DataToolContext,
-): RequiredMessageContext {
-  const repositoryName: RepositoryName | null = repositoryNameFromInput(
-    input,
-    context.repositoryName,
-  );
-  if (repositoryName === null) {
-    throw new Error(
-      "Message repository context is required. Supply context.repository or configure MURMUR_REPOSITORY/X-Murmur-Repository.",
-    );
-  }
-  const branchName: BranchName | null = branchNameFromInput(input, context.branchName);
-  if (branchName === null) {
-    throw new Error(
-      "Message branch context is required. Supply context.branch or configure MURMUR_BRANCH/X-Murmur-Branch.",
-    );
-  }
-  const client: AgentClient | null = agentClientFromInput(input, context.client);
-  if (client === null) {
-    throw new Error(
-      "Message client context is required. Supply context.client or configure MURMUR_CLIENT/X-Murmur-Client.",
-    );
-  }
-  return { branchName, client, repositoryName };
 }
 
 async function waitForMessages(
@@ -268,6 +234,15 @@ export async function callDataTool(
     (input: string): AgentId => authorizedAgentId(input, context),
   );
   if (historyResult !== null) return historyResult;
+  const feedbackResult: CallToolResult | null = await callFeedbackTool(
+    name,
+    argumentsValue,
+    store,
+    context,
+    async (input: string): Promise<AgentId> =>
+      await authorizedActorId(authorizedAgentId(input, context), context.senderAuthority, store),
+  );
+  if (feedbackResult !== null) return feedbackResult;
   const noticeResult: CallToolResult | null = await callNoticeTool(
     name,
     argumentsValue,
@@ -329,7 +304,11 @@ export async function callDataTool(
     }
     case "send_message": {
       const input: SendMessageInput = SendMessageInputSchema.parse(argumentsValue);
-      const messageContext: RequiredMessageContext = requiredMessageContext(input.context, context);
+      const messageContext: RequiredDataContext = requiredDataContext(
+        input.context,
+        context,
+        "Message",
+      );
       const command: SendMessageCommand = {
         ...messageContext,
         content: parseContent(input.content),
@@ -356,7 +335,11 @@ export async function callDataTool(
     }
     case "broadcast_message": {
       const input: BroadcastMessageInput = BroadcastMessageInputSchema.parse(argumentsValue);
-      const messageContext: RequiredMessageContext = requiredMessageContext(input.context, context);
+      const messageContext: RequiredDataContext = requiredDataContext(
+        input.context,
+        context,
+        "Message",
+      );
       const command: BroadcastMessageCommand = {
         audience: broadcastAudienceFromInput(input.audience),
         ...messageContext,

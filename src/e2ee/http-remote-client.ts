@@ -30,6 +30,12 @@ import {
   RegisterAgentOutputSchema,
 } from "../domain/contracts.js";
 import {
+  type SubmitFeedbackInput,
+  SubmitFeedbackInputSchema,
+  type SubmitFeedbackOutput,
+  SubmitFeedbackOutputSchema,
+} from "../domain/feedback-contracts.js";
+import {
   type GetDelegationInput,
   GetDelegationInputSchema,
   type GetDelegationOutput,
@@ -298,6 +304,15 @@ export class E2eeHttpRemoteClient implements E2eeRemoteClient, E2eeProxyRemoteCl
 
   public async listAgents(input: ListAgentsInput): Promise<ListAgentsOutput> {
     return await this.call("list_agents", input, ListAgentsInputSchema, ListAgentsOutputSchema);
+  }
+
+  public async submitFeedback(input: SubmitFeedbackInput): Promise<SubmitFeedbackOutput> {
+    return await this.call(
+      "submit_feedback",
+      input,
+      SubmitFeedbackInputSchema,
+      SubmitFeedbackOutputSchema,
+    );
   }
 
   public async publishAgentKeyBundle(

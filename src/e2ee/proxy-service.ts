@@ -20,6 +20,7 @@ import {
   type SendMessageInput,
   type WaitForMessagesInput,
 } from "../domain/contracts.js";
+import type { SubmitFeedbackInput, SubmitFeedbackOutput } from "../domain/feedback-contracts.js";
 import type { AgentClient, BranchName, Clock, RepositoryName } from "../domain/value-objects.js";
 import type {
   AskOrchestratorInput,
@@ -82,6 +83,7 @@ export interface E2eeProxyOperations {
   listAgents(input: ListAgentsInput): Promise<ListAgentsOutput>;
   endSession(input: EndSessionInput): Promise<EndSessionOutput>;
   closeAgent(input: CloseAgentInput): Promise<CloseAgentOutput>;
+  submitFeedback(input: SubmitFeedbackInput): Promise<SubmitFeedbackOutput>;
   askOrchestrator?(input: AskOrchestratorInput): Promise<ProxyAskOrchestratorOutput>;
   getDelegation?(input: GetDelegationInput): Promise<GetDelegationOutput>;
   getOrchestrator?(input: GetOrchestratorInput): Promise<GetOrchestratorOutput>;
@@ -168,6 +170,11 @@ export class E2eeProxyService implements E2eeProxyOperations {
   public async closeAgent(input: CloseAgentInput): Promise<CloseAgentOutput> {
     this.#ensureOpen();
     return await this.#dependencies.remote.closeAgent(input);
+  }
+
+  public async submitFeedback(input: SubmitFeedbackInput): Promise<SubmitFeedbackOutput> {
+    this.#ensureOpen();
+    return await this.#dependencies.remote.submitFeedback(input);
   }
 
   public async getOrchestrator(input: GetOrchestratorInput): Promise<GetOrchestratorOutput> {

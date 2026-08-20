@@ -280,6 +280,8 @@ test("upgrades a populated SQLite v8 database with bounded E2E tables and usage"
 
   const legacyDatabase: Database = new Database(databasePath);
   legacyDatabase.exec(`
+    DROP TABLE feedback_usage;
+    DROP TABLE feedback_submissions;
     DROP TABLE e2ee_usage;
     DROP TABLE e2ee_messages;
     DROP TABLE e2ee_broadcast_deliveries;
@@ -305,7 +307,7 @@ test("upgrades a populated SQLite v8 database with bounded E2E tables and usage"
       if (versionRow === null || typeof versionRow !== "object") {
         throw new Error("Expected SQLite schema version row");
       }
-      expect(Number(Reflect.get(versionRow, "user_version"))).toBe(10);
+      expect(Number(Reflect.get(versionRow, "user_version"))).toBe(11);
       const usageRow: unknown = database
         .query<unknown, []>(`
           SELECT claim_count, pending_broadcast_count, retained_message_count
@@ -317,6 +319,13 @@ test("upgrades a populated SQLite v8 database with bounded E2E tables and usage"
         pending_broadcast_count: 0,
         retained_message_count: 0,
       });
+      expect(
+        database
+          .query<unknown, []>(`
+            SELECT submission_count, content_bytes FROM feedback_usage WHERE singleton = 1
+          `)
+          .get(),
+      ).toEqual({ content_bytes: 0, submission_count: 0 });
     } finally {
       database.close();
     }

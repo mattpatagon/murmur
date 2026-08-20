@@ -170,6 +170,7 @@ export class MurmurApplication {
       "Murmur provides durable agent-to-agent inboxes. Call register_agent first, then send_message, broadcast_message, or get_messages. " +
       "Outgoing messages include verified sender_authority plus context.repository, context.branch, context.client, and a created_at timestamp. " +
       "Repository, branch, and client are detected from the launching agent when possible; otherwise send_message or broadcast_message must supply them in context. " +
+      "Use submit_feedback with type issue or feature_request to send durable feedback to Murmur maintainers. Feedback is intentionally maintainer-readable plaintext, so never include credentials, secrets, private message content, vulnerability details, or sensitive production data. Report suspected vulnerabilities privately at https://github.com/mattpatagon/murmur/security/advisories/new. " +
       "For push signals, subscribe to murmur://inbox/{agent_id}; always read the durable inbox after a notification or reconnect. " +
       `Messages expire automatically after ${RETENTION_DAYS} days. MCP notifications do not themselves guarantee that a host starts a new model turn. `;
     if (

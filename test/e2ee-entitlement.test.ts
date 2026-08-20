@@ -126,6 +126,7 @@ test("exposes the exact off, provisioning, cutover, and enforced tool matrices",
     "register_agent",
     "resolve_notice",
     "send_message",
+    "submit_feedback",
     "wait_for_messages",
     "withdraw_notice",
   ]);
@@ -147,6 +148,7 @@ test("exposes the exact off, provisioning, cutover, and enforced tool matrices",
     "mark_messages_read",
     "publish_agent_key_bundle",
     "register_agent",
+    "submit_feedback",
     "wait_for_messages",
   ]);
   const enforcedNames: readonly string[] = tenantDataToolNames(entitlement("enforced"));
@@ -161,10 +163,12 @@ test("exposes the exact off, provisioning, cutover, and enforced tool matrices",
       "get_agent",
       "list_agents",
       "register_agent",
+      "submit_feedback",
     ]),
   );
   expect(enforcedNames).not.toContain("send_message");
   expect(enforcedNames).not.toContain("broadcast_message");
   expect(enforcedNames).not.toContain("get_messages");
   expect(enforcedNames).not.toContain("wait_for_messages");
+  expect(enforcedNames).toContain("submit_feedback");
 });

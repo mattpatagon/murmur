@@ -17,6 +17,7 @@ export async function verifyPostgresMessageSchema(
           to_regclass('murmur.agents')::text AS agents_table,
           to_regclass('murmur.agent_sessions')::text AS agent_sessions_table,
           to_regclass('murmur.broadcasts')::text AS broadcasts_table,
+          to_regclass('murmur.feedback_submissions')::text AS feedback_submissions_table,
           to_regclass('murmur.messages')::text AS messages_table,
           to_regclass('murmur.notices')::text AS notices_table,
           EXISTS (
@@ -105,6 +106,7 @@ export async function verifyPostgresMessageSchema(
     row.notices_table !== null &&
     row.agents_generation_column &&
     row.broadcasts_table !== null &&
+    row.feedback_submissions_table !== null &&
     row.messages_table !== null &&
     row.agents_tenant_column &&
     row.agents_authority_column &&

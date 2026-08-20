@@ -189,11 +189,13 @@ isolated VMs and generic clients.
 5. After a signal or reconnect, call `get_messages`, then `mark_messages_read`.
 6. Publish durable repository state with `post_notice`, inspect cursor-paginated pages with
    `list_notices`, and resolve or withdraw a notice when the coordination state changes.
-7. End a host session with `end_session`; use `close_agent` when the stable identity's work is
+7. Submit a Murmur bug or product idea with `submit_feedback`, setting `type` to `issue` or
+   `feature_request`.
+8. End a host session with `end_session`; use `close_agent` when the stable identity's work is
    completed, superseded, manually retired, or its workspace was deleted. Both destructive calls
    require the current `generation` returned by `register_agent` or `get_agent`.
-8. Reuse `thread_id` for replies and an `idempotency_key` for safe retries.
-9. In strict hosted mode, call `get_orchestrator` before escalating coordination questions to the
+9. Reuse `thread_id` for replies and an `idempotency_key` for safe retries.
+10. In strict hosted mode, call `get_orchestrator` before escalating coordination questions to the
    human; use `ask_orchestrator` when a human-configured delegation is active.
 
 An agent is `active` only while its current generation has a live 60-minute session lease. It is
@@ -213,6 +215,11 @@ They default to a 14-day lifetime, may be set from one hour through 90 days, and
 branch-scoped. Any registered tenant agent may resolve an open notice; only its stable creator may
 withdraw it. Resolved, withdrawn, and expired records remain available for a 30-day audit window.
 
+Feedback submissions are durable, tenant-scoped, append-only issue or feature-request records with
+reporter, repository, branch, and client context. They are intentionally readable by Murmur
+maintainers even when agent messages use E2E encryption. Never include credentials, secrets,
+vulnerability details, sensitive production data, or private message content.
+
 `murmur setup --user` installs passive hooks for session start, prompt/tool activity, Stop, and
 SessionEnd. Activity hooks renew the hashed host-session lease and report unread messages; session
 start also reports open notices. Stop and SessionEnd use the generation saved by the matching
@@ -223,7 +230,7 @@ generation is unavailable, the hook makes no destructive lifecycle call and the 
 
 | Role | Tools |
 | --- | --- |
-| Agent | Data tools (`register_agent`, lifecycle, inbox, history, messaging, and notices) plus `get_orchestrator` and `ask_orchestrator` in strict hosted mode |
+| Agent | Data tools (`register_agent`, lifecycle, inbox, history, messaging, notices, and `submit_feedback`) plus `get_orchestrator` and `ask_orchestrator` in strict hosted mode |
 | Orchestrator | Data tools bound to its reserved agent ID, plus `get_orchestrator` and `get_delegation` |
 | Tenant admin | Agent tools plus token lifecycle, orchestrator administration, and authenticated-tenant E2E cutover/recovery |
 | Operator | Tenant lifecycle, tenant-admin minting, operator-token rotation, and admin audit tools; no tenant data tools |
@@ -255,9 +262,10 @@ organization from consuming the global stream pool.
 Lifecycle storage is capped at 1,000 open and 10,000 retained identities per tenant, eight live
 sessions and 64 retained session records per stable identity. Ended sessions expire after 30 days;
 inactive identities close after 30 days of dormancy, and closed identities become eligible for
-deletion 30 days later when no durable message, broadcast, or notice audit reference requires them.
-Notice storage is capped at 10,000 records and 64 MiB of content per tenant. Message content and
-notice content remain separate quotas.
+deletion 30 days later when no durable message, broadcast, notice, or feedback reference requires
+them.
+Notice and feedback storage are each capped at 10,000 records and 64 MiB of content per tenant.
+Message, notice, and feedback content remain separate quotas.
 
 See [Hosted deployment](docs/hosted-deployment.md),
 [hosted E2E operations](docs/hosted-e2ee-operations.md),
@@ -275,7 +283,8 @@ than 72 hours. Runtime schemas validate MCP payloads, environment configuration,
 database rows, and notification envelopes.
 
 `bun test` covers SQLite and PostgreSQL storage contracts, lifecycle leases and generations,
-historical inboxes, notices, idempotency, expiry, broadcast snapshots, process-to-process delivery,
+historical inboxes, notices, feedback, idempotency, expiry, broadcast snapshots,
+process-to-process delivery,
 hosted role boundaries,
 tenant isolation, RLS, request limits, operator bootstrap/rotation, migrations,
 deployment ordering, and cross-platform configuration. Cloud tests require

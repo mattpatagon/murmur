@@ -92,6 +92,7 @@ export type SchemaProbeRow = {
   readonly broadcasts_tenant_column: boolean;
   readonly broadcasts_table: string | null;
   readonly broadcasts_authority_column: boolean;
+  readonly feedback_submissions_table: string | null;
   readonly client_column: boolean;
   readonly messages_tenant_column: boolean;
   readonly messages_tenant_sequence_column: boolean;
@@ -196,6 +197,7 @@ export const SchemaProbeRowSchema: z.ZodType<SchemaProbeRow> = z.strictObject({
   broadcasts_tenant_column: z.boolean(),
   broadcasts_table: z.string().nullable(),
   broadcasts_authority_column: z.boolean(),
+  feedback_submissions_table: z.string().nullable(),
   client_column: z.boolean(),
   messages_tenant_column: z.boolean(),
   messages_tenant_sequence_column: z.boolean(),

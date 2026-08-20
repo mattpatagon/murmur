@@ -104,7 +104,7 @@ if [ -z "$second_tenant_id" ]; then
   exit 1
 fi
 tenant_tables=(
-  agents agent_sessions messages broadcasts access_tokens notices orchestrator_policies
+  agents agent_sessions messages broadcasts access_tokens notices feedback_submissions orchestrator_policies
   tenant_e2ee_state tenant_e2ee_usage e2ee_key_bundles e2ee_prekeys e2ee_claims
   e2ee_messages e2ee_broadcasts e2ee_broadcast_deliveries
 )
@@ -135,6 +135,37 @@ if psql "$app_url" --set ON_ERROR_STOP=1 \
     );
     rollback;" >/dev/null 2>&1; then
   echo 'murmur_app unexpectedly wrote an agent outside its tenant context' >&2
+  exit 1
+fi
+if psql "$app_url" --set ON_ERROR_STOP=1 \
+  --command "begin;
+    set local murmur.tenant_id = '$founding_tenant_id';
+    insert into murmur.feedback_submissions(
+      tenant_id, feedback_id, submission_type, reporter_id, reporter_generation,
+      repository_name, branch_name, client_name, title, description, created_at
+    ) values (
+      '$second_tenant_id', '51000000-0000-4000-8000-000000000010', 'issue',
+      'ci-cross-tenant-feedback', 1, 'owner/repository', 'ci', 'codex',
+      'Denied', 'Cross-tenant feedback must fail', statement_timestamp()
+    );
+    rollback;" >/dev/null 2>&1; then
+  echo 'murmur_app unexpectedly wrote feedback outside its tenant context' >&2
+  exit 1
+fi
+if psql "$app_url" --set ON_ERROR_STOP=1 \
+  --command "begin;
+    set local murmur.tenant_id = '$founding_tenant_id';
+    update murmur.feedback_submissions set title = 'Denied';
+    rollback;" >/dev/null 2>&1; then
+  echo 'murmur_app unexpectedly updated append-only feedback' >&2
+  exit 1
+fi
+if psql "$app_url" --set ON_ERROR_STOP=1 \
+  --command "begin;
+    set local murmur.tenant_id = '$founding_tenant_id';
+    delete from murmur.feedback_submissions;
+    rollback;" >/dev/null 2>&1; then
+  echo 'murmur_app unexpectedly deleted append-only feedback' >&2
   exit 1
 fi
 

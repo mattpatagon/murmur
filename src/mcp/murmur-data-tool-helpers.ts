@@ -1,8 +1,15 @@
-import { toAgentDto, toMessageDto } from "../domain/contracts.js";
+import {
+  agentClientFromInput,
+  branchNameFromInput,
+  type MessageContextDto,
+  repositoryNameFromInput,
+  toAgentDto,
+  toMessageDto,
+} from "../domain/contracts.js";
 import { AgentAuthorityConflictError } from "../domain/errors.js";
 import type { Agent, Message } from "../domain/models.js";
 import type { SenderAuthority } from "../domain/orchestration.js";
-import type { AgentId } from "../domain/value-objects.js";
+import type { AgentClient, AgentId, BranchName, RepositoryName } from "../domain/value-objects.js";
 import type { MessageStore } from "../storage/message-store.js";
 
 export async function authorizedActorId(
@@ -15,6 +22,45 @@ export async function authorizedActorId(
     throw new AgentAuthorityConflictError();
   }
   return agentId;
+}
+
+export type RequiredDataContext = {
+  readonly branchName: BranchName;
+  readonly client: AgentClient;
+  readonly repositoryName: RepositoryName;
+};
+
+export function requiredDataContext(
+  input: MessageContextDto | undefined,
+  fallback: {
+    readonly branchName: BranchName | null;
+    readonly client: AgentClient | null;
+    readonly repositoryName: RepositoryName | null;
+  },
+  subject: "Feedback" | "Message",
+): RequiredDataContext {
+  const repositoryName: RepositoryName | null = repositoryNameFromInput(
+    input,
+    fallback.repositoryName,
+  );
+  if (repositoryName === null) {
+    throw new Error(
+      `${subject} repository context is required. Supply context.repository or configure MURMUR_REPOSITORY/X-Murmur-Repository.`,
+    );
+  }
+  const branchName: BranchName | null = branchNameFromInput(input, fallback.branchName);
+  if (branchName === null) {
+    throw new Error(
+      `${subject} branch context is required. Supply context.branch or configure MURMUR_BRANCH/X-Murmur-Branch.`,
+    );
+  }
+  const client: AgentClient | null = agentClientFromInput(input, fallback.client);
+  if (client === null) {
+    throw new Error(
+      `${subject} client context is required. Supply context.client or configure MURMUR_CLIENT/X-Murmur-Client.`,
+    );
+  }
+  return { branchName, client, repositoryName };
 }
 
 export function agentDtoForClient(

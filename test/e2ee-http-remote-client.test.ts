@@ -11,6 +11,7 @@ import type {
   EndSessionOutput,
   RegisterAgentOutput,
 } from "../src/domain/contracts.js";
+import type { SubmitFeedbackOutput } from "../src/domain/feedback-contracts.js";
 import { E2eeHttpRemoteClient, type E2eeWireToolCaller } from "../src/e2ee/http-remote-client.js";
 import {
   ENCRYPTION_CLAIM_EXPIRED_MESSAGE,
@@ -89,6 +90,40 @@ test("validates remote outputs and applies absolute request deadlines", async ()
   expect(await client.capability()).toEqual(CAPABILITY);
   expect(caller.calls).toEqual([{ input: {}, name: "get_e2ee_capability", timeoutMs: 30_000 }]);
 
+  const feedbackOutput: SubmitFeedbackOutput = {
+    duplicate: false,
+    status: "stored",
+    submission: {
+      context: { branch: "main", client: "codex", repository: "owner/repository" },
+      created_at: "2026-08-20T12:00:00.000Z",
+      description: "Forward plaintext feedback deliberately.",
+      reporter_generation: 1,
+      reporter_id: "alice",
+      submission_id: "00000000-0000-4000-8000-000000000010",
+      title: "Proxy feedback",
+      type: "issue",
+    },
+  };
+  caller.response = toolOutput(feedbackOutput);
+  expect(
+    await client.submitFeedback({
+      description: "Forward plaintext feedback deliberately.",
+      reporter_id: "alice",
+      title: "Proxy feedback",
+      type: "issue",
+    }),
+  ).toEqual(feedbackOutput);
+  expect(caller.calls[1]).toEqual({
+    input: {
+      description: "Forward plaintext feedback deliberately.",
+      reporter_id: "alice",
+      title: "Proxy feedback",
+      type: "issue",
+    },
+    name: "submit_feedback",
+    timeoutMs: 30_000,
+  });
+
   const waitOutput: WaitForEncryptedMessagesOutput = {
     agent_id: "alice",
     messages: [],
@@ -102,7 +137,7 @@ test("validates remote outputs and applies absolute request deadlines", async ()
       timeout_seconds: 7,
     }),
   ).toEqual(waitOutput);
-  expect(caller.calls[1]).toEqual({
+  expect(caller.calls[2]).toEqual({
     input: { after_sequence: 12, agent_id: "alice", timeout_seconds: 7 },
     name: "wait_for_encrypted_messages",
     timeoutMs: 12_000,

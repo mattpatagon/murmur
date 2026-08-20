@@ -1,6 +1,7 @@
 import postgres, { type ListenMeta, type Sql, type TransactionSql } from "postgres";
 
 import { AgentClosedError, UnknownAgentError } from "../domain/errors.js";
+import type * as F from "../domain/feedback-models.js";
 import type {
   Agent,
   BroadcastMessageCommand,
@@ -60,6 +61,7 @@ import {
   type PostgresPlaintextInboxWatcher,
 } from "./postgres-e2ee-message-store.js";
 import { verifyPostgresE2eeSchema } from "./postgres-e2ee-schema.js";
+import { submitPostgresFeedback } from "./postgres-feedback-store.js";
 import {
   getPostgresInboxVersion,
   getPostgresMessages,
@@ -349,6 +351,15 @@ export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvi
     const now: Instant = this.clock.now();
     await this.pruneExpired(now);
     return await sendPostgresMessage(this.database, this.tenantId, command, now);
+  }
+
+  public async submitFeedback(command: F.SubmitFeedbackCommand): Promise<F.SubmitFeedbackResult> {
+    this.ensureOpen();
+    try {
+      return await submitPostgresFeedback(this.database, this.tenantId, command, this.clock.now());
+    } catch (error: unknown) {
+      throw normalizePostgresStorageError(error);
+    }
   }
 
   private async requireAgent(agentId: AgentId): Promise<Agent> {

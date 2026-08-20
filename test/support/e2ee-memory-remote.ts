@@ -13,6 +13,10 @@ import type {
   RegisterAgentInput,
   RegisterAgentOutput,
 } from "../../src/domain/contracts.js";
+import type {
+  SubmitFeedbackInput,
+  SubmitFeedbackOutput,
+} from "../../src/domain/feedback-contracts.js";
 import { verifyHostedEncryptedEnvelope } from "../../src/e2ee/hosted-validation.js";
 import type { E2eeProxyRemoteClient } from "../../src/e2ee/remote-client.js";
 import type {
@@ -351,6 +355,36 @@ export class MemoryE2eeRemote implements E2eeProxyRemoteClient {
   public async closeAgent(input: CloseAgentInput): Promise<CloseAgentOutput> {
     this.#capture("close_agent", input);
     return this.#backend.closeAgent(input);
+  }
+
+  public async submitFeedback(input: SubmitFeedbackInput): Promise<SubmitFeedbackOutput> {
+    this.#capture("submit_feedback", input);
+    const context: SubmitFeedbackInput["context"] = input.context;
+    const requiredContext: SubmitFeedbackOutput["submission"]["context"] = {
+      branch:
+        context === undefined || context.branch === undefined
+          ? "feature/lifecycle"
+          : context.branch,
+      client: context === undefined || context.client === undefined ? "codex" : context.client,
+      repository:
+        context === undefined || context.repository === undefined
+          ? "example/lifecycle"
+          : context.repository,
+    };
+    return {
+      duplicate: false,
+      status: "stored",
+      submission: {
+        context: requiredContext,
+        created_at: NOW,
+        description: input.description,
+        reporter_generation: 1,
+        reporter_id: input.reporter_id,
+        submission_id: "00000000-0000-4000-8000-000000000099",
+        title: input.title,
+        type: input.type,
+      },
+    };
   }
 
   public async publishAgentKeyBundle(

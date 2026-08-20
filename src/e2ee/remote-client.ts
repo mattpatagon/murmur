@@ -12,6 +12,7 @@ import type {
   RegisterAgentInput,
   RegisterAgentOutput,
 } from "../domain/contracts.js";
+import type { SubmitFeedbackInput, SubmitFeedbackOutput } from "../domain/feedback-contracts.js";
 import type {
   GetDelegationInput,
   GetDelegationOutput,
@@ -93,4 +94,5 @@ export interface E2eeProxyRemoteClient extends E2eeRemoteClient {
   getOrchestrator?(input: GetOrchestratorInput): Promise<GetOrchestratorOutput>;
   registerAgent(input: RegisterAgentInput): Promise<RegisterAgentOutput>;
   listAgents(input: ListAgentsInput): Promise<ListAgentsOutput>;
+  submitFeedback(input: SubmitFeedbackInput): Promise<SubmitFeedbackOutput>;
 }

@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 
 import {
   AgentCapacityError,
+  FeedbackCapacityError,
   NoticeCapacityError,
   StorageCorruptionError,
 } from "../src/domain/errors.js";
@@ -23,6 +24,11 @@ test("Postgres quota and accounting failures become stable domain errors", (): v
   ).toBeInstanceOf(NoticeCapacityError);
   expect(
     normalizePostgresStorageError(
+      postgresError("54000", "tenant retained-feedback quota exceeded"),
+    ),
+  ).toBeInstanceOf(FeedbackCapacityError);
+  expect(
+    normalizePostgresStorageError(
       postgresError("XX001", "tenant notice quota accounting inconsistent"),
     ),
   ).toBeInstanceOf(StorageCorruptionError);
@@ -36,6 +42,13 @@ test("new lifecycle constraints never expose schema names while unrelated errors
   expect(constraint).toHaveProperty(
     "message",
     "Stored agent lifecycle data failed runtime validation",
+  );
+  const feedbackConstraint: unknown = normalizePostgresStorageError(
+    postgresError("23514", "raw feedback detail", "feedback_submissions_type_known"),
+  );
+  expect(feedbackConstraint).toHaveProperty(
+    "message",
+    "Stored feedback submission failed runtime validation",
   );
 
   const unrelated: Error = postgresError("23505", "existing compatibility error");
