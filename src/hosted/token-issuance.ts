@@ -1,7 +1,12 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { PersonalId } from "../domain/orchestration.js";
-import type { AgentId, Instant, RepositoryName, TenantId } from "../domain/value-objects.js";
+import {
+  type AgentId,
+  type Instant,
+  type RepositoryName,
+  TenantId,
+} from "../domain/value-objects.js";
 import type {
   IssuedOperatorToken,
   IssuedToken,
@@ -9,6 +14,7 @@ import type {
 } from "./control-plane-contracts.js";
 import {
   generateTokenSecret,
+  deriveRegistrationTokenSecret,
   type HostedTokenPrefix,
   type HostedTokenSecret,
   parseOperatorTokenSecret,
@@ -53,6 +59,41 @@ export function issueToken(
       secret: issued.secret,
       tenantId,
       tokenId: issued.tokenId,
+    },
+  };
+}
+
+function registrationUuid(scope: "tenant" | "token", registrationSecret: string): string {
+  const hex: string = createHash("sha256")
+    .update(`murmur-registration-${scope}\0`, "utf8")
+    .update(registrationSecret, "utf8")
+    .digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+export function selfServiceTenantId(registrationSecret: string): TenantId {
+  return TenantId.parse(registrationUuid("tenant", registrationSecret));
+}
+
+export function issueSelfServiceToken(
+  tenantId: TenantId,
+  registrationSecret: string,
+): IssuedTokenMaterial {
+  const issued: HostedTokenSecret = deriveRegistrationTokenSecret(registrationSecret);
+  const tokenId: string = registrationUuid("token", registrationSecret);
+  return {
+    hash: issued.hash,
+    token: {
+      agentId: null,
+      expiresAt: null,
+      keyId: issued.keyId,
+      name: "Initial tenant administrator",
+      personalId: PersonalId.parse(tokenId),
+      repositoryName: null,
+      role: "tenant_admin",
+      secret: issued.secret,
+      tenantId,
+      tokenId,
     },
   };
 }

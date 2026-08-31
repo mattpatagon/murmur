@@ -9,7 +9,11 @@ import type {
   TenantTokenRole,
   TokenSummary,
 } from "./control-plane.js";
-import { OperatorTokenSecretSchema, TenantTokenSecretSchema } from "./token-secret.js";
+import {
+  OperatorTokenSecretSchema,
+  RegistrationSecretSchema,
+  TenantTokenSecretSchema,
+} from "./token-secret.js";
 
 const InstantSchema: z.ZodISODateTime = z.iso.datetime({ offset: true });
 const TenantIdSchema: z.ZodString = z.string().uuid();
@@ -67,6 +71,10 @@ export type ListAdminAuditInput = { readonly limit: number };
 export type CreateTenantInput = {
   readonly display_name: string;
   readonly slug: string;
+};
+
+export type SelfServiceRegistrationInput = CreateTenantInput & {
+  readonly registration_secret: string;
 };
 
 export type TenantIdInput = { readonly tenant_id: string };
@@ -224,6 +232,13 @@ export const CreateTenantInputSchema: z.ZodType<CreateTenantInput> = z.strictObj
   display_name: TenantDisplayNameSchema,
   slug: TenantSlugSchema,
 });
+
+export const SelfServiceRegistrationInputSchema: z.ZodType<SelfServiceRegistrationInput> =
+  z.strictObject({
+    display_name: TenantDisplayNameSchema,
+    registration_secret: RegistrationSecretSchema,
+    slug: TenantSlugSchema,
+  });
 
 export const TenantIdInputSchema: z.ZodType<TenantIdInput> = z.strictObject({
   tenant_id: TenantIdSchema,

@@ -189,6 +189,11 @@ export interface HostedControlPlane {
     slug: string,
     displayName: string,
   ): Promise<{ readonly tenant: TenantSummary; readonly token: IssuedToken }>;
+  selfServiceRegisterTenant(
+    slug: string,
+    displayName: string,
+    registrationSecret: string,
+  ): Promise<{ readonly tenant: TenantSummary; readonly token: IssuedToken }>;
   createToken(
     principal: TenantPrincipal,
     role: TenantTokenRole,

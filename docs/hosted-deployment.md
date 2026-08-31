@@ -12,6 +12,8 @@ The deployed service exposes:
 
 - `GET /health`, an unauthenticated liveness endpoint that returns a JSON
   `status` of `ok` only after startup has completed.
+- `POST /v1/tenants`, an unauthenticated, rate-limited endpoint that atomically
+  creates a tenant and returns its initial administrator credential.
 - `/mcp`, a public Streamable HTTP endpoint that requires a live Murmur bearer
   token for every MCP request.
 
@@ -155,6 +157,26 @@ concurrency group. It performs these phases in order:
 Every phase fails closed. Credential and adoption state are read from the
 database and Secret Manager on each run, so an interrupted workflow resumes
 from durable state instead of assuming the previous attempt finished.
+
+## Self-service tenant onboarding
+
+After the strict revision is running at tenant contract version 2, new organizations register
+directly through `POST /v1/tenants`. No operator credential or dashboard action is required. The
+request atomically creates the tenant and its first tenant-administrator token; the raw secret is
+derived from a caller-generated 256-bit registration secret and only its hash is stored. Exact
+request retries return the same tenant and token, so a lost response does not require operator
+recovery. Agents then set `MURMUR_API_TOKEN` and run `murmur setup --user` against the hosted MCP URL.
+
+Keep the endpoint behind the same TLS, origin, request-capacity, and observability boundary as
+`/mcp`. Configure `MURMUR_REGISTRATION_RATE_LIMIT_PER_MINUTE` only to tighten or scale the default
+per-process limit; the database independently enforces cross-replica creation and retention caps.
+The current no-paywall flow does not prove ownership of an organization name. Public operators
+should add source-aware throttling at their trusted edge; application and database caps remain the
+fail-safe bounds, not a substitute for edge abuse controls. Billing or ownership verification can
+be added later without changing the tenant credential boundary.
+Do not grant `anon` or `authenticated` direct execution on the private registration function or
+direct access to its state table. See [self-service tenant onboarding](self-service-onboarding.md)
+for the complete agent flow, response contract, failure handling, and credential setup.
 
 ## Tenant contract upgrade
 

@@ -33,6 +33,10 @@ export type HostedTokenSecret = {
 
 export const TenantTokenSecretSchema: z.ZodString = z.string().regex(TENANT_TOKEN_SECRET_PATTERN);
 
+export const RegistrationSecretSchema: z.ZodString = z
+  .string()
+  .regex(new RegExp(`^${SECRET_MATERIAL_PATTERN}$`, "u"));
+
 export const OperatorTokenSecretSchema: z.ZodString = z
   .string()
   .regex(OPERATOR_TOKEN_SECRET_PATTERN);
@@ -75,6 +79,21 @@ export function databaseCredentialHint(value: string): DatabaseCredentialHint | 
 export function generateTokenSecret(prefix: HostedTokenPrefix): HostedTokenSecret {
   const keyId: string = randomBytes(6).toString("base64url");
   const secret: string = `${prefix}_${keyId}_${randomBytes(32).toString("base64url")}`;
+  return { hash: hashTokenSecret(secret), keyId, secret };
+}
+
+export function deriveRegistrationTokenSecret(registrationSecret: string): HostedTokenSecret {
+  RegistrationSecretSchema.parse(registrationSecret);
+  const keyId: string = createHash("sha256")
+    .update("murmur-registration-key-id\0", "utf8")
+    .update(registrationSecret, "utf8")
+    .digest("base64url")
+    .slice(0, 12);
+  const material: string = createHash("sha256")
+    .update("murmur-registration-token\0", "utf8")
+    .update(registrationSecret, "utf8")
+    .digest("base64url");
+  const secret: string = `mur_${keyId}_${material}`;
   return { hash: hashTokenSecret(secret), keyId, secret };
 }
 

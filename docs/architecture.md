@@ -52,6 +52,15 @@ Hosted requests pass through ordered, independently observable gates:
 7. Parse the MCP envelope and dispatch through the role-specific application.
 8. Stream the response, release all capacity, and emit one completion event when the body closes.
 
+`POST /v1/tenants` is the one unauthenticated hosted mutation. It branches after route and origin
+validation, before credential extraction, and accepts only the strict tenant-registration schema.
+The handler shares global request capacity, has a dedicated application rate window, and delegates
+one atomic tenant-plus-initial-token write to a private PostgreSQL function. That function is
+executable only by the least-privilege runtime role, stores only the token hash, records a
+secret-free operator audit event, and enforces database-wide rate and retained-tenant caps. A
+caller-generated 256-bit registration secret deterministically derives the tenant and initial token,
+so an exact retry after a lost response returns the same credential without storing plaintext.
+
 The client cannot supply a tenant ID, principal role, server request ID, trace parent, or raw session
 identifier for audit correlation. Each request reauthenticates so revocation and suspension apply
 immediately; matching live sessions are also closed proactively.
@@ -143,6 +152,11 @@ queues, active requests, long-lived SSE streams, per-principal and per-tenant wo
 subscriptions, request rates, agents, tokens, retained messages, stored bytes, message size, and
 broadcast fan-out. Admission returns a safe retryable status before allocating downstream resources
 when a bound is full.
+
+Self-service tenant registration is additionally capped at 4 KiB per request, 10 valid attempts per
+minute per application process by default, 60 successful creations per minute across the database,
+and 100,000 retained tenants. The per-process rate is configurable; the database bounds are durable
+and apply across replicas.
 
 Agent lifecycle storage permits 1,000 open and 10,000 retained identities per tenant, eight live
 sessions and 64 retained session rows per stable identity. Expired leases become ended sessions and
