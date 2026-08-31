@@ -92,8 +92,12 @@ user-specific paths or secrets.
 
 ## Agent instruction excerpt
 
-Copy these excerpts verbatim into repositories whose coding agents use Murmur. Put the shared
-coordination contract in `AGENTS.md`:
+Murmur is instruction-file agnostic. Choose the layout that matches the coding agents in the
+repository and copy the applicable excerpt verbatim.
+
+### `AGENTS.md` only
+
+For Codex and other agents that use `AGENTS.md`, put this self-contained contract in `AGENTS.md`:
 
 ```markdown
 ## Coordination and release safety
@@ -109,7 +113,29 @@ coordination contract in `AGENTS.md`:
   CI before merge. Deployment and production smoke verification have one explicit owner.
 ```
 
-Then make `CLAUDE.md` load that contract and reinforce the Murmur coordination step:
+### `CLAUDE.md` only
+
+For Claude Code repositories that use only `CLAUDE.md`, put the same self-contained contract in
+`CLAUDE.md`:
+
+```markdown
+## Coordination and release safety
+
+- Before overlapping work, use Murmur to register, list active agents, and read pending messages.
+- Share scope, branch or PR, dependencies, urgency, and expensive shared resources. Assign one
+  owner for version bumps, migrations, merge order, deployment, and production verification.
+- Do not run competing database, browser, build, or coverage jobs on the same constrained host.
+- Recheck the inbox before merge. Announce status or priority changes and close the thread when
+  work is done. Never send secrets through Murmur.
+- Preserve unrelated working-tree changes. Do not rewrite shared history or bypass protected gates.
+- Releases update `VERSION`, `package.json`, and `CHANGELOG.md` together, then pass clean-checkout
+  CI before merge. Deployment and production smoke verification have one explicit owner.
+```
+
+### Both `AGENTS.md` and `CLAUDE.md`
+
+Put the self-contained contract above in `AGENTS.md`, then make `CLAUDE.md` load that single source
+of truth and reinforce the Murmur coordination step:
 
 ```markdown
 @AGENTS.md
