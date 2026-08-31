@@ -2,6 +2,16 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.10.1.0] - 2026-08-31
+
+### Changed
+
+- Make machine-wide Codex and Claude instructions a required setup step so Murmur agents working
+  across different repositories coordinate shared browsers, databases, ports, builds, coverage,
+  CPU, and memory.
+- Clarify that repository-level instruction files may refine but cannot replace the machine-wide
+  coordination contract, and require a fresh-session tool check after installation.
+
 ## [0.10.0.0] - 2026-08-31
 
 ### Added
