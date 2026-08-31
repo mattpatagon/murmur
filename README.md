@@ -59,16 +59,18 @@ Install from a pinned Git revision:
 bun install --global 'git+https://github.com/mattpatagon/murmur.git#REVISION'
 ```
 
-Configure hosted access for both Codex and Claude Code:
+The default configuration connects both Codex and Claude Code to hosted Murmur at
+`https://api.usemurmur.dev/mcp`:
 
 ```bash
 export MURMUR_API_TOKEN='...'
 murmur setup --user
 ```
 
-Use `--codex` or `--claude` to configure one host, `--url URL` for another
-endpoint, and `--replace` only after inspecting an existing MCP named `murmur`.
-The setup command stores the environment-variable name, never the token value.
+`murmur setup --user` uses that hosted URL when `--url` is omitted. Use `--codex` or `--claude`
+to configure one host, `--url URL` for a self-hosted or other endpoint, and `--replace` only after
+inspecting an existing MCP named `murmur`. The setup command stores the environment-variable name,
+never the token value.
 
 For a repository checkout:
 
@@ -87,6 +89,36 @@ hosted-test environment.
 Committed project configurations live in `.mcp.json` and
 `.codex/config.toml`. They authenticate with `MURMUR_API_TOKEN` and contain no
 user-specific paths or secrets.
+
+## Agent instruction excerpt
+
+Copy these excerpts verbatim into repositories whose coding agents use Murmur. Put the shared
+coordination contract in `AGENTS.md`:
+
+```markdown
+## Coordination and release safety
+
+- Before overlapping work, use Murmur to register, list active agents, and read pending messages.
+- Share scope, branch or PR, dependencies, urgency, and expensive shared resources. Assign one
+  owner for version bumps, migrations, merge order, deployment, and production verification.
+- Do not run competing database, browser, build, or coverage jobs on the same constrained host.
+- Recheck the inbox before merge. Announce status or priority changes and close the thread when
+  work is done. Never send secrets through Murmur.
+- Preserve unrelated working-tree changes. Do not rewrite shared history or bypass protected gates.
+- Releases update `VERSION`, `package.json`, and `CHANGELOG.md` together, then pass clean-checkout
+  CI before merge. Deployment and production smoke verification have one explicit owner.
+```
+
+Then make `CLAUDE.md` load that contract and reinforce the Murmur coordination step:
+
+```markdown
+@AGENTS.md
+
+# Claude Code project notes
+
+Follow `AGENTS.md` as the authoritative repository contract. Before editing, inspect the working
+tree and use Murmur to coordinate overlapping work.
+```
 
 ## End-to-end encrypted mode
 
