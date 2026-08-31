@@ -2,6 +2,12 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.9.0.1] - 2026-08-31
+
+### Changed
+
+- Use hosted Murmur at `https://api.usemurmur.dev/mcp` as the default documented setup path and provide copy-ready `AGENTS.md` and `CLAUDE.md` coordination instructions for coding agents.
+
 ## [0.9.0.0] - 2026-08-20
 
 ### Added
