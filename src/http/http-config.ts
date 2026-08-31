@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const HEALTH_PATH: string = "/health";
 export const MCP_PATH: string = "/mcp";
+export const TENANT_REGISTRATION_PATH: string = "/v1/tenants";
 export const SSE_KEEP_ALIVE_MS: number = 1_000;
 
 export type HttpServerConfig = {
@@ -21,6 +22,7 @@ export type HttpServerConfig = {
   readonly maxSessions: number;
   readonly maxSessionsPerTenant: number;
   readonly rateLimitPerMinute: number;
+  readonly registrationRateLimitPerMinute: number;
   readonly requestedPort: number;
   readonly sessionIdleMs: number;
   readonly tenantRateLimitPerMinute: number;
@@ -46,6 +48,7 @@ const DEFAULTS: HttpDefaults = {
   maxSessionsPerTenant: 100,
   port: 8080,
   rateLimitPerMinute: 600,
+  registrationRateLimitPerMinute: 10,
   sessionIdleMs: 15 * 60 * 1_000,
   tenantRateLimitPerMinute: 3_000,
 };
@@ -150,6 +153,11 @@ export function parseHttpServerConfig(environment: NodeJS.ProcessEnv): HttpServe
       environment,
       "MURMUR_RATE_LIMIT_PER_MINUTE",
       DEFAULTS.rateLimitPerMinute,
+    ),
+    registrationRateLimitPerMinute: positiveIntegerEnvironment(
+      environment,
+      "MURMUR_REGISTRATION_RATE_LIMIT_PER_MINUTE",
+      DEFAULTS.registrationRateLimitPerMinute,
     ),
     requestedPort: parsePort(environment),
     sessionIdleMs: positiveIntegerEnvironment(

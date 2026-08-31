@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { OrchestratorPolicyId, PersonalId } from "../domain/orchestration.js";
 import type { AgentId, Instant, RepositoryName, TenantId } from "../domain/value-objects.js";
 import { type PostgresSslOptions, postgresSslOptions } from "../postgres-tls.js";
+import { logSafeError } from "../safe-errors.js";
 import type {
   AdminAuditEvent,
   AskOrchestratorCommand,
@@ -66,6 +67,7 @@ import {
   setPostgresOrchestratorPolicy,
 } from "./orchestration-control-plane.js";
 import { listPostgresOrchestratorPolicies } from "./orchestration-policy-list.js";
+import { createSelfServicePostgresTenant } from "./self-service-tenant-control-plane.js";
 import {
   createPostgresOrchestratorToken,
   createPostgresTenantToken,
@@ -418,7 +420,21 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
     await this.refreshCredentialAdmissions();
     return created;
   }
-
+  public async selfServiceRegisterTenant(
+    slug: string,
+    displayName: string,
+    registrationSecret: string,
+  ): Promise<{ readonly tenant: TenantSummary; readonly token: IssuedToken }> {
+    this.ensureOpen();
+    const created: { readonly tenant: TenantSummary; readonly token: IssuedToken } =
+      await createSelfServicePostgresTenant(this.database, slug, displayName, registrationSecret);
+    try {
+      await this.refreshCredentialAdmissions();
+    } catch (error: unknown) {
+      logSafeError("Murmur self-service credential admission refresh failed", error);
+    }
+    return created;
+  }
   public async listTenants(
     principal: OperatorPrincipal,
     cursor: string | null,
@@ -427,7 +443,6 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
     this.ensureOpen();
     return await listPostgresTenants(this.database, principal, cursor, limit);
   }
-
   public async mintTenantAdminToken(
     principal: OperatorPrincipal,
     tenantId: TenantId,
@@ -445,7 +460,6 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
     await this.refreshCredentialAdmissions();
     return token;
   }
-
   private async changeTenantStatus(
     principal: OperatorPrincipal,
     functionName: "restore" | "suspend",
@@ -461,15 +475,12 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
     await this.refreshCredentialAdmissions();
     return changed;
   }
-
   public async suspendTenant(principal: OperatorPrincipal, tenantId: TenantId): Promise<boolean> {
     return await this.changeTenantStatus(principal, "suspend", tenantId);
   }
-
   public async restoreTenant(principal: OperatorPrincipal, tenantId: TenantId): Promise<boolean> {
     return await this.changeTenantStatus(principal, "restore", tenantId);
   }
-
   public async listAdminAudit(
     principal: OperatorPrincipal,
     limit: number,
@@ -477,7 +488,6 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
     this.ensureOpen();
     return await listHostedAdminAudit(this.database, principal, limit);
   }
-
   public async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;

@@ -62,6 +62,12 @@ bun install --global 'git+https://github.com/mattpatagon/murmur.git#REVISION'
 The default configuration connects both Codex and Claude Code to hosted Murmur at
 `https://api.usemurmur.dev/mcp`:
 
+New organizations can create their tenant without operator action by sending an unauthenticated
+`POST https://api.usemurmur.dev/v1/tenants`. The request includes an agent-generated registration
+secret so an exact retry safely returns the same credential after a lost response. Capture the
+returned `token.secret`, then follow the [self-service onboarding guide](docs/self-service-onboarding.md)
+to configure the agent.
+
 ```bash
 export MURMUR_API_TOKEN='...'
 murmur setup --user
@@ -355,6 +361,7 @@ Dependencies are exact-pinned, installs use the frozen Bun lockfile, and
 
 ## Documentation
 
+- [Self-service tenant onboarding](docs/self-service-onboarding.md)
 - [Hosted deployment and rollback](docs/hosted-deployment.md)
 - [Owner-only operator recovery](docs/operator-recovery.md)
 - [Contributing](CONTRIBUTING.md)

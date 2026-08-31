@@ -57,6 +57,30 @@ if psql "$app_url" --command 'select count(*) from murmur.operator_tokens' >/dev
   echo 'murmur_app unexpectedly read operator_tokens' >&2
   exit 1
 fi
+registration_privileges="$(psql "$admin_url" --tuples-only --no-align --quiet \
+  --command "select
+    has_function_privilege(
+      'murmur_app',
+      'murmur.self_service_create_tenant(uuid,text,text,uuid,text,bytea)',
+      'execute'
+    ),
+    has_function_privilege(
+      'anon',
+      'murmur.self_service_create_tenant(uuid,text,text,uuid,text,bytea)',
+      'execute'
+    ),
+    has_function_privilege(
+      'authenticated',
+      'murmur.self_service_create_tenant(uuid,text,text,uuid,text,bytea)',
+      'execute'
+    ),
+    has_table_privilege(
+      'murmur_app', 'murmur.self_service_registration_state', 'select'
+    )")"
+if [ "$registration_privileges" != 't|f|f|f' ]; then
+  echo "Self-service registration privileges are unsafe: $registration_privileges" >&2
+  exit 1
+fi
 
 owner_only_calls=(
   "select murmur.configure_operator_bootstrap('51000000-0000-4000-8000-000000000001', 'DeniedKey1', decode(repeat('00', 32), 'hex'))"
@@ -92,6 +116,12 @@ else
     MURMUR_TEST_DATABASE_TLS_INSECURE=1 \
     bun test test/hosted.mcp.e2e.test.ts
 fi
+
+MURMUR_TEST_APP_DATABASE_URL="$app_url" \
+  MURMUR_TEST_ADMIN_DATABASE_URL="$admin_url" \
+  MURMUR_TEST_DATABASE_TLS_INSECURE=1 \
+  MURMUR_TEST_REGISTRATION_LIMITS=1 \
+  bun test test/self-service-registration.postgres.test.ts
 
 psql "$admin_url" --set ON_ERROR_STOP=1 \
   --command 'select murmur.validate_tenant_contract()'

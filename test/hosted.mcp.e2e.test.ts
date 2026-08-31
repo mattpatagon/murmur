@@ -1,10 +1,12 @@
 import { expect, test } from "bun:test";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   type BootstrapCredential,
   deriveBootstrapCredential,
 } from "../src/hosted/bootstrap-secret.js";
 import {
+  type CreateTenantOutput,
+  CreateTenantOutputSchema,
   type IssuedOperatorTokenOutput,
   IssuedOperatorTokenOutputSchema,
   type IssuedTokenOutput,
@@ -282,6 +284,74 @@ test.skipIf(
           await strictServer.stop();
         }
       }
+
+      const selfServiceSlug: string = `self-service-${unique}`;
+      const selfServiceRegistrationSecret: string = randomBytes(32).toString("base64url");
+      const selfServiceBody: string = JSON.stringify({
+        display_name: `Self-service tenant ${unique}`,
+        registration_secret: selfServiceRegistrationSecret,
+        slug: selfServiceSlug,
+      });
+      const selfServiceResponse: Response = await fetch(server.registrationUrl, {
+        body: selfServiceBody,
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      expect(selfServiceResponse.status).toBe(201);
+      expect(selfServiceResponse.headers.get("cache-control")).toBe("no-store");
+      const selfServiceTenant: CreateTenantOutput = CreateTenantOutputSchema.parse(
+        await selfServiceResponse.json(),
+      );
+      expect(selfServiceTenant.tenant.slug).toBe(selfServiceSlug);
+      expect(selfServiceTenant.token.role).toBe("tenant_admin");
+      const selfServiceSession: string = await initialize(
+        server.mcpUrl,
+        selfServiceTenant.token.secret,
+        "self-service-tenant-test",
+      );
+      const selfServiceTools: readonly string[] = await toolNames(
+        server.mcpUrl,
+        selfServiceTenant.token.secret,
+        selfServiceSession,
+      );
+      expect(selfServiceTools).toContain("register_agent");
+      expect(selfServiceTools).toContain("create_access_token");
+      expect(selfServiceTools).not.toContain("create_tenant");
+      const replayedSelfServiceResponse: Response = await fetch(server.registrationUrl, {
+        body: selfServiceBody,
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      expect(replayedSelfServiceResponse.status).toBe(201);
+      expect(CreateTenantOutputSchema.parse(await replayedSelfServiceResponse.json())).toEqual(
+        selfServiceTenant,
+      );
+      const duplicateSelfServiceResponse: Response = await fetch(server.registrationUrl, {
+        body: JSON.stringify({
+          display_name: `Duplicate self-service tenant ${unique}`,
+          registration_secret: randomBytes(32).toString("base64url"),
+          slug: selfServiceSlug,
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      expect(duplicateSelfServiceResponse.status).toBe(409);
+      expect(await duplicateSelfServiceResponse.json()).toEqual({
+        error: "Tenant slug is already registered",
+      });
+      const conflictingReplayResponse: Response = await fetch(server.registrationUrl, {
+        body: JSON.stringify({
+          display_name: `Conflicting self-service tenant ${unique}`,
+          registration_secret: selfServiceRegistrationSecret,
+          slug: `conflicting-${unique}`,
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      expect(conflictingReplayResponse.status).toBe(409);
+      expect(await conflictingReplayResponse.json()).toEqual({
+        error: "Registration secret was already used with different tenant details",
+      });
 
       const backupOperator: IssuedOperatorTokenOutput = await callTool(
         server.mcpUrl,

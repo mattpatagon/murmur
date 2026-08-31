@@ -8,7 +8,13 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
 import type { AgentClient, BranchName, RepositoryName, TenantId } from "./domain/value-objects.js";
 import { createHostedAuthenticator, type HostedAuthenticator } from "./hosted/authenticator.js";
-import type { CredentialAdmission, HostedPrincipal } from "./hosted/control-plane.js";
+import type {
+  CredentialAdmission,
+  HostedControlPlane,
+  HostedPrincipal,
+  IssuedToken,
+  TenantSummary,
+} from "./hosted/control-plane.js";
 import { hashTokenSecret } from "./hosted/token-secret.js";
 import {
   HttpCapacityController,
@@ -20,6 +26,7 @@ import {
   MCP_PATH,
   parseHttpServerConfig,
   SSE_KEEP_ALIVE_MS,
+  TENANT_REGISTRATION_PATH,
 } from "./http/http-config.js";
 import {
   authenticationCapacityResponse,
@@ -47,6 +54,7 @@ import type { HostedApplicationRequest } from "./http/murmur-application-factory
 import { createHostedMurmurApplication } from "./http/murmur-application-factory.js";
 import type { RemoteSession } from "./http/remote-session.js";
 import { responseWithFinish, trackedResponse } from "./http/response-lifecycle.js";
+import { createTenantRegistrationHandler } from "./http/self-service-registration.js";
 import {
   RemoteSessionInvalidator,
   type SessionAuthorizationEpoch,
@@ -65,6 +73,7 @@ import type { MessageStore } from "./storage/message-store.js";
 export type MurmurHttpServer = {
   readonly mcpUrl: URL;
   readonly port: number;
+  readonly registrationUrl: URL;
   stop(): Promise<void>;
 };
 
@@ -120,6 +129,31 @@ export async function startHttpServer(
   const sessions: Map<string, RemoteSession> = new Map<string, RemoteSession>();
   const initializingByTenant: Map<string, number> = new Map<string, number>();
   const invalidator: RemoteSessionInvalidator = new RemoteSessionInvalidator(sessions);
+  const registrationControlPlane: HostedControlPlane | null = authenticator.tenantOnboardingEnabled
+    ? authenticator.controlPlane
+    : null;
+  const handleTenantRegistration: (
+    request: Request,
+    observation: RequestObservation,
+  ) => Promise<Response> = createTenantRegistrationHandler({
+    allowedOrigins,
+    capacity,
+    maxRequestBytes,
+    rateLimitPerMinute: config.registrationRateLimitPerMinute,
+    registration:
+      registrationControlPlane === null
+        ? null
+        : async (
+            slug: string,
+            displayName: string,
+            registrationSecret: string,
+          ): Promise<{ readonly tenant: TenantSummary; readonly token: IssuedToken }> =>
+            await registrationControlPlane.selfServiceRegisterTenant(
+              slug,
+              displayName,
+              registrationSecret,
+            ),
+  });
   let initializingSessions: number = 0;
   let stopped: boolean = false;
   const expireIdleSessions: (now: number) => Promise<void> = async (now: number): Promise<void> => {
@@ -390,7 +424,7 @@ export async function startHttpServer(
   let bunServer: Bun.Server<undefined>;
   try {
     bunServer = Bun.serve({
-      fetch: createHttpRequestHandler(observability, handleMcpRequest),
+      fetch: createHttpRequestHandler(observability, handleMcpRequest, handleTenantRegistration),
       hostname,
       port: requestedPort,
     });
@@ -409,11 +443,15 @@ export async function startHttpServer(
   const port: number = boundPort;
   const publicHostname: string = hostname === "0.0.0.0" ? "127.0.0.1" : hostname;
   const mcpUrl: URL = new URL(`http://${publicHostname}:${port}${MCP_PATH}`);
+  const registrationUrl: URL = new URL(
+    `http://${publicHostname}:${port}${TENANT_REGISTRATION_PATH}`,
+  );
   observability.info("service.started", { hostname, port });
 
   return {
     mcpUrl,
     port,
+    registrationUrl,
     stop: async (): Promise<void> => {
       if (stopped) return;
       stopped = true;
