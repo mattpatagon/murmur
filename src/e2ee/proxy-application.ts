@@ -8,6 +8,11 @@ import type {
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import packageMetadata from "../../package.json" with { type: "json" };
 import { toolError } from "../mcp/murmur-tool-results.js";
+import {
+  defaultMurmurUpgradeChecker,
+  type MurmurUpgradeChecker,
+} from "../mcp/murmur-upgrade-checker.js";
+import { callUpgradeTool, upgradeToolDefinition } from "../mcp/murmur-upgrade-tool.js";
 import { logSafeError } from "../safe-errors.js";
 import { E2eeProxyResources } from "./proxy-resources.js";
 import type { E2eeProxyOperations } from "./proxy-service.js";
@@ -17,14 +22,19 @@ export class E2eeProxyApplication {
   readonly #operations: E2eeProxyOperations;
   readonly #resources: E2eeProxyResources;
   readonly #tools: readonly Tool[];
+  readonly #upgradeChecker: MurmurUpgradeChecker;
   #closePromise: Promise<void> | null = null;
   #localClosePromise: Promise<void> | null = null;
   #onCloseCleanupStarted: boolean = false;
   public readonly server: Server;
 
-  public constructor(operations: E2eeProxyOperations) {
+  public constructor(
+    operations: E2eeProxyOperations,
+    upgradeChecker: MurmurUpgradeChecker = defaultMurmurUpgradeChecker,
+  ) {
     this.#operations = operations;
-    this.#tools = e2eeProxyTools();
+    this.#tools = [...e2eeProxyTools(), upgradeToolDefinition()];
+    this.#upgradeChecker = upgradeChecker;
     this.server = new Server(
       { name: "murmur-e2ee-proxy", version: packageMetadata.version },
       {
@@ -33,7 +43,7 @@ export class E2eeProxyApplication {
           tools: {},
         },
         instructions:
-          "Murmur end-to-end encryption runs at this local endpoint. Familiar agent lifecycle and message tools remain available. Message plaintext and private keys never leave this proxy; hosted Murmur receives ciphertext and bounded routing metadata only. Feedback is an explicit exception: submit_feedback stores maintainer-readable plaintext, so never include credentials, secrets, private message content, vulnerability details, or sensitive production data. Report suspected vulnerabilities privately at https://github.com/mattpatagon/murmur/security/advisories/new. Verify peer root fingerprints before exchanging sensitive content.",
+          "Murmur end-to-end encryption runs at this local endpoint. Familiar agent lifecycle and message tools remain available. Message plaintext and private keys never leave this proxy; hosted Murmur receives ciphertext and bounded routing metadata only. Feedback is an explicit exception: submit_feedback stores maintainer-readable plaintext, so never include credentials, secrets, private message content, vulnerability details, or sensitive production data. Report suspected vulnerabilities privately at https://github.com/mattpatagon/murmur/security/advisories/new. Call check_for_upgrades for revision-pinned upgrade steps. Verify peer root fingerprints before exchanging sensitive content.",
       },
     );
     this.server.setRequestHandler(
@@ -57,6 +67,12 @@ export class E2eeProxyApplication {
 
   private async callTool(request: CallToolRequest): Promise<CallToolResult> {
     try {
+      const upgradeResult: CallToolResult | null = await callUpgradeTool(
+        request.params.name,
+        request.params.arguments,
+        this.#upgradeChecker,
+      );
+      if (upgradeResult !== null) return upgradeResult;
       const result: CallToolResult | null = await callE2eeProxyTool(
         request.params.name,
         request.params.arguments,

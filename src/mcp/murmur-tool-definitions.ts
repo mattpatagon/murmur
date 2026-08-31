@@ -69,6 +69,7 @@ import {
 } from "./murmur-orchestration-tool-definitions.js";
 import { tenantAdminTools } from "./murmur-tenant-admin-tool-definitions.js";
 import type { E2eeEntitlementRecord, ToolExposure } from "./murmur-tool-exposure.js";
+import { upgradeToolDefinition } from "./murmur-upgrade-tool.js";
 import { toolDefinition } from "./tool-definition.js";
 
 function dataTools(): Tool[] {
@@ -416,7 +417,7 @@ function operatorTools(exposure: ToolExposure): Tool[] {
   });
 }
 
-export function toolsForPrincipal(exposure: ToolExposure): Tool[] {
+function principalToolsForExposure(exposure: ToolExposure): Tool[] {
   const principal: HostedPrincipal | null = exposure.principal;
   if (principal !== null && principal.kind === "bootstrap") {
     return exposure.bootstrapEnabled ? bootstrapTools() : [];
@@ -452,5 +453,11 @@ export function toolsForPrincipal(exposure: ToolExposure): Tool[] {
     tools.push(...tenantAdminTools());
     if (exposure.orchestrationEnabled === true) tools.push(...tenantAdminOrchestrationTools());
   }
+  return tools;
+}
+
+export function toolsForPrincipal(exposure: ToolExposure): Tool[] {
+  const tools: Tool[] = principalToolsForExposure(exposure);
+  tools.push(upgradeToolDefinition());
   return tools;
 }

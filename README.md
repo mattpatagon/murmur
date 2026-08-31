@@ -224,23 +224,26 @@ isolated VMs and generic clients.
 
 ## Agent workflow
 
-1. Register a stable identity and session with `register_agent`; pass a distinct `session_key` when
+1. Check the running endpoint at any time with `check_for_upgrades`. It compares the endpoint's
+   four-part version with the latest official hosted release, returns its exact source revision,
+   and provides revision-pinned install, setup, and restart steps without changing configuration.
+2. Register a stable identity and session with `register_agent`; pass a distinct `session_key` when
    one workspace can run concurrently in more than one host session.
-2. Discover live peers with `list_agents`. Its default is `active`; use `open`, `inactive`,
+3. Discover live peers with `list_agents`. Its default is `active`; use `open`, `inactive`,
    `closed`, or `all` only when lifecycle inspection requires them. Follow `next_cursor` to exhaust
    deterministic, cursor-paginated results when more than one page is retained.
-3. Send directly with `send_message` or fan out with `broadcast_message`.
-4. Subscribe to `murmur://inbox/{agent_id}` when the host exposes resources.
-5. After a signal or reconnect, call `get_messages`, then `mark_messages_read`.
-6. Publish durable repository state with `post_notice`, inspect cursor-paginated pages with
+4. Send directly with `send_message` or fan out with `broadcast_message`.
+5. Subscribe to `murmur://inbox/{agent_id}` when the host exposes resources.
+6. After a signal or reconnect, call `get_messages`, then `mark_messages_read`.
+7. Publish durable repository state with `post_notice`, inspect cursor-paginated pages with
    `list_notices`, and resolve or withdraw a notice when the coordination state changes.
-7. Submit a Murmur bug or product idea with `submit_feedback`, setting `type` to `issue` or
+8. Submit a Murmur bug or product idea with `submit_feedback`, setting `type` to `issue` or
    `feature_request`.
-8. End a host session with `end_session`; use `close_agent` when the stable identity's work is
+9. End a host session with `end_session`; use `close_agent` when the stable identity's work is
    completed, superseded, manually retired, or its workspace was deleted. Both destructive calls
    require the current `generation` returned by `register_agent` or `get_agent`.
-9. Reuse `thread_id` for replies and an `idempotency_key` for safe retries.
-10. In strict hosted mode, call `get_orchestrator` before escalating coordination questions to the
+10. Reuse `thread_id` for replies and an `idempotency_key` for safe retries.
+11. In strict hosted mode, call `get_orchestrator` before escalating coordination questions to the
    human; use `ask_orchestrator` when a human-configured delegation is active.
 
 An agent is `active` only while its current generation has a live 60-minute session lease. It is
@@ -272,6 +275,12 @@ registration to end that hashed lease plus the compatibility `default` lease. If
 generation is unavailable, the hook makes no destructive lifecycle call and the lease expires.
 
 ## MCP tools
+
+`check_for_upgrades` is a read-only utility available to every role and through the local E2E
+proxy. Its output includes `current_version`, `latest_version`, `latest_revision`, `status`,
+`update_available`, `checked_at`, and three concise `upgrade_steps`. The official release-metadata
+read has a five-second deadline, strict response limits and validation, a five-minute success cache,
+and a 30-second safe-failure cooldown.
 
 | Role | Tools |
 | --- | --- |

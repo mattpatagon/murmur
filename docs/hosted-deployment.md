@@ -12,6 +12,8 @@ The deployed service exposes:
 
 - `GET /health`, an unauthenticated liveness endpoint that returns a JSON
   `status` of `ok` only after startup has completed.
+- `GET /version`, an unauthenticated endpoint that returns the deployed four-part version and exact
+  source revision used by upgrade checks.
 - `POST /v1/tenants`, an unauthenticated, rate-limited endpoint that atomically
   creates a tenant and returns its initial administrator credential.
 - `/mcp`, a public Streamable HTTP endpoint that requires a live Murmur bearer
@@ -270,13 +272,14 @@ workflow because strict mode refuses to start without an operator.
 ```bash
 export GOOGLE_CLOUD_PROJECT='your-project-id'
 export MURMUR_RUNTIME_SERVICE_ACCOUNT='murmur-cloud-run@your-project-id.iam.gserviceaccount.com'
+export MURMUR_RELEASE_REVISION="$(git rev-parse HEAD)"
 
 gcloud run deploy murmur-mcp \
   --project "$GOOGLE_CLOUD_PROJECT" \
   --region us-central1 \
   --source . \
   --service-account "$MURMUR_RUNTIME_SERVICE_ACCOUNT" \
-  --update-env-vars MURMUR_AUTH_MODE=multi-tenant,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0 \
+  --update-env-vars MURMUR_AUTH_MODE=multi-tenant,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_RELEASE_REVISION="$MURMUR_RELEASE_REVISION" \
   --set-secrets MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:latest,/etc/murmur/secrets/database-ca.pem=MURMUR_DATABASE_CA:latest \
   --allow-unauthenticated \
   --concurrency 80 \

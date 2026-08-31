@@ -35,6 +35,11 @@ import {
   type SubmitFeedbackOutput,
   SubmitFeedbackOutputSchema,
 } from "../src/domain/feedback-contracts.js";
+import {
+  type CheckForUpgradesOutput,
+  CheckForUpgradesOutputSchema,
+  createUpgradeCheckOutput,
+} from "../src/domain/upgrade-contracts.js";
 import { E2eeProxyApplication } from "../src/e2ee/proxy-application.js";
 import {
   type ProxyBroadcastOutput,
@@ -48,6 +53,7 @@ import {
   ProxyWaitForMessagesOutputSchema,
 } from "../src/e2ee/proxy-contracts.js";
 import type { E2eeProxyOperations } from "../src/e2ee/proxy-service.js";
+import type { MurmurUpgradeChecker } from "../src/mcp/murmur-upgrade-checker.js";
 
 const NOW: string = "2026-08-10T20:00:00.000Z";
 const EXPIRES: string = "2026-09-09T20:00:00.000Z";
@@ -57,6 +63,7 @@ const SENDER_ID: string = "machine-a:codex:repo:1";
 const RECIPIENT_ID: string = "machine-b:codex:repo:2";
 const ROOT_KEY_ID: string = `mrk_${"A".repeat(43)}`;
 const AGENT_KEY_ID: string = `mak_${"B".repeat(43)}`;
+const UPGRADE_REVISION: string = "c".repeat(40);
 
 function proxyMessage(): ProxyMessageDto {
   return {
@@ -259,7 +266,16 @@ async function callTool(
 
 test("local E2E MCP proxy preserves familiar data tools and verified plaintext outputs", async (): Promise<void> => {
   const operations: FakeProxyOperations = new FakeProxyOperations();
-  const application: E2eeProxyApplication = new E2eeProxyApplication(operations);
+  const upgradeOutput: CheckForUpgradesOutput = createUpgradeCheckOutput(
+    "0.10.1.0",
+    "0.10.2.0",
+    UPGRADE_REVISION,
+    new Date(NOW),
+  );
+  const upgradeChecker: MurmurUpgradeChecker = {
+    checkForUpgrades: async (): Promise<CheckForUpgradesOutput> => upgradeOutput,
+  };
+  const application: E2eeProxyApplication = new E2eeProxyApplication(operations, upgradeChecker);
   const transports: [InMemoryTransport, InMemoryTransport] = InMemoryTransport.createLinkedPair();
   const client: Client = new Client(
     { name: "proxy-contract-test", version: "1.0.0" },
@@ -284,6 +300,7 @@ test("local E2E MCP proxy preserves familiar data tools and verified plaintext o
       "get_messages",
       "wait_for_messages",
       "mark_messages_read",
+      "check_for_upgrades",
     ]);
     expect(
       listed.tools.some(
@@ -296,6 +313,9 @@ test("local E2E MCP proxy preserves familiar data tools and verified plaintext o
     if (feedbackTool === undefined) throw new Error("Missing encrypted proxy feedback tool");
     expect(feedbackTool.description).toContain("maintainer-readable plaintext");
     expect(feedbackTool.description).toContain("security/advisories/new");
+
+    const upgrade: CallToolResult = await callTool(client, "check_for_upgrades", {});
+    expect(CheckForUpgradesOutputSchema.parse(upgrade.structuredContent)).toEqual(upgradeOutput);
 
     await callTool(client, "register_agent", {
       agent_id: SENDER_ID,

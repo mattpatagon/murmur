@@ -1,7 +1,14 @@
 import { z } from "zod";
 
+import packageMetadata from "../../package.json" with { type: "json" };
+import {
+  type MurmurReleaseMetadata,
+  MurmurReleaseMetadataSchema,
+} from "../domain/upgrade-contracts.js";
+
 export const HEALTH_PATH: string = "/health";
 export const MCP_PATH: string = "/mcp";
+export const RELEASE_PATH: string = "/version";
 export const TENANT_REGISTRATION_PATH: string = "/v1/tenants";
 export const SSE_KEEP_ALIVE_MS: number = 1_000;
 
@@ -22,13 +29,17 @@ export type HttpServerConfig = {
   readonly maxSessions: number;
   readonly maxSessionsPerTenant: number;
   readonly rateLimitPerMinute: number;
+  readonly releaseMetadata: MurmurReleaseMetadata | null;
   readonly registrationRateLimitPerMinute: number;
   readonly requestedPort: number;
   readonly sessionIdleMs: number;
   readonly tenantRateLimitPerMinute: number;
 };
 
-type HttpDefaults = Omit<HttpServerConfig, "allowedOrigins" | "hostname" | "requestedPort"> & {
+type HttpDefaults = Omit<
+  HttpServerConfig,
+  "allowedOrigins" | "hostname" | "releaseMetadata" | "requestedPort"
+> & {
   readonly port: number;
 };
 
@@ -78,6 +89,12 @@ function parseAllowedOrigins(environment: NodeJS.ProcessEnv): ReadonlySet<string
     .map((origin: string): string => origin.trim())
     .filter((origin: string): boolean => origin !== "");
   return new Set<string>(origins);
+}
+
+function parseReleaseMetadata(environment: NodeJS.ProcessEnv): MurmurReleaseMetadata | null {
+  const revision: string | undefined = environment["MURMUR_RELEASE_REVISION"];
+  if (revision === undefined || revision === "") return null;
+  return MurmurReleaseMetadataSchema.parse({ revision, version: packageMetadata.version });
 }
 
 export function parseHttpServerConfig(environment: NodeJS.ProcessEnv): HttpServerConfig {
@@ -154,6 +171,7 @@ export function parseHttpServerConfig(environment: NodeJS.ProcessEnv): HttpServe
       "MURMUR_RATE_LIMIT_PER_MINUTE",
       DEFAULTS.rateLimitPerMinute,
     ),
+    releaseMetadata: parseReleaseMetadata(environment),
     registrationRateLimitPerMinute: positiveIntegerEnvironment(
       environment,
       "MURMUR_REGISTRATION_RATE_LIMIT_PER_MINUTE",
