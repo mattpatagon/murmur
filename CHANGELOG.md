@@ -2,6 +2,13 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.9.0.2] - 2026-08-31
+
+### Changed
+
+- Document equivalent Murmur coordination setups for repositories that use only `AGENTS.md`, only
+  `CLAUDE.md`, or both instruction files.
+
 ## [0.9.0.1] - 2026-08-31
 
 ### Changed
