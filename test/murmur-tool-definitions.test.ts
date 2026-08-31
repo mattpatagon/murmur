@@ -37,6 +37,7 @@ const DATA_TOOLS: readonly string[] = [
   "wait_for_messages",
   "withdraw_notice",
 ];
+const UTILITY_TOOLS: readonly string[] = ["check_for_upgrades"];
 const TENANT_ADMIN_TOOLS: readonly string[] = [
   "create_access_token",
   "get_e2ee_entitlement",
@@ -89,8 +90,8 @@ describe("MCP role-to-tool exposure", (): void => {
       tenantId: TenantId.parse("00000000-0000-4000-8000-000000000001"),
       tokenId: "10000000-0000-4000-8000-000000000001",
     };
-    expect(names(exposure(null))).toEqual(DATA_TOOLS);
-    expect(names(exposure(tenantAgent))).toEqual(DATA_TOOLS);
+    expect(names(exposure(null))).toEqual([...DATA_TOOLS, ...UTILITY_TOOLS].sort());
+    expect(names(exposure(tenantAgent))).toEqual([...DATA_TOOLS, ...UTILITY_TOOLS].sort());
   });
 
   test("tenant administrators add only tenant lifecycle tools", (): void => {
@@ -100,7 +101,9 @@ describe("MCP role-to-tool exposure", (): void => {
       tenantId: TenantId.parse("00000000-0000-4000-8000-000000000001"),
       tokenId: "10000000-0000-4000-8000-000000000002",
     };
-    expect(names(exposure(principal))).toEqual([...DATA_TOOLS, ...TENANT_ADMIN_TOOLS].sort());
+    expect(names(exposure(principal))).toEqual(
+      [...DATA_TOOLS, ...TENANT_ADMIN_TOOLS, ...UTILITY_TOOLS].sort(),
+    );
   });
 
   test("tenant E2E enforcement exposes ciphertext tools and blocks every plaintext route", (): void => {
@@ -119,9 +122,12 @@ describe("MCP role-to-tool exposure", (): void => {
       unreadPlaintextMessages: 0,
     });
     expect(names({ ...exposure(principal), e2eeEntitlement: entitlement })).toEqual(
-      tenantDataToolNames(entitlement)
-        .filter((name: string): boolean => name !== "claim_orchestrator_prekey")
-        .sort(),
+      [
+        ...tenantDataToolNames(entitlement).filter(
+          (name: string): boolean => name !== "claim_orchestrator_prekey",
+        ),
+        ...UTILITY_TOOLS,
+      ].sort(),
     );
     expect(names({ ...exposure(principal), e2eeEntitlement: entitlement })).not.toContain(
       "get_messages",
@@ -154,7 +160,7 @@ describe("MCP role-to-tool exposure", (): void => {
       tokenId: "10000000-0000-4000-8000-000000000008",
     };
     expect(names({ ...exposure(agent), orchestrationEnabled: true })).toEqual(
-      [...DATA_TOOLS, ...WORKER_ORCHESTRATION_TOOLS].sort(),
+      [...DATA_TOOLS, ...WORKER_ORCHESTRATION_TOOLS, ...UTILITY_TOOLS].sort(),
     );
     expect(names({ ...exposure(admin), orchestrationEnabled: true })).toEqual(
       [
@@ -162,12 +168,13 @@ describe("MCP role-to-tool exposure", (): void => {
         ...WORKER_ORCHESTRATION_TOOLS,
         ...TENANT_ADMIN_TOOLS,
         ...ADMIN_ORCHESTRATION_TOOLS,
+        ...UTILITY_TOOLS,
       ].sort(),
     );
     expect(names({ ...exposure(boss), orchestrationEnabled: true })).toEqual(
-      [...DATA_TOOLS, ...BOSS_ORCHESTRATION_TOOLS].sort(),
+      [...DATA_TOOLS, ...BOSS_ORCHESTRATION_TOOLS, ...UTILITY_TOOLS].sort(),
     );
-    expect(names(exposure(boss))).toEqual([]);
+    expect(names(exposure(boss))).toEqual(UTILITY_TOOLS);
   });
 
   test("enforced E2E uses only encrypted orchestration content routes", (): void => {
@@ -212,14 +219,14 @@ describe("MCP role-to-tool exposure", (): void => {
     expect(bossTools).not.toContain("claim_orchestrator_prekey");
   });
 
-  test("bootstrap sessions expose one tool only while the bootstrap proof exists", (): void => {
+  test("bootstrap sessions keep the upgrade utility outside the bootstrap proof gate", (): void => {
     const principal: HostedPrincipal = {
       keyId: "bootstrap",
       kind: "bootstrap",
       tokenId: "10000000-0000-4000-8000-000000000003",
     };
-    expect(names(exposure(principal))).toEqual(["bootstrap_operator"]);
-    expect(names({ ...exposure(principal), bootstrapEnabled: false })).toEqual([]);
+    expect(names(exposure(principal))).toEqual(["bootstrap_operator", ...UTILITY_TOOLS].sort());
+    expect(names({ ...exposure(principal), bootstrapEnabled: false })).toEqual(UTILITY_TOOLS);
   });
 
   test("operator sessions expose no tenant data tools and honor rollout gates", (): void => {
@@ -229,7 +236,7 @@ describe("MCP role-to-tool exposure", (): void => {
       kind: "operator",
       tokenId: "10000000-0000-4000-8000-000000000004",
     };
-    expect(names(exposure(principal))).toEqual(OPERATOR_TOOLS);
+    expect(names(exposure(principal))).toEqual([...OPERATOR_TOOLS, ...UTILITY_TOOLS].sort());
     expect(
       names({
         ...exposure(principal),
@@ -237,10 +244,13 @@ describe("MCP role-to-tool exposure", (): void => {
         tenantOnboardingEnabled: false,
       }),
     ).toEqual(
-      OPERATOR_TOOLS.filter(
-        (name: string): boolean =>
-          name !== "adopt_legacy_founding_token" && name !== "create_tenant",
-      ),
+      [
+        ...OPERATOR_TOOLS.filter(
+          (name: string): boolean =>
+            name !== "adopt_legacy_founding_token" && name !== "create_tenant",
+        ),
+        ...UTILITY_TOOLS,
+      ].sort(),
     );
     expect(names(exposure(principal))).not.toContain("register_agent");
   });

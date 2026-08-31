@@ -3,6 +3,30 @@
 Upgrades are deliberate, exact-pinned, independently reviewable changes. Murmur does not accept
 dependency ranges or packages published in the previous 72 hours.
 
+## Installed Murmur upgrades
+
+Call the read-only MCP tool `check_for_upgrades` with an empty object from a standard Murmur
+connection or the local E2E proxy. It compares the running endpoint's four-part version with the
+latest official hosted release metadata and returns:
+
+- `status` as `update_available`, `up_to_date`, or `ahead`, plus `update_available` for callers that
+  only need a boolean;
+- the current and latest versions, exact 40-character `latest_revision`, and `checked_at` time;
+- three brief `upgrade_steps` covering a revision-pinned global install, configuration refresh,
+  and host restart.
+
+The check never installs or changes configuration. Its fixed upstream request has a five-second
+deadline, enforces response type and byte limits, validates every returned field, deduplicates
+concurrent calls, caches a successful result for five minutes, and observes a 30-second failure
+cooldown. A failed or malformed upstream response returns a fixed safe error instead of repository
+or transport details. Production sets
+`MURMUR_RELEASE_REVISION` to the deployed 40-character source revision so `/version` publishes a
+version and revision from the same release.
+
+Follow the returned install command exactly. Then run `murmur setup --user`, or preserve encrypted
+mode with `murmur setup --user --e2ee`, and restart active Codex and Claude sessions. Repository
+checkouts should fetch and review the returned revision before updating their own pinned checkout.
+
 ## Dependency upgrades
 
 1. Read upstream release notes, migration notes, supported runtime matrix, license, provenance, and

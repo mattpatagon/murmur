@@ -47,6 +47,11 @@ import {
 } from "./murmur-orchestration-tools.js";
 import { toolsForPrincipal } from "./murmur-tool-definitions.js";
 import { toolError } from "./murmur-tool-results.js";
+import {
+  defaultMurmurUpgradeChecker,
+  type MurmurUpgradeChecker,
+} from "./murmur-upgrade-checker.js";
+import { callUpgradeTool } from "./murmur-upgrade-tool.js";
 
 const SERVER_VERSION: string = packageMetadata.version;
 
@@ -70,6 +75,7 @@ export type MurmurApplicationDependencies = {
   readonly repositoryName: RepositoryName | null;
   readonly store: MessageStore | null;
   readonly tenantOnboardingEnabled?: boolean;
+  readonly upgradeChecker?: MurmurUpgradeChecker | undefined;
 };
 
 export class MurmurApplication {
@@ -96,6 +102,7 @@ export class MurmurApplication {
   private readonly store: MessageStore | null;
   private readonly tools: Tool[];
   private readonly tenantOnboardingEnabled: boolean;
+  private readonly upgradeChecker: MurmurUpgradeChecker;
 
   public constructor(dependencies: MurmurApplicationDependencies) {
     this.branchName = dependencies.branchName;
@@ -122,6 +129,7 @@ export class MurmurApplication {
     this.repositoryName = dependencies.repositoryName;
     this.store = dependencies.store;
     this.tenantOnboardingEnabled = dependencies.tenantOnboardingEnabled === true;
+    this.upgradeChecker = dependencies.upgradeChecker ?? defaultMurmurUpgradeChecker;
     this.tools = this.createTools();
     this.exposedToolNames = new Set<string>(this.tools.map((tool: Tool): string => tool.name));
     this.server = new Server(
@@ -171,6 +179,7 @@ export class MurmurApplication {
       "Outgoing messages include verified sender_authority plus context.repository, context.branch, context.client, and a created_at timestamp. " +
       "Repository, branch, and client are detected from the launching agent when possible; otherwise send_message or broadcast_message must supply them in context. " +
       "Use submit_feedback with type issue or feature_request to send durable feedback to Murmur maintainers. Feedback is intentionally maintainer-readable plaintext, so never include credentials, secrets, private message content, vulnerability details, or sensitive production data. Report suspected vulnerabilities privately at https://github.com/mattpatagon/murmur/security/advisories/new. " +
+      "Call check_for_upgrades to compare this endpoint with the official hosted release and get revision-pinned upgrade steps. " +
       "For push signals, subscribe to murmur://inbox/{agent_id}; always read the durable inbox after a notification or reconnect. " +
       `Messages expire automatically after ${RETENTION_DAYS} days. MCP notifications do not themselves guarantee that a host starts a new model turn. `;
     if (
@@ -214,6 +223,12 @@ export class MurmurApplication {
       if (!this.exposedToolNames.has(name)) {
         return toolError(new Error(`Unknown tool '${name}'`));
       }
+      const upgradeResult: CallToolResult | null = await callUpgradeTool(
+        name,
+        argumentsValue,
+        this.upgradeChecker,
+      );
+      if (upgradeResult !== null) return upgradeResult;
       if (this.e2eeCapability !== null && this.e2eeEntitlement !== null) {
         const e2eeContext: E2eeToolContext = {
           authorizeAgent: async (agentId: AgentId): Promise<void> => {

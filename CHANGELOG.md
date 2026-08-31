@@ -2,6 +2,21 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.11.0.0] - 2026-08-31
+
+### Added
+
+- Expose `check_for_upgrades` to every standard MCP role and the local E2E proxy, returning
+  deterministic version status plus revision-pinned install, setup, and restart instructions.
+- Publish the official deployed version and exact source revision through `GET /version` so local,
+  self-hosted, and hosted clients share one stable release channel.
+
+### Security
+
+- Bound release checks with a fixed origin, five-second deadline, 1 KiB response cap, strict media
+  type and schema validation, concurrent request deduplication, success caching, safe-failure
+  cooldown, and caller-safe errors.
+
 ## [0.10.2.0] - 2026-08-31
 
 ### Fixed

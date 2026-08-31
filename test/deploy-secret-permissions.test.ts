@@ -262,6 +262,17 @@ test("workflow always drains pre-lifecycle Cloud Run revisions", async (): Promi
   expect(drainStep).not.toContain("TENANT_CONTRACT_FINALIZE_REQUIRED");
 });
 
+test("every production revision publishes its exact source revision", async (): Promise<void> => {
+  const workflow: string = await Bun.file(".github/workflows/deploy.yml").text();
+  const environmentUpdates: readonly string[] = workflow
+    .split("\n")
+    .filter((line: string): boolean => line.includes("--update-env-vars"));
+  expect(environmentUpdates).toHaveLength(4);
+  environmentUpdates.forEach((line: string): void => {
+    expect(line).toContain('MURMUR_RELEASE_REVISION="$GITHUB_SHA"');
+  });
+});
+
 test("production smoke masks privileged credentials before live isolation checks", async (): Promise<void> => {
   const workflow: string = await Bun.file(".github/workflows/production-smoke.yml").text();
   expect(workflow).toContain("workflow_dispatch:");

@@ -1,7 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { HostedPrincipal } from "../hosted/control-plane.js";
-import { HEALTH_PATH, MCP_PATH, TENANT_REGISTRATION_PATH } from "../http/http-config.js";
+import {
+  HEALTH_PATH,
+  MCP_PATH,
+  RELEASE_PATH,
+  TENANT_REGISTRATION_PATH,
+} from "../http/http-config.js";
 import type { McpRequestMetadata } from "../http/http-request.js";
 import { responseWithFinish } from "../http/response-lifecycle.js";
 import { type LogFields, StructuredLogger } from "./structured-logger.js";
@@ -33,6 +38,7 @@ function routeForRequest(request: Request): string {
     const pathname: string = new URL(request.url).pathname;
     if (pathname === "/" || pathname === HEALTH_PATH) return HEALTH_PATH;
     if (pathname === MCP_PATH) return MCP_PATH;
+    if (pathname === RELEASE_PATH) return RELEASE_PATH;
     if (pathname === TENANT_REGISTRATION_PATH) return TENANT_REGISTRATION_PATH;
     return "/not-found";
   } catch (_error: unknown) {

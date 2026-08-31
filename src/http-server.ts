@@ -420,11 +420,15 @@ export async function startHttpServer(
         if (!responseHandedOff) releaseResponseCapacity();
       }
     };
-
   let bunServer: Bun.Server<undefined>;
   try {
     bunServer = Bun.serve({
-      fetch: createHttpRequestHandler(observability, handleMcpRequest, handleTenantRegistration),
+      fetch: createHttpRequestHandler(
+        observability,
+        handleMcpRequest,
+        handleTenantRegistration,
+        config.releaseMetadata,
+      ),
       hostname,
       port: requestedPort,
     });
@@ -433,7 +437,6 @@ export async function startHttpServer(
     await cleanupServerStartup(authenticator, store, observability, null);
     throw error;
   }
-
   const boundPort: number | undefined = bunServer.port;
   if (boundPort === undefined) {
     capacity.stop();
@@ -447,7 +450,6 @@ export async function startHttpServer(
     `http://${publicHostname}:${port}${TENANT_REGISTRATION_PATH}`,
   );
   observability.info("service.started", { hostname, port });
-
   return {
     mcpUrl,
     port,
@@ -468,7 +470,6 @@ export async function startHttpServer(
     },
   };
 }
-
 if (import.meta.main) {
   startHttpServer()
     .then((server: MurmurHttpServer): void => {

@@ -2,8 +2,9 @@ import type {
   HttpObservability,
   RequestObservation,
 } from "../observability/request-observation.js";
+import type { MurmurReleaseMetadata } from "../domain/upgrade-contracts.js";
 import { logSafeError } from "../safe-errors.js";
-import { HEALTH_PATH, MCP_PATH, TENANT_REGISTRATION_PATH } from "./http-config.js";
+import { HEALTH_PATH, MCP_PATH, RELEASE_PATH, TENANT_REGISTRATION_PATH } from "./http-config.js";
 import { jsonResponse } from "./http-request.js";
 
 export type McpRequestHandler = (
@@ -15,6 +16,7 @@ export function createHttpRequestHandler(
   observability: HttpObservability,
   handleMcpRequest: McpRequestHandler,
   handleTenantRegistration: McpRequestHandler | null = null,
+  releaseMetadata: MurmurReleaseMetadata | null = null,
 ): (request: Request) => Promise<Response> {
   return async (request: Request): Promise<Response> => {
     const observation: RequestObservation = observability.observe(request);
@@ -29,6 +31,18 @@ export function createHttpRequestHandler(
           });
         } else {
           response = jsonResponse(200, { service: "murmur", status: "ok" });
+        }
+      } else if (url.pathname === RELEASE_PATH) {
+        if (request.method !== "GET") {
+          response = new Response(null, { headers: { allow: "GET" }, status: 405 });
+        } else {
+          response =
+            releaseMetadata === null
+              ? jsonResponse(503, { error: "Release metadata unavailable" })
+              : jsonResponse(200, {
+                  revision: releaseMetadata.revision,
+                  version: releaseMetadata.version,
+                });
         }
       } else if (url.pathname === TENANT_REGISTRATION_PATH) {
         response =

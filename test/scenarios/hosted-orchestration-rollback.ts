@@ -39,7 +39,9 @@ export async function verifyHostedOrchestrationRollback(
       options.bossSecret,
       "orchestrator-hybrid-rollback-test",
     );
-    expect(await toolNames(server.mcpUrl, options.bossSecret, session)).toEqual([]);
+    expect(await toolNames(server.mcpUrl, options.bossSecret, session)).toEqual([
+      "check_for_upgrades",
+    ]);
     expect(
       await callToolExpectingError(
         server.mcpUrl,
