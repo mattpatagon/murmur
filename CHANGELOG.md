@@ -2,6 +2,14 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.10.2.0] - 2026-08-31
+
+### Fixed
+
+- Inject the detected repository, branch, and client into agent guidance so remote MCP clients can
+  send messages and feedback without guessing the required context shape, while keeping scope, PR,
+  dependencies, and urgency in message content instead of unsupported tool fields.
+
 ## [0.10.1.0] - 2026-08-31
 
 ### Changed
