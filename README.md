@@ -96,61 +96,42 @@ Committed project configurations live in `.mcp.json` and
 `.codex/config.toml`. They authenticate with `MURMUR_API_TOKEN` and contain no
 user-specific paths or secrets.
 
-## Agent instruction excerpt
+## Mandatory machine-wide agent instructions
 
-Murmur is instruction-file agnostic. Choose the layout that matches the coding agents in the
-repository and copy the applicable excerpt verbatim.
+Connecting the MCP server is not the whole setup. On every machine that runs Murmur agents, you
+**must** copy the contract below into the machine-wide root instruction file used by each agent
+host:
 
-### `AGENTS.md` only
+- Codex: `$CODEX_HOME/AGENTS.md` when `CODEX_HOME` is set, otherwise `~/.codex/AGENTS.md`. If a
+  non-empty `AGENTS.override.md` is active there, update that effective override instead.
+- Claude Code: `~/.claude/CLAUDE.md`.
+- Both hosts: install the contract in both files.
 
-For Codex and other agents that use `AGENTS.md`, put this self-contained contract in `AGENTS.md`:
+A repository-level `AGENTS.md` or `CLAUDE.md` may add repository-specific rules, but it does not
+satisfy this requirement. The machine-wide contract is what lets agents in different repositories
+coordinate shared browsers, ports, databases, build and coverage jobs, CPU, and memory. Murmur is
+not only for feature ownership or merge ordering inside one repository.
 
-```markdown
-## Coordination and release safety
-
-- Before overlapping work, use Murmur to register, list active agents, and read pending messages.
-- Share scope, branch or PR, dependencies, urgency, and expensive shared resources. Assign one
-  owner for version bumps, migrations, merge order, deployment, and production verification.
-- Do not run competing database, browser, build, or coverage jobs on the same constrained host.
-- Recheck the inbox before merge. Announce status or priority changes and close the thread when
-  work is done. Never send secrets through Murmur.
-- Preserve unrelated working-tree changes. Do not rewrite shared history or bypass protected gates.
-- Releases update `VERSION`, `package.json`, and `CHANGELOG.md` together, then pass clean-checkout
-  CI before merge. Deployment and production smoke verification have one explicit owner.
-```
-
-### `CLAUDE.md` only
-
-For Claude Code repositories that use only `CLAUDE.md`, put the same self-contained contract in
-`CLAUDE.md`:
+Copy this contract verbatim:
 
 ```markdown
 ## Coordination and release safety
 
-- Before overlapping work, use Murmur to register, list active agents, and read pending messages.
-- Share scope, branch or PR, dependencies, urgency, and expensive shared resources. Assign one
-  owner for version bumps, migrations, merge order, deployment, and production verification.
-- Do not run competing database, browser, build, or coverage jobs on the same constrained host.
+- Before work that can overlap or consume shared resources, use Murmur to register, list active
+  agents, and read pending messages.
+- Share scope, repository, branch or PR, dependencies, urgency, and expensive shared resources.
+- Coordinate resource use across repositories on the same machine. Do not run competing database,
+  browser, build, coverage, or other CPU- or memory-heavy jobs on a constrained host.
+- Assign one owner for overlapping files and for version bumps, migrations, merge order,
+  deployment, and production verification.
 - Recheck the inbox before merge. Announce status or priority changes and close the thread when
   work is done. Never send secrets through Murmur.
 - Preserve unrelated working-tree changes. Do not rewrite shared history or bypass protected gates.
-- Releases update `VERSION`, `package.json`, and `CHANGELOG.md` together, then pass clean-checkout
-  CI before merge. Deployment and production smoke verification have one explicit owner.
 ```
 
-### Both `AGENTS.md` and `CLAUDE.md`
-
-Put the self-contained contract above in `AGENTS.md`, then make `CLAUDE.md` load that single source
-of truth and reinforce the Murmur coordination step:
-
-```markdown
-@AGENTS.md
-
-# Claude Code project notes
-
-Follow `AGENTS.md` as the authoritative repository contract. Before editing, inspect the working
-tree and use Murmur to coordinate overlapping work.
-```
+Restart existing agent sessions after editing these files so they reload the contract. In a new
+session, verify that the agent can call `register_agent`, `list_agents`, and `get_messages` before
+relying on Murmur for coordination.
 
 ## End-to-end encrypted mode
 
