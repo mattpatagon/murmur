@@ -2,6 +2,22 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.10.0.0] - 2026-08-31
+
+### Added
+
+- Let an agent create a new Murmur organization through `POST /v1/tenants` without a dashboard,
+  operator credential, payment gate, or client-supplied tenant identity, then use the returned
+  tenant-administrator credential to configure MCP and mint narrower agent tokens.
+- Make exact registration retries return the same tenant and credential after a lost response by
+  deriving them from a caller-generated 256-bit registration secret while storing only token hashes.
+
+### Security
+
+- Bound public registration by origin, method, media type, strict fields, a 4 KiB body limit,
+  request capacity, process and database rate limits, a retained-tenant cap, least-privilege
+  execution, forced RLS, and secret-free operator auditing.
+
 ## [0.9.0.2] - 2026-08-31
 
 ### Changed
