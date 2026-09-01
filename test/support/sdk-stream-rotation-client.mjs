@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { ResourceUpdatedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 
 const endpoint = process.argv[2];
 const token = process.argv[3];
@@ -56,12 +57,65 @@ const transport = new StreamableHTTPClientTransport(new URL(endpoint), {
 });
 
 try {
-  await client.connect(transport);
+  await boundedWait(client.connect(transport));
+  const sender = await boundedWait(
+    client.callTool({
+      arguments: { agent_id: "rotation-sender", display_name: "Rotation Sender" },
+      name: "register_agent",
+    }),
+  );
+  const receiver = await boundedWait(
+    client.callTool({
+      arguments: { agent_id: "rotation-receiver", display_name: "Rotation Receiver" },
+      name: "register_agent",
+    }),
+  );
+  if (sender.isError === true || receiver.isError === true) {
+    throw new Error("SDK rotation agents could not be registered");
+  }
+  const inboxUri = "murmur://inbox/rotation-receiver";
+  let resolveNotification;
+  const notificationReceived = new Promise((resolve) => {
+    resolveNotification = resolve;
+  });
+  client.setNotificationHandler(ResourceUpdatedNotificationSchema, (notification) => {
+    if (notification.params.uri !== inboxUri || resolveNotification === undefined) return;
+    resolveNotification(notification.params.uri);
+    resolveNotification = undefined;
+  });
+  await boundedWait(client.subscribeResource({ uri: inboxUri }));
+  if (getRequests !== 1) {
+    throw new Error("SDK rotation stream changed before the inbox subscription was established");
+  }
   await boundedWait(waitForGetRequests(2));
-  const tools = await client.listTools();
+  const sent = await boundedWait(
+    client.callTool({
+      arguments: {
+        content: "notification after SDK stream rotation",
+        idempotency_key: "sdk-rotation-notification",
+        recipient_id: "rotation-receiver",
+        sender_id: "rotation-sender",
+      },
+      name: "send_message",
+    }),
+  );
+  if (sent.isError === true) throw new Error("SDK rotation message could not be sent");
+  const notificationUri = await boundedWait(notificationReceived);
+  const inbox = await boundedWait(client.readResource({ uri: inboxUri }));
+  const content = inbox.contents[0];
+  if (content === undefined || !("text" in content)) {
+    throw new Error("SDK rotation inbox did not contain JSON text");
+  }
+  const parsedInbox = JSON.parse(content.text);
+  if (!Array.isArray(parsedInbox.messages)) {
+    throw new Error("SDK rotation inbox did not contain a messages array");
+  }
+  const tools = await boundedWait(client.listTools());
   console.log(
     JSON.stringify({
       get_requests: getRequests,
+      inbox_message_count: parsedInbox.messages.length,
+      notification_received: notificationUri === inboxUri,
       session_retained: transport.sessionId !== undefined,
       tool_count: tools.tools.length,
     }),
@@ -70,5 +124,10 @@ try {
   console.error("SDK rotation verification failed");
   process.exitCode = 1;
 } finally {
-  await client.close();
+  try {
+    await boundedWait(client.close());
+  } catch (_error) {
+    console.error("SDK rotation client cleanup failed");
+    process.exitCode = 1;
+  }
 }

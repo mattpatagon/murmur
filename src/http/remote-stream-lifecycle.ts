@@ -38,6 +38,7 @@ export function trackSessionResponse(
     time,
     (): void => {
       observation.recordStreamRotation();
+      session.lastSeenAt = time.now();
       session.transport.closeStandaloneSSEStream();
     },
   );

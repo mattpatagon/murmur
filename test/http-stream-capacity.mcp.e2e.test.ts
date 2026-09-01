@@ -8,6 +8,9 @@ import { z } from "zod";
 import type { TimeSource } from "../src/http/http-capacity.js";
 import { streamRotationDelay } from "../src/http/remote-stream-lifecycle.js";
 import { type MurmurHttpServer, startHttpServer } from "../src/http-server.js";
+import { createHttpObservability } from "../src/observability/request-observation.js";
+import { type LogOutput, StructuredLogger } from "../src/observability/structured-logger.js";
+import { createTelemetry } from "../src/observability/telemetry.js";
 import {
   initializeSession,
   postJson,
@@ -17,13 +20,77 @@ import {
 
 const SdkRotationResultSchema: z.ZodType<{
   readonly get_requests: number;
+  readonly inbox_message_count: number;
+  readonly notification_received: true;
   readonly session_retained: true;
   readonly tool_count: number;
 }> = z.strictObject({
   get_requests: z.number().int().min(2),
+  inbox_message_count: z.number().int().positive(),
+  notification_received: z.literal(true),
   session_retained: z.literal(true),
   tool_count: z.number().int().positive(),
 });
+const RotationLogSchema: z.ZodType<{
+  readonly duration_ms: number;
+  readonly response_finish: "completed";
+  readonly session_hash: string;
+  readonly stream_rotated: true;
+}> = z.object({
+  duration_ms: z.number().nonnegative(),
+  response_finish: z.literal("completed"),
+  session_hash: z.string().min(1),
+  stream_rotated: z.literal(true),
+});
+const SDK_ROTATION_PROCESS_TIMEOUT_MS: number = 15_000;
+
+type SdkRotationChild = Bun.Subprocess<"ignore", "pipe", "pipe">;
+type SdkRotationChildResult = {
+  readonly exitCode: number;
+  readonly stderr: string;
+  readonly stdout: string;
+};
+
+class CapturingLogOutput implements LogOutput {
+  public readonly errors: string[] = [];
+  public readonly infos: string[] = [];
+
+  public error(line: string): void {
+    this.errors.push(line);
+  }
+
+  public info(line: string): void {
+    this.infos.push(line);
+  }
+}
+
+async function sdkRotationChildResult(child: SdkRotationChild): Promise<SdkRotationChildResult> {
+  const completed: Promise<SdkRotationChildResult> = Promise.all([
+    child.exited,
+    new Response(child.stderr).text(),
+    new Response(child.stdout).text(),
+  ]).then(
+    ([exitCode, stderr, stdout]: [number, string, string]): SdkRotationChildResult => ({
+      exitCode,
+      stderr,
+      stdout,
+    }),
+  );
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const expired: Promise<SdkRotationChildResult> = new Promise(
+    (_resolve: (result: SdkRotationChildResult) => void, reject: (reason: Error) => void): void => {
+      timeout = setTimeout((): void => {
+        reject(new Error("SDK rotation subprocess timed out"));
+      }, SDK_ROTATION_PROCESS_TIMEOUT_MS);
+      timeout.unref();
+    },
+  );
+  try {
+    return await Promise.race([completed, expired]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
 
 class StreamTimeSource implements TimeSource {
   private current: number = 0;
@@ -164,13 +231,15 @@ test("the supported SDK client reconnects after application-owned rotation", asy
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-http-sdk-rotation-"));
   const environment: NodeJS.ProcessEnv = {
     ...testEnvironment(join(directory, "messages.db")),
-    MURMUR_MAX_STREAM_LIFETIME_MS: "100",
+    MURMUR_MAX_STREAM_LIFETIME_MS: "2000",
+    MURMUR_SESSION_IDLE_MS: "100",
   };
   const token: string | undefined = environment["MURMUR_API_TOKEN"];
   if (token === undefined) throw new Error("The SDK rotation test token is missing");
   const server: MurmurHttpServer = await startHttpServer(environment);
+  let child: SdkRotationChild | null = null;
   try {
-    const child: Bun.Subprocess<"ignore", "pipe", "pipe"> = Bun.spawn(
+    child = Bun.spawn(
       [
         process.execPath,
         "run",
@@ -186,20 +255,22 @@ test("the supported SDK client reconnects after application-owned rotation", asy
         stdout: "pipe",
       },
     );
-    const [exitCode, stderr, stdout]: [number, string, string] = await Promise.all([
-      child.exited,
-      new Response(child.stderr).text(),
-      new Response(child.stdout).text(),
-    ]);
-    expect(exitCode).toBe(0);
-    expect(stderr).toBe("");
-    const result: z.infer<typeof SdkRotationResultSchema> = SdkRotationResultSchema.parse(
-      JSON.parse(stdout),
+    const childResult: SdkRotationChildResult = await sdkRotationChildResult(child);
+    expect(childResult.exitCode).toBe(0);
+    expect(childResult.stderr).toBe("");
+    const sdkResult: z.infer<typeof SdkRotationResultSchema> = SdkRotationResultSchema.parse(
+      JSON.parse(childResult.stdout),
     );
-    expect(result.get_requests).toBeGreaterThanOrEqual(2);
-    expect(result.session_retained).toBe(true);
-    expect(result.tool_count).toBeGreaterThan(0);
+    expect(sdkResult.get_requests).toBeGreaterThanOrEqual(2);
+    expect(sdkResult.inbox_message_count).toBeGreaterThan(0);
+    expect(sdkResult.notification_received).toBe(true);
+    expect(sdkResult.session_retained).toBe(true);
+    expect(sdkResult.tool_count).toBeGreaterThan(0);
   } finally {
+    if (child !== null) {
+      if (child.exitCode === null) child.kill();
+      await child.exited;
+    }
     await server.stop();
     rmSync(directory, { force: true, recursive: true });
   }
@@ -208,17 +279,24 @@ test("the supported SDK client reconnects after application-owned rotation", asy
 test("remote MCP rotates concurrent streams before the upstream deadline", async (): Promise<void> => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-http-rotation-"));
   const time: StreamTimeSource = new StreamTimeSource();
-  const server: MurmurHttpServer = await startHttpServer(
-    {
-      ...testEnvironment(join(directory, "messages.db")),
-      MURMUR_MAX_ACTIVE_STREAMS: "3",
-      MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL: "3",
-      MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT: "3",
-      MURMUR_MAX_STREAM_LIFETIME_MS: "25",
-      MURMUR_RELEASE_REVISION: "a".repeat(40),
-    },
-    { timeSource: time },
-  );
+  const environment: NodeJS.ProcessEnv = {
+    ...testEnvironment(join(directory, "messages.db")),
+    MURMUR_LOG_LEVEL: "info",
+    MURMUR_MAX_ACTIVE_STREAMS: "3",
+    MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL: "3",
+    MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT: "3",
+    MURMUR_MAX_STREAM_LIFETIME_MS: "25",
+    MURMUR_RELEASE_REVISION: "a".repeat(40),
+  };
+  const output: CapturingLogOutput = new CapturingLogOutput();
+  const server: MurmurHttpServer = await startHttpServer(environment, {
+    observability: createHttpObservability(
+      new StructuredLogger(environment, output),
+      createTelemetry(environment),
+      time,
+    ),
+    timeSource: time,
+  });
   const initialControllers: AbortController[] = [];
   const replacementControllers: AbortController[] = [];
   try {
@@ -256,6 +334,20 @@ test("remote MCP rotates concurrent streams before the upstream deadline", async
         response.headers.get("mcp-session-id"),
       ),
     ).toEqual(sessionIds);
+    const rotationLines: string[] = output.infos.filter((line: string): boolean =>
+      line.includes('"stream_rotated":true'),
+    );
+    expect(rotationLines).toHaveLength(sessionIds.length);
+    rotationLines.forEach((line: string): void => {
+      const rotation: z.infer<typeof RotationLogSchema> = RotationLogSchema.parse(JSON.parse(line));
+      expect(rotation.duration_ms).toBeGreaterThanOrEqual(25);
+      expect(rotation.response_finish).toBe("completed");
+      expect(rotation.stream_rotated).toBe(true);
+      expect(sessionIds).not.toContain(rotation.session_hash);
+      sessionIds.forEach((sessionId: string): void => {
+        expect(line).not.toContain(sessionId);
+      });
+    });
 
     const healthUrl: URL = new URL("/health", server.mcpUrl);
     const versionUrl: URL = new URL("/version", server.mcpUrl);
