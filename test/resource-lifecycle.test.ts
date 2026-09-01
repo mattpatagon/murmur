@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 
+import type { TimeSource } from "../src/http/http-capacity.js";
 import {
   cleanupObservabilityStartup,
   cleanupServerStartup,
@@ -12,7 +13,12 @@ import {
   closeResources,
   type ResourceCleanup,
 } from "../src/http/resource-lifecycle.js";
-import { responseWithFinish, trackedResponse } from "../src/http/response-lifecycle.js";
+import {
+  type ResponseFinishReason,
+  responseWithDeadline,
+  responseWithFinish,
+  trackedResponse,
+} from "../src/http/response-lifecycle.js";
 import type {
   HttpObservability,
   RequestObservation,
@@ -22,6 +28,31 @@ import type { LogFields } from "../src/observability/structured-logger.js";
 type Closeable = {
   close(): Promise<void>;
 };
+
+class DeadlineTimeSource implements TimeSource {
+  public cancellations: number = 0;
+  private wake: (() => void) | null = null;
+
+  public fire(): void {
+    const wake: (() => void) | null = this.wake;
+    if (wake === null) throw new Error("No response deadline is scheduled");
+    this.wake = null;
+    wake();
+  }
+
+  public now(): number {
+    return 0;
+  }
+
+  public schedule(_milliseconds: number, wake: () => void): () => void {
+    if (this.wake !== null) throw new Error("A response deadline is already scheduled");
+    this.wake = wake;
+    return (): void => {
+      this.cancellations += 1;
+      this.wake = null;
+    };
+  }
+}
 
 function closeable(events: string[], name: string, failure: Error | null = null): Closeable {
   return {
@@ -165,28 +196,105 @@ test("HTTP startup and shutdown helpers close every resource in deterministic or
 });
 
 test("response lifecycle finishes bodyless, cancelled, and failed streams exactly once", async (): Promise<void> => {
-  let bodylessFinishes: number = 0;
-  const bodyless: Response = responseWithFinish(new Response(null, { status: 204 }), (): void => {
-    bodylessFinishes += 1;
-  });
+  const bodylessFinishes: ResponseFinishReason[] = [];
+  const bodyless: Response = responseWithFinish(
+    new Response(null, { status: 204 }),
+    (reason: ResponseFinishReason): void => {
+      bodylessFinishes.push(reason);
+    },
+  );
   expect(bodyless.status).toBe(204);
-  expect(bodylessFinishes).toBe(1);
+  expect(bodylessFinishes).toEqual(["bodyless"]);
 
-  let failedFinishes: number = 0;
+  const cancelledFinishes: ResponseFinishReason[] = [];
+  const cancelledStream: ReadableStream<Uint8Array> = new ReadableStream<Uint8Array>({
+    start: (_controller: ReadableStreamDefaultController<Uint8Array>): void => {},
+  });
+  const cancelled: Response = responseWithFinish(
+    new Response(cancelledStream),
+    (reason: ResponseFinishReason): void => {
+      cancelledFinishes.push(reason);
+    },
+  );
+  if (cancelled.body === null) throw new Error("The cancellation stream body is missing");
+  await cancelled.body.cancel("peer disconnected");
+  await cancelled.body.cancel("duplicate cancellation");
+  expect(cancelledFinishes).toEqual(["cancelled"]);
+
+  const failedFinishes: ResponseFinishReason[] = [];
   const failure: Error = new Error("stream failed");
   const failedStream: ReadableStream<Uint8Array> = new ReadableStream<Uint8Array>({
     pull: (controller: ReadableStreamDefaultController<Uint8Array>): void => {
       controller.error(failure);
     },
   });
-  const failed: Response = responseWithFinish(new Response(failedStream), (): void => {
-    failedFinishes += 1;
-  });
+  const failed: Response = responseWithFinish(
+    new Response(failedStream),
+    (reason: ResponseFinishReason): void => {
+      failedFinishes.push(reason);
+    },
+  );
   await expect(failed.text()).rejects.toBe(failure);
-  expect(failedFinishes).toBe(1);
+  expect(failedFinishes).toEqual(["failed"]);
 
   const counter: { activeResponses: number } = { activeResponses: 0 };
   const untracked: Response = trackedResponse(new Response(null, { status: 204 }), counter);
   expect(untracked.status).toBe(204);
   expect(counter.activeResponses).toBe(0);
+});
+
+test("response deadlines close streams and cancel lifecycle resources exactly once", async (): Promise<void> => {
+  const time: DeadlineTimeSource = new DeadlineTimeSource();
+  let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  let deadlines: number = 0;
+  const source: ReadableStream<Uint8Array> = new ReadableStream<Uint8Array>({
+    start: (streamController: ReadableStreamDefaultController<Uint8Array>): void => {
+      controller = streamController;
+    },
+  });
+  const response: Response = responseWithDeadline(new Response(source), 25, time, (): void => {
+    deadlines += 1;
+    const activeController: ReadableStreamDefaultController<Uint8Array> | null = controller;
+    if (activeController === null) throw new Error("The deadline stream controller is missing");
+    activeController.close();
+  });
+
+  time.fire();
+  expect(await response.text()).toBe("");
+  expect(deadlines).toBe(1);
+  expect(time.cancellations).toBe(1);
+
+  const cancelledTime: DeadlineTimeSource = new DeadlineTimeSource();
+  let cancelledDeadlines: number = 0;
+  const cancelledSource: ReadableStream<Uint8Array> = new ReadableStream<Uint8Array>({
+    start: (_controller: ReadableStreamDefaultController<Uint8Array>): void => {},
+  });
+  const cancelled: Response = responseWithDeadline(
+    new Response(cancelledSource),
+    25,
+    cancelledTime,
+    (): void => {
+      cancelledDeadlines += 1;
+    },
+  );
+  if (cancelled.body === null) throw new Error("The deadline cancellation body is missing");
+  await cancelled.body.cancel("peer disconnected");
+  expect(cancelledDeadlines).toBe(0);
+  expect(cancelledTime.cancellations).toBe(1);
+
+  const failedTime: DeadlineTimeSource = new DeadlineTimeSource();
+  const failure: Error = new Error("deadline source failed");
+  const failedSource: ReadableStream<Uint8Array> = new ReadableStream<Uint8Array>({
+    pull: (streamController: ReadableStreamDefaultController<Uint8Array>): void => {
+      streamController.error(failure);
+    },
+  });
+  const failed: Response = responseWithDeadline(
+    new Response(failedSource),
+    25,
+    failedTime,
+    (): void => {},
+  );
+  await expect(failed.text()).rejects.toBe(failure);
+  expect(failedTime.cancellations).toBe(1);
 });

@@ -85,17 +85,18 @@ test("HTTP configuration parses every bound and normalizes origins", (): void =>
     MURMUR_MAX_ACTIVE_STREAMS: "15",
     MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL: "16",
     MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT: "17",
-    MURMUR_MAX_CONCURRENT_AUTHENTICATIONS: "18",
-    MURMUR_MAX_PENDING_AUTHENTICATIONS: "19",
-    MURMUR_MAX_PENDING_AUTHENTICATIONS_PER_TENANT: "20",
-    MURMUR_MAX_REQUEST_BYTES: "21",
-    MURMUR_MAX_SESSIONS: "22",
-    MURMUR_MAX_SESSIONS_PER_TENANT: "23",
-    MURMUR_RATE_LIMIT_PER_MINUTE: "24",
-    MURMUR_REGISTRATION_RATE_LIMIT_PER_MINUTE: "25",
-    MURMUR_SESSION_IDLE_MS: "26",
-    MURMUR_TENANT_RATE_LIMIT_PER_MINUTE: "27",
-    PORT: "28",
+    MURMUR_MAX_STREAM_LIFETIME_MS: "18",
+    MURMUR_MAX_CONCURRENT_AUTHENTICATIONS: "19",
+    MURMUR_MAX_PENDING_AUTHENTICATIONS: "20",
+    MURMUR_MAX_PENDING_AUTHENTICATIONS_PER_TENANT: "21",
+    MURMUR_MAX_REQUEST_BYTES: "22",
+    MURMUR_MAX_SESSIONS: "23",
+    MURMUR_MAX_SESSIONS_PER_TENANT: "24",
+    MURMUR_RATE_LIMIT_PER_MINUTE: "25",
+    MURMUR_REGISTRATION_RATE_LIMIT_PER_MINUTE: "26",
+    MURMUR_SESSION_IDLE_MS: "27",
+    MURMUR_TENANT_RATE_LIMIT_PER_MINUTE: "28",
+    PORT: "29",
   });
   expect([...config.allowedOrigins]).toEqual(["https://one.example", "https://two.example"]);
   expect(config).toMatchObject({
@@ -107,17 +108,18 @@ test("HTTP configuration parses every bound and normalizes origins", (): void =>
     maxActiveStreams: 15,
     maxActiveStreamsPerPrincipal: 16,
     maxActiveStreamsPerTenant: 17,
-    maxAuthentications: 18,
-    maxPendingAuthentications: 19,
-    maxPendingAuthenticationsPerTenant: 20,
-    maxRequestBytes: 21,
-    maxSessions: 22,
-    maxSessionsPerTenant: 23,
-    rateLimitPerMinute: 24,
-    registrationRateLimitPerMinute: 25,
-    requestedPort: 28,
-    sessionIdleMs: 26,
-    tenantRateLimitPerMinute: 27,
+    maxAuthentications: 19,
+    maxPendingAuthentications: 20,
+    maxPendingAuthenticationsPerTenant: 21,
+    maxRequestBytes: 22,
+    maxSessions: 23,
+    maxSessionsPerTenant: 24,
+    maxStreamLifetimeMs: 18,
+    rateLimitPerMinute: 25,
+    registrationRateLimitPerMinute: 26,
+    requestedPort: 29,
+    sessionIdleMs: 27,
+    tenantRateLimitPerMinute: 28,
   });
   expect((): HttpServerConfig => parseHttpServerConfig({ PORT: "65536" })).toThrow();
   expect(
@@ -133,6 +135,13 @@ test("HTTP configuration parses every bound and normalizes origins", (): void =>
   expect(
     (): HttpServerConfig =>
       parseHttpServerConfig({ MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT: "not-a-number" }),
+  ).toThrow();
+  expect(
+    (): HttpServerConfig => parseHttpServerConfig({ MURMUR_MAX_STREAM_LIFETIME_MS: "0" }),
+  ).toThrow();
+  expect(
+    (): HttpServerConfig =>
+      parseHttpServerConfig({ MURMUR_MAX_STREAM_LIFETIME_MS: String(55 * 60 * 1_000 + 1) }),
   ).toThrow();
   expect(
     (): HttpServerConfig =>

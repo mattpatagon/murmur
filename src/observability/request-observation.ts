@@ -8,7 +8,7 @@ import {
   TENANT_REGISTRATION_PATH,
 } from "../http/http-config.js";
 import type { McpRequestMetadata } from "../http/http-request.js";
-import { responseWithFinish } from "../http/response-lifecycle.js";
+import { type ResponseFinishReason, responseWithFinish } from "../http/response-lifecycle.js";
 import { type LogFields, StructuredLogger } from "./structured-logger.js";
 import { createTelemetry, type RequestTrace, type Telemetry } from "./telemetry.js";
 
@@ -74,6 +74,7 @@ export class RequestObservation {
   private sessionLookup: SessionLookupOutcome;
   private readonly startedAt: number;
   private streamCapacity: GateOutcome;
+  private streamRotated: boolean;
   private tenantId: string | null;
   private tenantRateLimit: GateOutcome;
   private tenantRole: string | null;
@@ -108,6 +109,7 @@ export class RequestObservation {
     this.sessionLookup = "not_checked";
     this.startedAt = time.now();
     this.streamCapacity = "not_checked";
+    this.streamRotated = false;
     this.tenantId = null;
     this.tenantRateLimit = "not_checked";
     this.tenantRole = null;
@@ -175,14 +177,18 @@ export class RequestObservation {
     this.streamCapacity = outcome;
   }
 
+  public recordStreamRotation(): void {
+    this.streamRotated = true;
+  }
+
   public recordTenantRateLimit(outcome: GateOutcome): void {
     this.tenantRateLimit = outcome;
   }
 
-  private finish(status: number): void {
+  private finish(status: number, responseFinish: ResponseFinishReason): void {
     if (this.finished) return;
     this.finished = true;
-    const failed: boolean = status >= 500;
+    const failed: boolean = status >= 500 || responseFinish === "failed";
     const fields: LogFields = {
       authentication: this.authentication,
       authentication_capacity: this.authenticationCapacity,
@@ -196,17 +202,26 @@ export class RequestObservation {
       mcp_method: this.mcpMethod,
       mcp_tool: this.mcpTool,
       origin: this.origin,
-      outcome: failed ? "server_error" : status >= 400 ? "client_error" : "success",
+      outcome:
+        responseFinish === "failed"
+          ? "stream_error"
+          : failed
+            ? "server_error"
+            : status >= 400
+              ? "client_error"
+              : "success",
       principal_kind: this.principalKind,
       principal_rate_limit: this.principalRateLimit,
       request_capacity: this.requestCapacity,
       request_id: this.id,
+      response_finish: responseFinish,
       session_capacity: this.sessionCapacity,
       session_capacity_scope: this.sessionCapacityScope,
       session_hash: this.sessionHash,
       session_lookup: this.sessionLookup,
       span_id: this.trace.spanId,
       stream_capacity: this.streamCapacity,
+      stream_rotated: this.streamRotated,
       tenant_id: this.tenantId,
       tenant_rate_limit: this.tenantRateLimit,
       tenant_role: this.tenantRole,
@@ -225,8 +240,8 @@ export class RequestObservation {
       status: response.status,
       statusText: response.statusText,
     });
-    return responseWithFinish(correlated, (): void => {
-      this.finish(response.status);
+    return responseWithFinish(correlated, (reason: ResponseFinishReason): void => {
+      this.finish(response.status, reason);
     });
   }
 }

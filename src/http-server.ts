@@ -50,10 +50,12 @@ import {
   cleanupStoreStartup,
   shutdownHttpResources,
 } from "./http/http-server-resources.js";
+import type { HttpServerDependencies, MurmurHttpServer } from "./http/http-server-contracts.js";
 import type { HostedApplicationRequest } from "./http/murmur-application-factory.js";
 import { createHostedMurmurApplication } from "./http/murmur-application-factory.js";
 import type { RemoteSession } from "./http/remote-session.js";
-import { responseWithFinish, trackedResponse } from "./http/response-lifecycle.js";
+import { trackSessionResponse } from "./http/remote-stream-lifecycle.js";
+import { responseWithFinish } from "./http/response-lifecycle.js";
 import { createTenantRegistrationHandler } from "./http/self-service-registration.js";
 import {
   RemoteSessionInvalidator,
@@ -70,21 +72,7 @@ import { logSafeError } from "./safe-errors.js";
 import { createStore } from "./storage/create-store.js";
 import type { MessageStore } from "./storage/message-store.js";
 
-export type MurmurHttpServer = {
-  readonly mcpUrl: URL;
-  readonly port: number;
-  readonly registrationUrl: URL;
-  stop(): Promise<void>;
-};
-
-export type HttpServerDependencies = {
-  readonly applicationFactory?:
-    | ((request: HostedApplicationRequest) => Promise<MurmurApplication>)
-    | undefined;
-  readonly authenticator?: HostedAuthenticator;
-  readonly observability?: HttpObservability;
-  readonly timeSource?: TimeSource;
-};
+export type { HttpServerDependencies, MurmurHttpServer } from "./http/http-server-contracts.js";
 
 export async function startHttpServer(
   environment: NodeJS.ProcessEnv = process.env,
@@ -99,10 +87,8 @@ export async function startHttpServer(
   const requestedPort: number = config.requestedPort;
   const sessionIdleMs: number = config.sessionIdleMs;
   const tenantRateLimitPerMinute: number = config.tenantRateLimitPerMinute;
-  const capacity: HttpCapacityController = new HttpCapacityController(
-    config,
-    dependencies.timeSource ?? SYSTEM_TIME_SOURCE,
-  );
+  const timeSource: TimeSource = dependencies.timeSource ?? SYSTEM_TIME_SOURCE;
+  const capacity: HttpCapacityController = new HttpCapacityController(config, timeSource);
   const store: MessageStore = await createStore(environment);
   const applicationFactory: (request: HostedApplicationRequest) => Promise<MurmurApplication> =
     dependencies.applicationFactory ?? createHostedMurmurApplication;
@@ -292,7 +278,15 @@ export async function startHttpServer(
               request,
               parsedPostBody === undefined ? undefined : { parsedBody: parsedPostBody },
             );
-            return trackedResponse(response, session);
+            return trackSessionResponse(
+              response,
+              session,
+              sessionId,
+              request.method === "GET",
+              config.maxStreamLifetimeMs,
+              timeSource,
+              observation,
+            );
           }
 
           if (request.method !== "POST") {

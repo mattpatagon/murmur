@@ -20,6 +20,8 @@ Every record contains:
 The `http.request.completed` event records duration, method, normalized route, status, outcome, MCP
 method/tool, principal kind, tenant/role after authentication, and independent origin, credential,
 authentication, request/stream capacity, rate-limit, session lookup, and session capacity outcomes.
+A `response_finish` field distinguishes completed, cancelled, failed, and bodyless responses;
+`stream_rotated` records application-directed SSE rotation without exposing the session identifier.
 A validated client `x-request-id` is retained separately as `client_request_id`; it never replaces
 the server ID.
 Server errors use severity `ERROR`; successful and client-rejected requests use `INFO`.
@@ -100,4 +102,8 @@ or tenant identifiers.
 
 A readiness failure or startup error has no request completion event. Inspect the fixed safe startup
 message and deployment revision, then validate environment configuration and database reachability.
+Every application response includes `x-request-id`. An HTML error without that header and without a
+matching completion event originated before the Murmur router; correlate the time window with the
+hosting platform's request and instance-capacity logs instead of treating it as an application
+error body.
 See [hosted-deployment.md](hosted-deployment.md) for rollout and rollback.

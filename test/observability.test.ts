@@ -234,9 +234,11 @@ test("request completion event correlates safely without retaining secrets", asy
   expect(line).toContain('"mcp_tool":"send_message"');
   expect(line).toContain('"client_request_id":"request-123"');
   expect(line).toContain(`"request_id":"${serverRequestId}"`);
+  expect(line).toContain('"response_finish":"completed"');
   expect(line).toContain('"session_capacity":"allowed"');
   expect(line).toContain('"session_lookup":"found"');
   expect(line).toContain('"stream_capacity":"allowed"');
+  expect(line).toContain('"stream_rotated":false');
   expect(line).toContain('"trace_id":"trace-123"');
   expect(line).not.toContain(rawSession);
   expect(line).not.toContain(tokenSecret);
@@ -266,8 +268,29 @@ test("stream cancellation completes observation and telemetry shutdown exactly o
   await observability.shutdown();
 
   expect(output.infos).toHaveLength(1);
+  expect(output.infos[0]).toContain('"response_finish":"cancelled"');
   expect(telemetry.trace.finishes).toBe(1);
   expect(telemetry.shutdowns).toBe(1);
+});
+
+test("application-owned stream rotation is explicit in completion telemetry", async (): Promise<void> => {
+  const output: CapturingOutput = new CapturingOutput();
+  const telemetry: CapturingTelemetry = new CapturingTelemetry();
+  const observation: RequestObservation = new RequestObservation(
+    new Request("https://murmur.example/mcp"),
+    new StructuredLogger(loggerEnvironment(), output),
+    telemetry,
+    new SequenceClock([2_100, 2_125]),
+  );
+  observation.recordStreamCapacity("allowed");
+  observation.recordStreamRotation();
+  const response: Response = observation.track(new Response("rotated"));
+  expect(await response.text()).toBe("rotated");
+
+  expect(output.infos).toHaveLength(1);
+  expect(output.infos[0]).toContain('"response_finish":"completed"');
+  expect(output.infos[0]).toContain('"stream_rotated":true');
+  expect(telemetry.trace.finishes).toBe(1);
 });
 
 test("telemetry flush failure is logged safely without failing graceful shutdown", async (): Promise<void> => {

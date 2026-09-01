@@ -153,6 +153,12 @@ subscriptions, request rates, agents, tokens, retained messages, stored bytes, m
 broadcast fan-out. Admission returns a safe retryable status before allocating downstream resources
 when a bound is full.
 
+Standalone SSE responses rotate before the hosting platform's request deadline. The configured
+lifetime defaults to and is hard-capped at 55 minutes; a stable per-session jitter rotates each
+stream during the final 10% of that window. Rotation closes only the response, releases stream
+capacity, and preserves the MCP session so supported clients reconnect without losing durable inbox
+state.
+
 Self-service tenant registration is additionally capped at 4 KiB per request, 10 valid attempts per
 minute per application process by default, 60 successful creations per minute across the database,
 and 100,000 retained tenants. The per-process rate is configurable; the database bounds are durable
