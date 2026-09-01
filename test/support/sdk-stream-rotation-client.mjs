@@ -12,7 +12,9 @@ const getWaiters = [];
 const observedFetch = async (input, init) => {
   if (init !== undefined && init.method === "GET") {
     getRequests += 1;
-    getWaiters.splice(0).forEach((wake) => wake());
+    getWaiters.splice(0).forEach((wake) => {
+      wake();
+    });
   }
   return await fetch(input, init);
 };

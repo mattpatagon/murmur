@@ -277,8 +277,12 @@ test("remote MCP rotates concurrent streams before the upstream deadline", async
     expect(version.status).toBe(200);
     expect(tools.status).toBe(200);
   } finally {
-    initialControllers.forEach((controller: AbortController): void => controller.abort());
-    replacementControllers.forEach((controller: AbortController): void => controller.abort());
+    initialControllers.forEach((controller: AbortController): void => {
+      controller.abort();
+    });
+    replacementControllers.forEach((controller: AbortController): void => {
+      controller.abort();
+    });
     await server.stop();
     rmSync(directory, { force: true, recursive: true });
   }
