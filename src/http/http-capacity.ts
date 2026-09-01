@@ -9,6 +9,7 @@ export const SYSTEM_TIME_SOURCE: TimeSource = {
   now: (): number => Date.now(),
   schedule: (milliseconds: number, wake: () => void): (() => void) => {
     const timeout: ReturnType<typeof setTimeout> = setTimeout(wake, milliseconds);
+    timeout.unref();
     return (): void => clearTimeout(timeout);
   },
 };

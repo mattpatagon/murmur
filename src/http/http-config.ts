@@ -11,6 +11,7 @@ export const MCP_PATH: string = "/mcp";
 export const RELEASE_PATH: string = "/version";
 export const TENANT_REGISTRATION_PATH: string = "/v1/tenants";
 export const SSE_KEEP_ALIVE_MS: number = 1_000;
+const MAXIMUM_STREAM_LIFETIME_MS: number = 55 * 60 * 1_000;
 
 export type HttpServerConfig = {
   readonly allowedOrigins: ReadonlySet<string>;
@@ -22,6 +23,7 @@ export type HttpServerConfig = {
   readonly maxActiveStreams: number;
   readonly maxActiveStreamsPerPrincipal: number;
   readonly maxActiveStreamsPerTenant: number;
+  readonly maxStreamLifetimeMs: number;
   readonly maxAuthentications: number;
   readonly maxPendingAuthentications: number;
   readonly maxPendingAuthenticationsPerTenant: number;
@@ -51,6 +53,7 @@ const DEFAULTS: HttpDefaults = {
   maxActiveStreams: 64,
   maxActiveStreamsPerPrincipal: 32,
   maxActiveStreamsPerTenant: 32,
+  maxStreamLifetimeMs: MAXIMUM_STREAM_LIFETIME_MS,
   maxAuthentications: 4,
   maxPendingAuthentications: 32,
   maxPendingAuthenticationsPerTenant: 8,
@@ -79,6 +82,13 @@ function positiveIntegerEnvironment(
   return configured === undefined || configured === ""
     ? fallback
     : z.coerce.number().int().positive().safe().parse(configured);
+}
+
+function streamLifetimeEnvironment(environment: NodeJS.ProcessEnv): number {
+  const configured: string | undefined = environment["MURMUR_MAX_STREAM_LIFETIME_MS"];
+  return configured === undefined || configured === ""
+    ? DEFAULTS.maxStreamLifetimeMs
+    : z.coerce.number().int().positive().max(MAXIMUM_STREAM_LIFETIME_MS).safe().parse(configured);
 }
 
 function parseAllowedOrigins(environment: NodeJS.ProcessEnv): ReadonlySet<string> {
@@ -136,6 +146,7 @@ export function parseHttpServerConfig(environment: NodeJS.ProcessEnv): HttpServe
       "MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT",
       DEFAULTS.maxActiveStreamsPerTenant,
     ),
+    maxStreamLifetimeMs: streamLifetimeEnvironment(environment),
     maxAuthentications: positiveIntegerEnvironment(
       environment,
       "MURMUR_MAX_CONCURRENT_AUTHENTICATIONS",

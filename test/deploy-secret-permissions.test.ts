@@ -270,6 +270,7 @@ test("every production revision publishes its exact source revision", async (): 
   expect(environmentUpdates).toHaveLength(4);
   environmentUpdates.forEach((line: string): void => {
     expect(line).toContain('MURMUR_RELEASE_REVISION="$GITHUB_SHA"');
+    expect(line).toContain("MURMUR_MAX_STREAM_LIFETIME_MS=3300000");
   });
 });
 

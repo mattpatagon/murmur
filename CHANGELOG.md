@@ -2,6 +2,20 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.11.1.0] - 2026-09-01
+
+### Fixed
+
+- Keep hosted MCP clients connected across the platform's hard request lifetime by rotating
+  notification streams beforehand, retaining their sessions, and preserving durable inbox access.
+- Keep the hosted service responsive when many long-lived clients reconnect at once by staggering
+  rotations, releasing bounded stream capacity, and cancelling every lifecycle timer on cleanup.
+
+### Changed
+
+- Record exact HTTP response completion reasons and app-directed stream rotations with request,
+  instance, latency, and hashed-session correlation for safe incident diagnosis.
+
 ## [0.11.0.0] - 2026-08-31
 
 ### Added

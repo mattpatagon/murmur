@@ -279,7 +279,7 @@ gcloud run deploy murmur-mcp \
   --region us-central1 \
   --source . \
   --service-account "$MURMUR_RUNTIME_SERVICE_ACCOUNT" \
-  --update-env-vars MURMUR_AUTH_MODE=multi-tenant,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_RELEASE_REVISION="$MURMUR_RELEASE_REVISION" \
+  --update-env-vars MURMUR_AUTH_MODE=multi-tenant,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_STREAM_LIFETIME_MS=3300000,MURMUR_RELEASE_REVISION="$MURMUR_RELEASE_REVISION" \
   --set-secrets MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:latest,/etc/murmur/secrets/database-ca.pem=MURMUR_DATABASE_CA:latest \
   --allow-unauthenticated \
   --concurrency 80 \
@@ -288,6 +288,11 @@ gcloud run deploy murmur-mcp \
   --port 8080 \
   --timeout 3600
 ```
+
+Keep the Cloud Run request timeout above `MURMUR_MAX_STREAM_LIFETIME_MS`. Murmur hard-caps that
+setting at 55 minutes and applies up to 10% deterministic per-session jitter, so streams rotate
+before the 3,600-second platform backstop instead of relying on platform truncation. The stream
+rotation preserves the MCP session and supported clients reconnect automatically.
 
 Apply migrations before the matching server revision. For a manually managed
 PostgreSQL deployment:
@@ -318,6 +323,12 @@ After every production change, run the operator-authenticated isolation canary:
 ```bash
 gh workflow run production-smoke.yml --ref main
 ```
+
+The accelerated HTTP regression suite proves rotation, timer cleanup, same-session reconnect, and
+real SDK transport compatibility with an injected short lifetime. After rollout, retain a
+real-window observation for at least 55 minutes: confirm `stream_rotated: true` completion events on
+the new revision, successful reconnect traffic for the same hashed session correlation, continued
+health/version success, and no new 3,600-second platform truncations or frontend HTML 500s.
 
 The canary obtains and masks the operator credential through the deploy
 identity. It creates a short-lived tenant credential, verifies operator/admin/

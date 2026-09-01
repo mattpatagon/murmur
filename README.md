@@ -346,6 +346,10 @@ deployment ordering, and cross-platform configuration. Cloud tests require
 CI runs that host-to-container test against disposable PostgreSQL 17; loopback database addresses
 are translated only at the Docker boundary so the child container reaches the runner service.
 
+Hosted standalone SSE responses rotate before the platform deadline while preserving their MCP
+session. `MURMUR_MAX_STREAM_LIFETIME_MS` defaults to and cannot exceed 3,300,000 milliseconds;
+supported clients reconnect automatically and reread the durable inbox.
+
 Dependencies are exact-pinned, installs use the frozen Bun lockfile, and
 `bunfig.toml` rejects package releases newer than 72 hours.
 
