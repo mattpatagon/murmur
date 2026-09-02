@@ -282,6 +282,12 @@ agents fail until registration reopens them. Broadcasts exclude the sender and s
 matching active leases. Repository and machine audience filters combine with AND. Retries return
 the original recipient snapshot even if lifecycle state later changes.
 
+Broadcasts and notices are deliberately separate. A broadcast creates an unread inbox item for
+each agent in its active-recipient snapshot, so it is the right tool for an immediate announcement
+that each recipient should process. A notice creates one shared repository record, sends no inbox
+item, remains discoverable to agents that arrive later, and has an explicit resolve-or-withdraw
+lifecycle. Use a notice for durable coordination state, not as another way to broadcast a message.
+
 Coordination notices are repository-scoped `handoff`, `ownership`, `blocker`, or `decision` records.
 They default to a 14-day lifetime, may be set from one hour through 90 days, and can optionally be
 branch-scoped. Any registered tenant agent may resolve an open notice; only its stable creator may

@@ -19,7 +19,7 @@ import type {
   ResolveNoticeResult,
   WithdrawNoticeResult,
 } from "../src/domain/notice-models.js";
-import type { RegisterAgentResult } from "../src/domain/models.js";
+import type { Message, RegisterAgentResult } from "../src/domain/models.js";
 import {
   AgentId,
   BranchName,
@@ -27,6 +27,7 @@ import {
   IdempotencyKey,
   Instant,
   RepositoryName,
+  Sequence,
 } from "../src/domain/value-objects.js";
 import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
 import { MutableClock } from "./support/store-fixture.js";
@@ -129,6 +130,53 @@ test("notice TTL boundaries and idempotency are exact", (): void => {
           sessionKey: SessionKey.parse("bob-pane"),
         }),
     ).toThrow("no longer open");
+  });
+});
+
+test("notices remain shared state without creating inbox deliveries", (): void => {
+  withNotices(({ store }: NoticeFixture): void => {
+    const posted: PostNoticeResult = store.postNotice(
+      postCommand("future agents need this decision", "shared-notice", "decision"),
+    );
+    for (const id of ["alice", "bob"]) {
+      const messages: readonly Message[] = store.getMessages({
+        afterSequence: Sequence.zero(),
+        agentId: AgentId.parse(id),
+        limit: 100,
+        threadId: null,
+        unreadOnly: false,
+      });
+      expect(messages).toEqual([]);
+    }
+
+    store.registerAgent({
+      agentId: AgentId.parse("charlie"),
+      displayName: DisplayName.parse("charlie"),
+      metadata: { repository: "mattpatagon/murmur" },
+      sessionKey: SessionKey.parse("charlie-pane"),
+    });
+    const discovered: ListNoticesResult = store.listNotices({
+      actorId: AgentId.parse("charlie"),
+      branchName: null,
+      cursor: null,
+      kind: null,
+      limit: 100,
+      repositoryName: RepositoryName.parse("mattpatagon/murmur"),
+      sessionKey: SessionKey.parse("charlie-pane"),
+      state: "open",
+    });
+    expect(discovered.notices.map((notice: Notice): string => notice.noticeId.value)).toEqual([
+      posted.notice.noticeId.value,
+    ]);
+    expect(
+      store.getMessages({
+        afterSequence: Sequence.zero(),
+        agentId: AgentId.parse("charlie"),
+        limit: 100,
+        threadId: null,
+        unreadOnly: false,
+      }),
+    ).toEqual([]);
   });
 });
 

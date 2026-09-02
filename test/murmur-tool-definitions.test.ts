@@ -373,6 +373,26 @@ describe("MCP role-to-tool exposure", (): void => {
     expect(tool.description).toContain("security/advisories/new");
   });
 
+  test("distinguishes active-audience broadcasts from shared repository notices", (): void => {
+    const tools: Tool[] = toolsForPrincipal(exposure(null));
+    const broadcast: Tool | undefined = tools.find(
+      (tool: Tool): boolean => tool.name === "broadcast_message",
+    );
+    const notice: Tool | undefined = tools.find(
+      (tool: Tool): boolean => tool.name === "post_notice",
+    );
+    if (broadcast === undefined || notice === undefined) {
+      throw new Error("Expected broadcast and notice tools");
+    }
+    expect(broadcast.description).toContain("unread inbox delivery");
+    expect(broadcast.description).toContain("recipient snapshot");
+    expect(broadcast.description).toContain("Use post_notice instead");
+    expect(notice.description).toContain("shared repository-scoped");
+    expect(notice.description).toContain("creates no inbox deliveries");
+    expect(notice.description).toContain("current and future agents");
+    expect(notice.description).toContain("Use broadcast_message instead");
+  });
+
   test("advertises only retry-safe orchestration mutations as idempotent", (): void => {
     const tenantId: TenantId = TenantId.parse("00000000-0000-4000-8000-000000000001");
     const principal: HostedPrincipal = {
