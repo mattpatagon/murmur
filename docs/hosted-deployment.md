@@ -18,11 +18,16 @@ The deployed service exposes:
   creates a tenant and returns its initial administrator credential.
 - `/mcp`, a public Streamable HTTP endpoint that requires a live Murmur bearer
   token for every MCP request.
+- `/.well-known/oauth-protected-resource/mcp` and
+  `/.well-known/oauth-authorization-server`, public connector discovery metadata.
+- `/oauth/authorize` and `/oauth/token`, the bounded authorization-code and existing-token
+  compatibility flow for connector hosts.
 
 Cloud Run ingress is public so generic MCP clients can connect. Public ingress
 does not bypass Murmur authorization. The initial deployment uses one instance
-because MCP sessions are in memory; messages and authorization state remain
-durable in PostgreSQL across restarts.
+because MCP sessions and connector authorization codes are in memory. Messages, tenant
+credentials, and authorization policy remain durable in PostgreSQL across restarts; a connector
+restarts authorization when an ephemeral five-minute code is lost.
 
 Production PostgreSQL connections must use certificate verification. The
 runtime mounts the Supabase Server root certificate and connects as the
@@ -169,6 +174,12 @@ derived from a caller-generated 256-bit registration secret and only its hash is
 request retries return the same tenant and token, so a lost response does not require operator
 recovery. Agents then set `MURMUR_API_TOKEN` and run `murmur setup --user` against the hosted MCP URL.
 
+ChatGPT and Grok users do not run the local setup command. Create a dedicated repository-bound
+`agent` token, place it only in the connector Client Secret field, use client ID `murmur`, scope
+`murmur`, the hosted `/oauth/authorize` and `/oauth/token` URLs, and select
+`client_secret_basic` or `client_secret_post`. Operator and bootstrap credentials are rejected.
+See [connector authentication](connector-authentication.md) for the complete form and trust model.
+
 Keep the endpoint behind the same TLS, origin, request-capacity, and observability boundary as
 `/mcp`. Configure `MURMUR_REGISTRATION_RATE_LIMIT_PER_MINUTE` only to tighten or scale the default
 per-process limit; the database independently enforces cross-replica creation and retention caps.
@@ -273,13 +284,14 @@ workflow because strict mode refuses to start without an operator.
 export GOOGLE_CLOUD_PROJECT='your-project-id'
 export MURMUR_RUNTIME_SERVICE_ACCOUNT='murmur-cloud-run@your-project-id.iam.gserviceaccount.com'
 export MURMUR_RELEASE_REVISION="$(git rev-parse HEAD)"
+export MURMUR_PUBLIC_ORIGIN='https://api.example.com'
 
 gcloud run deploy murmur-mcp \
   --project "$GOOGLE_CLOUD_PROJECT" \
   --region us-central1 \
   --source . \
   --service-account "$MURMUR_RUNTIME_SERVICE_ACCOUNT" \
-  --update-env-vars MURMUR_AUTH_MODE=multi-tenant,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_STREAM_LIFETIME_MS=3300000,MURMUR_RELEASE_REVISION="$MURMUR_RELEASE_REVISION" \
+  --update-env-vars MURMUR_AUTH_MODE=multi-tenant,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_STREAM_LIFETIME_MS=3300000,MURMUR_PUBLIC_ORIGIN="$MURMUR_PUBLIC_ORIGIN",MURMUR_RELEASE_REVISION="$MURMUR_RELEASE_REVISION" \
   --set-secrets MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:latest,/etc/murmur/secrets/database-ca.pem=MURMUR_DATABASE_CA:latest \
   --allow-unauthenticated \
   --concurrency 80 \
@@ -309,6 +321,10 @@ MURMUR_TEST_DATABASE_URL="$VERIFIED_DATABASE_URL" bun run test:cloud
 Never use the Supabase transaction pooler: PostgreSQL `LISTEN/NOTIFY` requires
 a stable session. `MURMUR_DATABASE_TLS_INSECURE=1` is a local-development escape
 hatch for plaintext test databases and must not be set in production.
+
+`MURMUR_PUBLIC_ORIGIN` is required for non-loopback connector OAuth routes. Set it to the canonical
+external HTTPS origin. Murmur uses it directly and never trusts inbound host or proxy headers for
+OAuth issuer or resource identity.
 
 ## Health and isolation canary
 

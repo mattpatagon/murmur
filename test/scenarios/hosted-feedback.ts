@@ -17,7 +17,7 @@ import type { HostedTenantScenario } from "./hosted-tenant-provisioning.js";
 
 type StoredFeedbackRow = {
   readonly branch_name: string;
-  readonly client_name: "claude" | "codex";
+  readonly client_name: "claude" | "codex" | "connector";
   readonly created_at: string;
   readonly description: string;
   readonly feedback_id: string;
@@ -32,7 +32,7 @@ type StoredFeedbackRow = {
 
 const StoredFeedbackRowSchema: z.ZodType<StoredFeedbackRow> = z.strictObject({
   branch_name: z.string(),
-  client_name: z.enum(["claude", "codex"]),
+  client_name: z.enum(["claude", "codex", "connector"]),
   created_at: z.string(),
   description: z.string(),
   feedback_id: z.string().uuid(),
@@ -55,6 +55,11 @@ export async function verifyHostedFeedback(scenario: HostedTenantScenario): Prom
   ).toContain("submit_feedback");
   const idempotencyKey: string = `hosted-feedback-${scenario.unique}`;
   const issueArguments: Record<string, unknown> = {
+    context: {
+      branch: "connector/hosted-e2e",
+      client: "connector",
+      repository: "mattpatagon/murmur",
+    },
     description: "The hosted feedback path must preserve tenant and reporter context.",
     idempotency_key: idempotencyKey,
     reporter_id: scenario.senderA,
@@ -83,8 +88,8 @@ export async function verifyHostedFeedback(scenario: HostedTenantScenario): Prom
   expect(issue.submission.type).toBe("issue");
   expect(issue.submission.reporter_id).toBe(scenario.senderA);
   expect(issue.submission.context).toEqual({
-    branch: "feature/hosted-isolation",
-    client: "codex",
+    branch: "connector/hosted-e2e",
+    client: "connector",
     repository: "mattpatagon/murmur",
   });
   expect(retry.duplicate).toBe(true);
@@ -177,8 +182,8 @@ export async function verifyHostedFeedback(scenario: HostedTenantScenario): Prom
     const rows: StoredFeedbackRow[] = z.array(StoredFeedbackRowSchema).parse(raw);
     expect(rows).toEqual([
       {
-        branch_name: "feature/hosted-isolation",
-        client_name: "codex",
+        branch_name: "connector/hosted-e2e",
+        client_name: "connector",
         created_at: issue.submission.created_at,
         description: "The hosted feedback path must preserve tenant and reporter context.",
         feedback_id: issue.submission.submission_id,

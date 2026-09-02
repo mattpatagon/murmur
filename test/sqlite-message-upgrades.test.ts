@@ -17,6 +17,7 @@ import {
   MessageContent,
   Sequence,
 } from "../src/domain/value-objects.js";
+import { migrateSqliteDatabase } from "../src/storage/sqlite-message-migrations.js";
 import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
 import { baseMessageCommand } from "./support/store-fixture.js";
 
@@ -101,7 +102,7 @@ test("upgrades an existing SQLite schema before storing message context", (): vo
     if (sent.message.branchName === null) throw new Error("Expected branch context");
     expect(sent.message.branchName.value).toBe("feature/agent-context");
     if (sent.message.client === null) throw new Error("Expected client context");
-    expect(sent.message.client.value).toBe("codex");
+    expect(sent.message.client.value).toBe("connector");
     if (sent.message.repositoryName === null) throw new Error("Expected repository context");
     expect(sent.message.repositoryName.value).toBe("mattpatagon/murmur");
   } finally {
@@ -307,7 +308,19 @@ test("upgrades a populated SQLite v8 database with bounded E2E tables and usage"
       if (versionRow === null || typeof versionRow !== "object") {
         throw new Error("Expected SQLite schema version row");
       }
-      expect(Number(Reflect.get(versionRow, "user_version"))).toBe(11);
+      expect(Number(Reflect.get(versionRow, "user_version"))).toBe(12);
+      for (const table of ["messages", "broadcasts", "feedback_submissions"]) {
+        const schemaRow: unknown = database
+          .query<unknown, [string]>(
+            "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?",
+          )
+          .get(table);
+        if (schemaRow === null || typeof schemaRow !== "object") {
+          throw new Error("Expected upgraded SQLite table schema");
+        }
+        const sql: unknown = Reflect.get(schemaRow, "sql");
+        expect(typeof sql === "string" ? sql : "").toContain("'connector'");
+      }
       const usageRow: unknown = database
         .query<unknown, []>(`
           SELECT claim_count, pending_broadcast_count, retained_message_count
@@ -332,5 +345,51 @@ test("upgrades a populated SQLite v8 database with bounded E2E tables and usage"
   } finally {
     upgraded.close();
     rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("SQLite v12 migration rolls back invalid data and restores foreign keys", (): void => {
+  const database: Database = new Database(":memory:", { create: true });
+  try {
+    migrateSqliteDatabase(database);
+    database.exec(`
+      PRAGMA foreign_keys = OFF;
+      INSERT INTO messages(
+        message_id, thread_id, sender_id, recipient_id, content, created_at, expires_at
+      ) VALUES (
+        '00000000-0000-4000-8000-000000000099', 'invalid-foreign-key',
+        'missing-sender', 'missing-recipient', 'invalid row',
+        '2026-09-02T00:00:00.000Z', '2026-10-02T00:00:00.000Z'
+      );
+      PRAGMA user_version = 11;
+    `);
+
+    expect((): void => migrateSqliteDatabase(database)).toThrow(
+      "SQLite migration violated a foreign key",
+    );
+    const versionRow: unknown = database.query<unknown, []>("PRAGMA user_version").get();
+    const foreignKeysRow: unknown = database.query<unknown, []>("PRAGMA foreign_keys").get();
+    if (typeof versionRow !== "object" || versionRow === null) {
+      throw new Error("SQLite user version row is invalid");
+    }
+    if (typeof foreignKeysRow !== "object" || foreignKeysRow === null) {
+      throw new Error("SQLite foreign-key row is invalid");
+    }
+    expect(Number(Reflect.get(versionRow, "user_version"))).toBe(11);
+    expect(Number(Reflect.get(foreignKeysRow, "foreign_keys"))).toBe(1);
+    expect(database.query("SELECT COUNT(*) AS count FROM messages").get()).toEqual({ count: 1 });
+    expect((): void => {
+      database.exec(`
+          INSERT INTO messages(
+            message_id, thread_id, sender_id, recipient_id, content, created_at, expires_at
+          ) VALUES (
+            '00000000-0000-4000-8000-000000000100', 'foreign-key-restored',
+            'missing-sender', 'missing-recipient', 'must fail',
+            '2026-09-02T00:00:00.000Z', '2026-10-02T00:00:00.000Z'
+          )
+        `);
+    }).toThrow("FOREIGN KEY constraint failed");
+  } finally {
+    database.close();
   }
 });

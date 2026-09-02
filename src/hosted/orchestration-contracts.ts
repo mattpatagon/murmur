@@ -119,7 +119,7 @@ export type AskOrchestratorInput = {
   readonly context?:
     | {
         readonly branch?: string | undefined;
-        readonly client?: "claude" | "codex" | undefined;
+        readonly client?: "claude" | "codex" | "connector" | undefined;
         readonly repository?: string | undefined;
       }
     | undefined;
@@ -133,7 +133,7 @@ export const AskOrchestratorInputSchema: z.ZodType<AskOrchestratorInput> = z.str
   context: z
     .strictObject({
       branch: z.string().trim().min(1).max(500).optional(),
-      client: z.enum(["claude", "codex"]).optional(),
+      client: z.enum(["claude", "codex", "connector"]).optional(),
       repository: RepositorySchema.optional(),
     })
     .optional(),

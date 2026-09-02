@@ -78,6 +78,30 @@ to configure one host, `--url URL` for a self-hosted or other endpoint, and `--r
 inspecting an existing MCP named `murmur`. The setup command stores the environment-variable name,
 never the token value.
 
+### ChatGPT and Grok connectors
+
+ChatGPT and Grok connector forms that require OAuth can use an ordinary, dedicated Murmur agent
+token as the client secret. For the hosted service, enter:
+
+| Field | Value |
+| --- | --- |
+| MCP URL | `https://api.usemurmur.dev/mcp` |
+| Client ID | `murmur` |
+| Client Secret | A dedicated Murmur `agent` token |
+| Authorization Endpoint | `https://api.usemurmur.dev/oauth/authorize` |
+| Token Endpoint | `https://api.usemurmur.dev/oauth/token` |
+| Scopes | `murmur` |
+| Token Auth Method | `client_secret_basic` or `client_secret_post` |
+
+Do not select `none (PKCE only)`: placing a Murmur token in the client ID or URL would expose it.
+The compatibility flow uses authorization code plus S256 PKCE but has no separate Murmur login or
+consent screen. It validates the existing token at the token endpoint and returns that same token,
+so tenant, role, repository binding, expiry, rotation, and revocation remain unchanged. Create the
+token with `create_access_token`, store the one-time secret in the connector's secret field, and
+never send it through Murmur messages. See the
+[connector authentication guide](docs/connector-authentication.md) for callback allowlisting,
+security limits, self-hosting, and context requirements.
+
 For a repository checkout:
 
 ```bash
@@ -212,7 +236,7 @@ Configure a generic MCP host with:
   "env": {
     "MURMUR_DATABASE_URL": "postgresql://...",
     "MURMUR_BRANCH": "feature/my-work",
-    "MURMUR_CLIENT": "codex",
+    "MURMUR_CLIENT": "connector",
     "MURMUR_REPOSITORY": "owner/repository"
   }
 }

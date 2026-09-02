@@ -4,6 +4,11 @@ import type { HostedPrincipal } from "../hosted/control-plane.js";
 import {
   HEALTH_PATH,
   MCP_PATH,
+  OAUTH_AUTHORIZATION_PATH,
+  OAUTH_PROTECTED_RESOURCE_PATH,
+  OAUTH_PROTECTED_RESOURCE_ROOT_PATH,
+  OAUTH_SERVER_METADATA_PATH,
+  OAUTH_TOKEN_PATH,
   RELEASE_PATH,
   TENANT_REGISTRATION_PATH,
 } from "../http/http-config.js";
@@ -38,6 +43,13 @@ function routeForRequest(request: Request): string {
     const pathname: string = new URL(request.url).pathname;
     if (pathname === "/" || pathname === HEALTH_PATH) return HEALTH_PATH;
     if (pathname === MCP_PATH) return MCP_PATH;
+    if (pathname === OAUTH_AUTHORIZATION_PATH) return OAUTH_AUTHORIZATION_PATH;
+    if (pathname === OAUTH_TOKEN_PATH) return OAUTH_TOKEN_PATH;
+    if (pathname === OAUTH_SERVER_METADATA_PATH) return OAUTH_SERVER_METADATA_PATH;
+    if (pathname === OAUTH_PROTECTED_RESOURCE_PATH) return OAUTH_PROTECTED_RESOURCE_PATH;
+    if (pathname === OAUTH_PROTECTED_RESOURCE_ROOT_PATH) {
+      return OAUTH_PROTECTED_RESOURCE_ROOT_PATH;
+    }
     if (pathname === RELEASE_PATH) return RELEASE_PATH;
     if (pathname === TENANT_REGISTRATION_PATH) return TENANT_REGISTRATION_PATH;
     return "/not-found";

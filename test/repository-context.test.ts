@@ -1,8 +1,7 @@
+import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-
-import { expect, test } from "bun:test";
 
 import {
   detectAgentClient,
@@ -22,7 +21,7 @@ function requireRepositoryValue(repositoryName: RepositoryName | null): string {
   return repositoryName.value;
 }
 
-function requireClientValue(client: AgentClient | null): "claude" | "codex" {
+function requireClientValue(client: AgentClient | null): "claude" | "codex" | "connector" {
   if (client === null) throw new Error("Expected client context");
   return client.value;
 }

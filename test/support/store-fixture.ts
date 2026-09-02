@@ -62,7 +62,7 @@ export function withFixture(run: (fixture: StoreFixture) => void): void {
 export function baseMessageCommand(): SendMessageCommand {
   return {
     branchName: BranchName.parse("feature/agent-context"),
-    client: AgentClient.parse("codex"),
+    client: AgentClient.parse("connector"),
     content: MessageContent.parse("Can you review this?"),
     idempotencyKey: IdempotencyKey.parse("review-1"),
     recipientId: AgentId.parse("bob"),
@@ -76,7 +76,7 @@ export function baseBroadcastCommand(): BroadcastMessageCommand {
   return {
     audience: { machineName: null, repositoryName: null },
     branchName: BranchName.parse("feature/broadcasts"),
-    client: AgentClient.parse("codex"),
+    client: AgentClient.parse("connector"),
     content: MessageContent.parse("Attention all active agents"),
     idempotencyKey: IdempotencyKey.parse("broadcast-1"),
     repositoryName: RepositoryName.parse("mattpatagon/murmur"),

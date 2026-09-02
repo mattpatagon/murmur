@@ -42,9 +42,13 @@ export function streamCapacityResponse(): Response {
   );
 }
 
-export function unauthorizedResponse(): Response {
+export function unauthorizedResponse(resourceMetadataUrl: string | null = null): Response {
+  const challenge: string =
+    resourceMetadataUrl === null
+      ? 'Bearer realm="murmur"'
+      : `Bearer realm="murmur", resource_metadata="${resourceMetadataUrl}", scope="murmur"`;
   return new Response(null, {
-    headers: { "cache-control": "no-store", "www-authenticate": 'Bearer realm="murmur"' },
+    headers: { "cache-control": "no-store", "www-authenticate": challenge },
     status: 401,
   });
 }
@@ -95,7 +99,7 @@ export function mcpRequestMetadata(body: unknown): McpRequestMetadata {
   };
 }
 
-async function requestBodyBytes(request: Request, maxBytes: number): Promise<Uint8Array> {
+export async function requestBodyBytes(request: Request, maxBytes: number): Promise<Uint8Array> {
   const declaredLength: string | null = request.headers.get("content-length");
   if (declaredLength !== null && Number(declaredLength) > maxBytes) {
     throw new RequestBodyTooLargeError(maxBytes);

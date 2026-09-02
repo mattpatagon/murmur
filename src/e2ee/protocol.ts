@@ -11,7 +11,7 @@ export type PrekeyClass = "fallback" | "one_time";
 export type EnvelopeHeaderInput = {
   readonly branchName: string | null;
   readonly broadcastId: string | null;
-  readonly client: "claude" | "codex" | null;
+  readonly client: "claude" | "codex" | "connector" | null;
   readonly createdAt: string;
   readonly expiresAt: string;
   readonly idempotencyKey: string;

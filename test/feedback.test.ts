@@ -65,7 +65,7 @@ function feedbackCommand(
 ): SubmitFeedbackCommand {
   return {
     branchName: BranchName.parse("feature/feedback"),
-    client: AgentClient.parse("codex"),
+    client: AgentClient.parse("connector"),
     description: FeedbackDescription.parse("The submission path should preserve this detail."),
     idempotencyKey: key === null ? null : IdempotencyKey.parse(key),
     reporterId: AgentId.parse(reporter),
@@ -151,7 +151,7 @@ test("persists issues and feature requests with exact reporter context", (): voi
     expect(issue.submission.reporterGeneration.value).toBe(1);
     expect(issue.submission.repositoryName.value).toBe("mattpatagon/murmur");
     expect(issue.submission.branchName.value).toBe("feature/feedback");
-    expect(issue.submission.client.value).toBe("codex");
+    expect(issue.submission.client.value).toBe("connector");
     expect(issue.submission.createdAt.toISOString()).toBe("2026-08-20T12:00:00.000Z");
     expect(feature.submission.type).toBe("feature_request");
     expect(feature.submission.createdAt.toISOString()).toBe("2026-08-20T12:01:00.000Z");

@@ -40,7 +40,7 @@ type HeaderDto = {
   readonly branch_name: string | null;
   readonly broadcast_id: string | null;
   readonly cipher_suite: "x25519-xsalsa20-poly1305+ed25519";
-  readonly client: "claude" | "codex" | null;
+  readonly client: "claude" | "codex" | "connector" | null;
   readonly created_at: string;
   readonly expires_at: string;
   readonly idempotency_key: string;
@@ -133,7 +133,7 @@ const HeaderSchema: z.ZodType<HeaderDto> = z.strictObject({
   branch_name: z.string().min(1).max(500).nullable(),
   broadcast_id: UuidSchema.nullable(),
   cipher_suite: z.literal(CIPHER_SUITE),
-  client: z.enum(["claude", "codex"]).nullable(),
+  client: z.enum(["claude", "codex", "connector"]).nullable(),
   created_at: InstantSchema,
   expires_at: InstantSchema,
   idempotency_key: z.string().min(1).max(200),

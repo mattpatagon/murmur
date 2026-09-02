@@ -15,26 +15,6 @@ import {
   ThreadId,
 } from "./value-objects.js";
 
-export {
-  AgentDtoSchema,
-  CloseAgentInputSchema,
-  CloseAgentOutputSchema,
-  EndSessionInputSchema,
-  EndSessionOutputSchema,
-  GetAgentInputSchema,
-  GetAgentOutputSchema,
-  ListAgentsInputSchema,
-  ListAgentsOutputSchema,
-  RegisterAgentInputSchema,
-  RegisterAgentOutputSchema,
-  closeAgentCommand,
-  encodeAgentCursor,
-  endSessionCommand,
-  listAgentsQuery,
-  registerAgentCommand,
-  toAgentDto,
-  toListAgentsOutput,
-} from "./agent-contracts.js";
 export type {
   AgentDto,
   CloseAgentInput,
@@ -47,6 +27,26 @@ export type {
   ListAgentsOutput,
   RegisterAgentInput,
   RegisterAgentOutput,
+} from "./agent-contracts.js";
+export {
+  AgentDtoSchema,
+  CloseAgentInputSchema,
+  CloseAgentOutputSchema,
+  closeAgentCommand,
+  EndSessionInputSchema,
+  EndSessionOutputSchema,
+  encodeAgentCursor,
+  endSessionCommand,
+  GetAgentInputSchema,
+  GetAgentOutputSchema,
+  ListAgentsInputSchema,
+  ListAgentsOutputSchema,
+  listAgentsQuery,
+  RegisterAgentInputSchema,
+  RegisterAgentOutputSchema,
+  registerAgentCommand,
+  toAgentDto,
+  toListAgentsOutput,
 } from "./agent-contracts.js";
 
 export const RETENTION_DAYS: number = 30;
@@ -65,7 +65,8 @@ const BranchNameTextSchema: z.ZodString = z.string().trim().min(1).max(500);
 const AgentClientTextSchema: z.ZodEnum<{
   claude: "claude";
   codex: "codex";
-}> = z.enum(["claude", "codex"]);
+  connector: "connector";
+}> = z.enum(["claude", "codex", "connector"]);
 const MachineNameTextSchema: z.ZodString = z
   .string()
   .trim()
@@ -98,7 +99,7 @@ export type BroadcastAudienceDto = {
 
 export type MessageContextDto = {
   readonly branch?: string | undefined;
-  readonly client?: "claude" | "codex" | undefined;
+  readonly client?: "claude" | "codex" | "connector" | undefined;
   readonly repository?: string | undefined;
 };
 

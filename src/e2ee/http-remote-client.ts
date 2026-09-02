@@ -53,6 +53,12 @@ import {
   EncryptionClaimExpiredError,
 } from "./remote-client.js";
 import {
+  type ClaimOrchestratorPrekeyInput,
+  ClaimOrchestratorPrekeyInputSchema,
+  type ClaimOrchestratorPrekeyOutput,
+  ClaimOrchestratorPrekeyOutputSchema,
+} from "./wire-orchestration.js";
+import {
   type CancelEncryptedBroadcastInput,
   CancelEncryptedBroadcastInputSchema,
   type CancelEncryptedBroadcastOutput,
@@ -98,12 +104,6 @@ import {
   type WaitForEncryptedMessagesOutput,
   WaitForEncryptedMessagesOutputSchema,
 } from "./wire-tools.js";
-import {
-  type ClaimOrchestratorPrekeyInput,
-  ClaimOrchestratorPrekeyInputSchema,
-  type ClaimOrchestratorPrekeyOutput,
-  ClaimOrchestratorPrekeyOutputSchema,
-} from "./wire-orchestration.js";
 
 const CONNECT_TIMEOUT_MS: number = 10_000;
 const REQUEST_TIMEOUT_MS: number = 30_000;
@@ -117,7 +117,7 @@ const CLAIM_EXPIRED_CONTENT: string = JSON.stringify(
 
 export type E2eeHttpRemoteClientConfig = {
   readonly branch: string | null;
-  readonly client: "claude" | "codex";
+  readonly client: "claude" | "codex" | "connector";
   readonly endpoint: string;
   readonly repository: string | null;
   readonly token: string;
@@ -137,7 +137,11 @@ class McpWireToolCaller implements E2eeWireToolCaller {
 
   public static async connect(config: E2eeHttpRemoteClientConfig): Promise<McpWireToolCaller> {
     const endpoint: URL = parseEndpoint(config.endpoint);
-    const context: { branch: string; client: "claude" | "codex"; repository: string } | null =
+    const context: {
+      branch: string;
+      client: "claude" | "codex" | "connector";
+      repository: string;
+    } | null =
       config.branch === null || config.repository === null
         ? null
         : E2eeMessageContextDtoSchema.parse({

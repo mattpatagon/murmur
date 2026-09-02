@@ -45,7 +45,9 @@ test("remote MCP requires a bearer token", async (): Promise<void> => {
     expect(healthResponse.status).toBe(200);
     const response: Response = await fetch(server.mcpUrl, { method: "POST" });
     expect(response.status).toBe(401);
-    expect(response.headers.get("www-authenticate")).toBe('Bearer realm="murmur"');
+    expect(response.headers.get("www-authenticate")).toBe(
+      `Bearer realm="murmur", resource_metadata="${server.mcpUrl.origin}/.well-known/oauth-protected-resource/mcp", scope="murmur"`,
+    );
   } finally {
     await server.stop();
     rmSync(directory, { force: true, recursive: true });

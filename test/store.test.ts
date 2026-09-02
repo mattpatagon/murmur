@@ -45,7 +45,7 @@ test("stores, reads, and marks an inbox message", (): void => {
     if (sent.message.branchName === null) throw new Error("Expected branch context");
     expect(sent.message.branchName.value).toBe("feature/agent-context");
     if (sent.message.client === null) throw new Error("Expected client context");
-    expect(sent.message.client.value).toBe("codex");
+    expect(sent.message.client.value).toBe("connector");
     if (sent.message.repositoryName === null) throw new Error("Expected repository context");
     expect(sent.message.repositoryName.value).toBe("mattpatagon/murmur");
     expect(sent.message.createdAt.toISOString()).toBe("2026-08-04T12:00:00.000Z");
@@ -443,6 +443,7 @@ test("upgrades a SQLite v3 database for broadcast delivery", (): void => {
 });
 
 test("rejects malformed domain identifiers before storage", (): void => {
+  expect(AgentClient.parse("connector").value).toBe("connector");
   expect((): AgentClient => AgentClient.parse("cursor")).toThrow();
   expect((): AgentId => AgentId.parse("space is not allowed")).toThrow();
   expect((): BranchName => BranchName.parse("")).toThrow();

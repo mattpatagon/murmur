@@ -2,6 +2,38 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.12.0.0] - 2026-09-02
+
+### Added
+
+- Connect ChatGPT and Grok-style MCP hosts with a dedicated Murmur agent token through an
+  authorization-code and S256 PKCE compatibility flow, without introducing a separate Murmur
+  login or consent system.
+- Publish protected-resource and authorization-server metadata plus copy-ready connector settings
+  for hosted and self-hosted deployments.
+
+### Changed
+
+- Preserve connector-originated repository, branch, and generic `connector` client context across
+  plaintext and encrypted message, broadcast, and feedback contracts.
+- Apply connector client constraints through independently retryable, bounded-lock PostgreSQL
+  expansion, validation, and finalization migrations.
+
+### Security
+
+- Derive OAuth issuer and MCP resource identity from a configured canonical HTTPS origin, require
+  exact allowlisted callbacks, and reject host or forwarding-header spoofing.
+- Share bounded HTTP, authentication, and tenant/principal rate controls with existing hosted
+  traffic while keeping anonymous code issuance below the live in-memory code pool.
+- Return the original tenant agent token only after client-secret authentication and one-use PKCE
+  grant validation, so existing repository scope, expiry, suspension, rotation, and revocation
+  remain authoritative.
+
+### For contributors
+
+- Stabilize the SDK stream-rotation regression by allowing normal client setup jitter while
+  retaining a pre-rotation idle-expiry assertion.
+
 ## [0.11.1.0] - 2026-09-01
 
 ### Fixed

@@ -232,7 +232,7 @@ test("the supported SDK client reconnects after application-owned rotation", asy
   const environment: NodeJS.ProcessEnv = {
     ...testEnvironment(join(directory, "messages.db")),
     MURMUR_MAX_STREAM_LIFETIME_MS: "2000",
-    MURMUR_SESSION_IDLE_MS: "100",
+    MURMUR_SESSION_IDLE_MS: "1000",
   };
   const token: string | undefined = environment["MURMUR_API_TOKEN"];
   if (token === undefined) throw new Error("The SDK rotation test token is missing");

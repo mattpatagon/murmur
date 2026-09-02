@@ -1,9 +1,10 @@
+import type { MurmurReleaseMetadata } from "../domain/upgrade-contracts.js";
 import type {
   HttpObservability,
   RequestObservation,
 } from "../observability/request-observation.js";
-import type { MurmurReleaseMetadata } from "../domain/upgrade-contracts.js";
 import { logSafeError } from "../safe-errors.js";
+import { isConnectorOAuthPath } from "./connector-oauth.js";
 import { HEALTH_PATH, MCP_PATH, RELEASE_PATH, TENANT_REGISTRATION_PATH } from "./http-config.js";
 import { jsonResponse } from "./http-request.js";
 
@@ -17,6 +18,7 @@ export function createHttpRequestHandler(
   handleMcpRequest: McpRequestHandler,
   handleTenantRegistration: McpRequestHandler | null = null,
   releaseMetadata: MurmurReleaseMetadata | null = null,
+  handleConnectorOAuth: McpRequestHandler | null = null,
 ): (request: Request) => Promise<Response> {
   return async (request: Request): Promise<Response> => {
     const observation: RequestObservation = observability.observe(request);
@@ -49,6 +51,11 @@ export function createHttpRequestHandler(
           handleTenantRegistration === null
             ? jsonResponse(404, { error: "Not found" })
             : await handleTenantRegistration(request, observation);
+      } else if (isConnectorOAuthPath(url.pathname)) {
+        response =
+          handleConnectorOAuth === null
+            ? jsonResponse(404, { error: "Not found" })
+            : await handleConnectorOAuth(request, observation);
       } else if (url.pathname !== MCP_PATH) {
         response = jsonResponse(404, { error: "Not found" });
       } else {

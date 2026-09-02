@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 import {
-  MessageContextDtoSchema,
   type MessageContextDto,
+  MessageContextDtoSchema,
   nullableIdempotencyKey,
 } from "./contracts.js";
 import {
@@ -19,7 +19,7 @@ const AgentIdTextSchema: z.ZodString = z.string().min(1).max(200);
 const InstantTextSchema: z.ZodISODateTime = z.iso.datetime({ offset: true });
 const RequiredFeedbackContextSchema: z.ZodType<RequiredFeedbackContext> = z.strictObject({
   branch: z.string().trim().min(1).max(500),
-  client: z.enum(["claude", "codex"]),
+  client: z.enum(["claude", "codex", "connector"]),
   repository: z
     .string()
     .min(3)
@@ -49,7 +49,7 @@ export const SubmitFeedbackInputSchema: z.ZodType<SubmitFeedbackInput> = z.stric
 
 export type RequiredFeedbackContext = {
   readonly branch: string;
-  readonly client: "claude" | "codex";
+  readonly client: "claude" | "codex" | "connector";
   readonly repository: string;
 };
 

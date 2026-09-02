@@ -74,6 +74,13 @@ MCP changes are additive when possible. Preserve existing tool names, required f
 meanings, idempotency behavior, resource URIs, and message retention semantics. A breaking change
 requires an explicit compatibility plan, versioned contract, migration path, and release note.
 
+The connector-client expansion adds replacement message, broadcast, and feedback check constraints
+as `NOT VALID`, validates each table in its own bounded-lock migration, then swaps the validated
+constraints into the stable names. Apply all five migrations in order. If validation reports its
+five-second lock timeout, leave the recorded migrations and constraints unchanged and rerun the
+same pending migration after the conflicting workload releases the table; do not drop or rename a
+constraint manually.
+
 The v0.6 lifecycle expansion backfills existing agents and messages into generation 1 and creates a
 60-minute compatibility lease for agents seen during the preceding hour. Apply its migrations before
 the matching application, complete traffic cutover and drain older writers before those leases can

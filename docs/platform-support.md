@@ -66,6 +66,12 @@ Environment-variable syntax differs by shell. In PowerShell, use
 `$env:MURMUR_API_TOKEN = "..."`; in POSIX shells, use `export MURMUR_API_TOKEN='...'`. Never commit a
 `.env` file.
 
+ChatGPT and Grok use the hosted HTTPS OAuth compatibility endpoints and require no local launcher,
+shell, or filesystem path. Self-hosted connector callback additions are exact HTTPS URLs in
+`MURMUR_OAUTH_ALLOWED_REDIRECT_URIS`, whose comma-separated syntax is the same on every platform.
+Non-loopback deployments also set the platform-independent `MURMUR_PUBLIC_ORIGIN` to one canonical
+HTTPS origin.
+
 SQLite local mode needs no external service. PostgreSQL integration requires a reachable PostgreSQL
 17 instance and TLS configuration; the authoritative scripts additionally require Bash, Docker, and
 PostgreSQL client tools on Linux. Cloud Run deployment requires the tools listed in

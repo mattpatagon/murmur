@@ -402,6 +402,8 @@ test("real HTTP requests never export message, token, session, or query secrets"
   const server: MurmurHttpServer = await startHttpServer(environment, { observability });
   const bodySecret: string = "RAW_HTTP_MESSAGE_SECRET";
   const querySecret: string = "RAW_HTTP_QUERY_SECRET";
+  const oauthCodeSecret: string = "RAW_OAUTH_CODE_SECRET";
+  const oauthVerifierSecret: string = "RAW_OAUTH_VERIFIER_SECRET";
   const tokenSecret: string = environment["MURMUR_API_TOKEN"] ?? "";
   try {
     const secretUrl: URL = new URL(server.mcpUrl);
@@ -409,6 +411,35 @@ test("real HTTP requests never export message, token, session, or query secrets"
     const unauthorized: Response = await fetch(secretUrl, { method: "POST" });
     expect(unauthorized.status).toBe(401);
     await unauthorized.arrayBuffer();
+    const authorizationUrl: URL = new URL("/oauth/authorize", server.mcpUrl.origin);
+    authorizationUrl.searchParams.set("client_id", "invalid-client");
+    authorizationUrl.searchParams.set("code", oauthCodeSecret);
+    authorizationUrl.searchParams.set("code_verifier", oauthVerifierSecret);
+    const authorization: Response = await fetch(authorizationUrl, { redirect: "manual" });
+    expect(authorization.status).toBe(400);
+    await authorization.arrayBuffer();
+    const token: Response = await fetch(new URL("/oauth/token", server.mcpUrl.origin), {
+      body: new URLSearchParams({
+        client_id: "murmur",
+        client_secret: bodySecret,
+        code: oauthCodeSecret,
+        code_verifier: oauthVerifierSecret,
+        grant_type: "authorization_code",
+      }),
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      method: "POST",
+    });
+    expect(token.status).toBe(401);
+    await token.arrayBuffer();
+    for (const path of [
+      "/.well-known/oauth-authorization-server",
+      "/.well-known/oauth-protected-resource",
+      "/.well-known/oauth-protected-resource/mcp",
+    ]) {
+      const metadata: Response = await fetch(new URL(path, server.mcpUrl.origin));
+      expect(metadata.status).toBe(200);
+      await metadata.arrayBuffer();
+    }
     const forbiddenHeaders: Headers = requestHeaders();
     forbiddenHeaders.set("Origin", "https://untrusted.example");
     const forbidden: Response = await fetch(secretUrl, {
@@ -447,13 +478,20 @@ test("real HTTP requests never export message, token, session, or query secrets"
   const exported: string = bodies
     .map((body: Uint8Array): string => new TextDecoder().decode(body))
     .join("\n");
-  [bodySecret, querySecret, tokenSecret].forEach((secret: string): void => {
-    expect(logs).not.toContain(secret);
-    expect(exported).not.toContain(secret);
-  });
+  [bodySecret, querySecret, oauthCodeSecret, oauthVerifierSecret, tokenSecret].forEach(
+    (secret: string): void => {
+      expect(logs).not.toContain(secret);
+      expect(exported).not.toContain(secret);
+    },
+  );
   expect(logs).toContain('"authentication":"invalid"');
   expect(logs).toContain('"credential":"missing"');
   expect(logs).toContain('"origin":"rejected"');
   expect(logs).toContain('"mcp_tool":"send_message"');
+  expect(logs).toContain('"http_route":"/oauth/authorize"');
+  expect(logs).toContain('"http_route":"/oauth/token"');
+  expect(logs).toContain('"http_route":"/.well-known/oauth-authorization-server"');
+  expect(logs).toContain('"http_route":"/.well-known/oauth-protected-resource"');
+  expect(logs).toContain('"http_route":"/.well-known/oauth-protected-resource/mcp"');
   expect(bodies.length).toBeGreaterThan(0);
 });
