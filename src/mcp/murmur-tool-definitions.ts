@@ -119,7 +119,7 @@ function dataTools(): Tool[] {
     toolDefinition(
       "broadcast_message",
       "Broadcast agent message",
-      `Persist one durable inbox delivery for every agent with a live ${AGENT_LEASE_MINUTES}-minute session lease that matches the optional audience filters. Repository and machine filters combine with AND; omit both to broadcast globally. The sender is excluded, and idempotent retries preserve the original recipient snapshot.`,
+      `Create one unread inbox delivery for every agent with a live ${AGENT_LEASE_MINUTES}-minute session lease that matches the optional audience filters. Repository and machine filters combine with AND; omit both to broadcast globally. The sender is excluded, agents outside the recipient snapshot cannot discover it later, and idempotent retries preserve the original snapshot. Use post_notice instead for shared repository state with a resolve-or-withdraw lifecycle.`,
       BroadcastMessageInputSchema,
       BroadcastMessageOutputSchema,
       {
@@ -218,7 +218,7 @@ function dataTools(): Tool[] {
     toolDefinition(
       "post_notice",
       "Post coordination notice",
-      "Post a repository-scoped handoff, ownership, blocker, or decision notice with a bounded TTL.",
+      "Create one shared repository-scoped handoff, ownership, blocker, or decision record with a bounded TTL. A notice creates no inbox deliveries: current and future agents discover it with list_notices, then explicitly resolve or withdraw it. Use broadcast_message instead for immediate per-recipient unread inbox delivery to the currently active audience.",
       PostNoticeInputSchema,
       NoticeMutationOutputSchema,
       {

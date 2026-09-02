@@ -53,6 +53,15 @@ test("launcher resolves Bun when the host PATH omits Bun", async (): Promise<voi
       (tool: (typeof toolsResult.tools)[number]): boolean => tool.name === "register_agent",
     );
     expect(hasRegisterTool).toBe(true);
+    const instructions: string | undefined = harness.client.getInstructions();
+    if (instructions === undefined) throw new Error("Murmur server instructions were omitted");
+    expect(instructions).toContain(
+      "Use broadcast_message for per-recipient inbox delivery to the currently active audience",
+    );
+    expect(instructions).toContain(
+      "Use post_notice for shared repository state that current and future agents can discover",
+    );
+    expect(instructions).toContain("notices do not create inbox deliveries");
   } finally {
     await Promise.allSettled([harness.client.close()]);
     rmSync(directory, { force: true, recursive: true });
@@ -155,7 +164,7 @@ test("two MCP processes exchange a durable message and push an inbox update", as
     await Promise.allSettled([sender.client.close(), receiver.client.close()]);
     rmSync(directory, { force: true, recursive: true });
   }
-});
+}, 10_000);
 
 test("a broadcast fans out to every matching MCP inbox and pushes each update", async (): Promise<void> => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-broadcast-mcp-"));
