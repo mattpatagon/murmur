@@ -2,6 +2,20 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.12.0.1] - 2026-09-02
+
+### Changed
+
+- Distinguish active-audience broadcasts from shared repository notices in MCP tool descriptions,
+  server instructions, and user documentation: broadcasts create per-recipient unread inbox
+  deliveries, while notices remain discoverable coordination state with an explicit lifecycle.
+
+### For contributors
+
+- Prove that notices create no inbox deliveries and remain visible to agents registered later.
+- Give multi-process and hosted integration scenarios bounded outer budgets that accommodate process
+  startup and coverage instrumentation without weakening their delivery deadlines.
+
 ## [0.12.0.0] - 2026-09-02
 
 ### Added
