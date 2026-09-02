@@ -96,7 +96,7 @@ export type ProxyBroadcastOutput = Record<string, unknown> & {
 
 const MessageContextSchema: z.ZodType<MessageContextDto> = z.strictObject({
   branch: z.string().min(1).max(500).optional(),
-  client: z.enum(["claude", "codex"]).optional(),
+  client: z.enum(["claude", "codex", "connector"]).optional(),
   repository: z
     .string()
     .min(3)

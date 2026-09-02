@@ -1,8 +1,9 @@
 import type { Database, Statement } from "bun:sqlite";
 
+import { migrateSqliteClientNames } from "./sqlite-client-name-migration.js";
 import { type UserVersionRow, UserVersionRowSchema } from "./sqlite-message-rows.js";
 
-const SUPPORTED_SCHEMA_VERSION: number = 11;
+const SUPPORTED_SCHEMA_VERSION: number = 12;
 
 function schemaVersion(database: Database): number {
   const statement: Statement<unknown, []> = database.query("PRAGMA user_version");
@@ -11,8 +12,11 @@ function schemaVersion(database: Database): number {
 }
 
 export function migrateSqliteDatabase(database: Database): void {
-  database.exec("BEGIN IMMEDIATE");
+  database.exec("PRAGMA foreign_keys = OFF");
+  let transactionStarted: boolean = false;
   try {
+    database.exec("BEGIN IMMEDIATE");
+    transactionStarted = true;
     let version: number = schemaVersion(database);
     if (version > SUPPORTED_SCHEMA_VERSION) {
       throw new Error(
@@ -421,10 +425,20 @@ export function migrateSqliteDatabase(database: Database): void {
         INSERT INTO feedback_usage(singleton) VALUES (1);
         PRAGMA user_version = 11;
       `);
+      version = 11;
     }
+    if (version === 11) {
+      migrateSqliteClientNames(database);
+      database.exec("PRAGMA user_version = 12");
+    }
+    const foreignKeyViolation: unknown = database.query("PRAGMA foreign_key_check").get();
+    if (foreignKeyViolation !== null) throw new Error("SQLite migration violated a foreign key");
     database.exec("COMMIT");
+    transactionStarted = false;
   } catch (error: unknown) {
-    database.exec("ROLLBACK");
+    if (transactionStarted) database.exec("ROLLBACK");
     throw error;
+  } finally {
+    database.exec("PRAGMA foreign_keys = ON");
   }
 }

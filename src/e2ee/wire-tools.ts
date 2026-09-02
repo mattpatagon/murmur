@@ -39,7 +39,7 @@ export type E2eeEntitlementState = "enforced" | "off" | "provisioning";
 
 export type E2eeMessageContextDto = {
   readonly branch: string;
-  readonly client: "claude" | "codex";
+  readonly client: "claude" | "codex" | "connector";
   readonly repository: string;
 };
 
@@ -202,7 +202,7 @@ export type GetInboxSummaryOutput = {
 
 export const E2eeMessageContextDtoSchema: z.ZodType<E2eeMessageContextDto> = z.strictObject({
   branch: z.string().min(1).max(500),
-  client: z.enum(["claude", "codex"]),
+  client: z.enum(["claude", "codex", "connector"]),
   repository: RepositoryNameSchema,
 });
 export const E2eeCapabilityInputSchema: z.ZodType<Record<string, never>> = z.strictObject({});

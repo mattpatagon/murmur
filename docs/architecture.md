@@ -65,6 +65,17 @@ The client cannot supply a tenant ID, principal role, server request ID, trace p
 identifier for audit correlation. Each request reauthenticates so revocation and suspension apply
 immediately; matching live sessions are also closed proactively.
 
+Connector OAuth compatibility branches at public discovery and authorization routes. A bounded,
+in-memory authorization code carries no Murmur credential and is bound to the exact client,
+issuer, redirect, MCP resource, scope, and S256 challenge. The token endpoint passes its client
+secret through the same authentication-capacity gate as `/mcp`, accepts only tenant principals,
+atomically consumes the code, and returns the unchanged Murmur token. Connector context is the
+generic, informational `connector` value; it never selects a tenant, role, repository grant, or
+orchestrator policy. The configured canonical HTTPS origin supplies issuer and resource identity
+without trusting proxy headers. Public OAuth requests share global request capacity but leave one
+slot reserved for authenticated MCP, and authorization issuance remains below the number of codes
+that can stay live across its bounded expiry window.
+
 Strict multi-tenant authentication also derives a stable personal identity, optional
 credential-bound repository, and optional orchestrator agent binding. Those authenticated values
 select an orchestrator policy; request headers and MCP arguments cannot select another policy.

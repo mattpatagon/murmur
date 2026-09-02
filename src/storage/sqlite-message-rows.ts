@@ -70,7 +70,7 @@ export type BroadcastRow = {
   readonly audience_repository_name: string | null;
   readonly branch_name: string;
   readonly broadcast_id: string;
-  readonly client_name: "claude" | "codex";
+  readonly client_name: "claude" | "codex" | "connector";
   readonly content: string;
   readonly created_at: string;
   readonly expires_at: string;
@@ -139,7 +139,7 @@ export const BroadcastRowSchema: z.ZodType<BroadcastRow> = z.strictObject({
   audience_repository_name: z.string().nullable(),
   branch_name: z.string(),
   broadcast_id: z.string(),
-  client_name: z.enum(["claude", "codex"]),
+  client_name: z.enum(["claude", "codex", "connector"]),
   content: z.string(),
   created_at: z.string(),
   expires_at: z.string(),

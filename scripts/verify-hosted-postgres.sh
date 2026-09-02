@@ -409,6 +409,7 @@ bunx supabase db advisors \
   --fail-on error
 
 MURMUR_MIGRATION_TEST_ADMIN_URL="$admin_url" bash scripts/verify-populated-upgrade.sh
+MURMUR_MIGRATION_TEST_ADMIN_URL="$admin_url" bash scripts/verify-connector-migration.sh
 if [ "$coverage_mode" = '1' ]; then
   bun run scripts/check-coverage.ts
 fi

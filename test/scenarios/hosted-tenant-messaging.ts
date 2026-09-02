@@ -24,6 +24,11 @@ import {
 import type { HostedTenantScenario } from "./hosted-tenant-provisioning.js";
 
 export async function verifyHostedTenantMessaging(scenario: HostedTenantScenario): Promise<void> {
+  const connectorContext: Record<string, string> = {
+    branch: "connector/hosted-e2e",
+    client: "connector",
+    repository: "mattpatagon/murmur",
+  };
   const currentAgent: GetAgentOutput = await callTool(
     scenario.server.mcpUrl,
     scenario.agentAToken.token.secret,
@@ -85,6 +90,7 @@ export async function verifyHostedTenantMessaging(scenario: HostedTenantScenario
     "send_message",
     {
       content: "tenant A message",
+      context: connectorContext,
       idempotency_key: idempotencyKey,
       recipient_id: scenario.receiverA,
       sender_id: scenario.senderA,
@@ -129,6 +135,7 @@ export async function verifyHostedTenantMessaging(scenario: HostedTenantScenario
   streamAAbortController.abort();
   streamBAbortController.abort();
   expect(sentA.message.content).toBe("tenant A message");
+  expect(sentA.message.context).toEqual(connectorContext);
   expect(sentB.message.content).toBe("tenant B message");
   expect(sentA.message.sequence).toBe(1);
   expect(sentB.message.sequence).toBe(1);
@@ -140,6 +147,7 @@ export async function verifyHostedTenantMessaging(scenario: HostedTenantScenario
     "send_message",
     {
       content: "tenant A message",
+      context: connectorContext,
       idempotency_key: idempotencyKey,
       recipient_id: scenario.receiverA,
       sender_id: scenario.senderA,
@@ -157,6 +165,7 @@ export async function verifyHostedTenantMessaging(scenario: HostedTenantScenario
       "send_message",
       {
         content: "conflicting tenant A message",
+        context: connectorContext,
         idempotency_key: idempotencyKey,
         recipient_id: scenario.receiverA,
         sender_id: scenario.senderA,
@@ -174,6 +183,7 @@ export async function verifyHostedTenantMessaging(scenario: HostedTenantScenario
     {
       audience: {},
       content: "tenant A organization broadcast",
+      context: connectorContext,
       idempotency_key: broadcastKey,
       sender_id: scenario.senderA,
     },
@@ -189,6 +199,7 @@ export async function verifyHostedTenantMessaging(scenario: HostedTenantScenario
     {
       audience: {},
       content: "tenant A organization broadcast",
+      context: connectorContext,
       idempotency_key: broadcastKey,
       sender_id: scenario.senderA,
     },
@@ -206,6 +217,7 @@ export async function verifyHostedTenantMessaging(scenario: HostedTenantScenario
       {
         audience: {},
         content: "conflicting tenant A broadcast",
+        context: connectorContext,
         idempotency_key: broadcastKey,
         sender_id: scenario.senderA,
       },

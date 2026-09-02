@@ -136,7 +136,7 @@ jobs:
             --region "$REGION" \
             --image "$IMAGE" \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
-            --update-env-vars MURMUR_AUTH_MODE=legacy,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_CONCURRENT_AUTHENTICATIONS=4,MURMUR_MAX_STREAM_LIFETIME_MS=3300000,MURMUR_RELEASE_REVISION="$GITHUB_SHA" \
+            --update-env-vars MURMUR_AUTH_MODE=legacy,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_CONCURRENT_AUTHENTICATIONS=4,MURMUR_MAX_STREAM_LIFETIME_MS=3300000,MURMUR_PUBLIC_ORIGIN=https://api.usemurmur.dev,MURMUR_RELEASE_REVISION="$GITHUB_SHA" \
             --set-secrets MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:"$RUNTIME_DATABASE_SECRET_VERSION",MURMUR_API_TOKEN=MURMUR_API_TOKEN:latest,/etc/murmur/secrets/database-ca.pem=MURMUR_DATABASE_CA:latest \
             --concurrency 80 \
             --max-instances 1 \
@@ -237,7 +237,7 @@ jobs:
             --region "$REGION" \
             --image "$IMAGE" \
             --service-account "$RUNTIME_SERVICE_ACCOUNT" \
-            --update-env-vars MURMUR_AUTH_MODE="$auth_mode",MURMUR_ALLOW_BOOTSTRAP="$allow_bootstrap",MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_CONCURRENT_AUTHENTICATIONS=4,MURMUR_MAX_STREAM_LIFETIME_MS=3300000,MURMUR_RELEASE_REVISION="$GITHUB_SHA" \
+            --update-env-vars MURMUR_AUTH_MODE="$auth_mode",MURMUR_ALLOW_BOOTSTRAP="$allow_bootstrap",MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_CONCURRENT_AUTHENTICATIONS=4,MURMUR_MAX_STREAM_LIFETIME_MS=3300000,MURMUR_PUBLIC_ORIGIN=https://api.usemurmur.dev,MURMUR_RELEASE_REVISION="$GITHUB_SHA" \
             --set-secrets "$secret_mapping" \
             --concurrency 80 \
             --max-instances 1 \
@@ -287,7 +287,7 @@ jobs:
           gcloud run services update "$SERVICE" \
             --project "$PROJECT_ID" \
             --region "$REGION" \
-            --update-env-vars MURMUR_AUTH_MODE=multi-tenant,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_CONCURRENT_AUTHENTICATIONS=4,MURMUR_MAX_STREAM_LIFETIME_MS=3300000,MURMUR_RELEASE_REVISION="$GITHUB_SHA" \
+            --update-env-vars MURMUR_AUTH_MODE=multi-tenant,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_CONCURRENT_AUTHENTICATIONS=4,MURMUR_MAX_STREAM_LIFETIME_MS=3300000,MURMUR_PUBLIC_ORIGIN=https://api.usemurmur.dev,MURMUR_RELEASE_REVISION="$GITHUB_SHA" \
             --set-secrets MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:"$RUNTIME_DATABASE_SECRET_VERSION",/etc/murmur/secrets/database-ca.pem=MURMUR_DATABASE_CA:latest \
             --quiet
           unset bootstrap_database_credential database_url bootstrap_token legacy_token operator_token
@@ -426,7 +426,7 @@ jobs:
           gcloud run services update "$SERVICE" \
             --project "$PROJECT_ID" \
             --region "$REGION" \
-            --update-env-vars MURMUR_AUTH_MODE=multi-tenant,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_CONCURRENT_AUTHENTICATIONS=4,MURMUR_MAX_STREAM_LIFETIME_MS=3300000,MURMUR_RELEASE_REVISION="$GITHUB_SHA",MURMUR_TENANT_CONTRACT_VERSION=2 \
+            --update-env-vars MURMUR_AUTH_MODE=multi-tenant,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_CONCURRENT_AUTHENTICATIONS=4,MURMUR_MAX_STREAM_LIFETIME_MS=3300000,MURMUR_PUBLIC_ORIGIN=https://api.usemurmur.dev,MURMUR_RELEASE_REVISION="$GITHUB_SHA",MURMUR_TENANT_CONTRACT_VERSION=2 \
             --set-secrets MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:"$RUNTIME_DATABASE_SECRET_VERSION",/etc/murmur/secrets/database-ca.pem=MURMUR_DATABASE_CA:latest \
             --quiet
 

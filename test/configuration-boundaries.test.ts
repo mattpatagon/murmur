@@ -9,8 +9,8 @@ import { StorageCorruptionError, UnsupportedDatabaseError } from "../src/domain/
 import { AgentId, TenantId } from "../src/domain/value-objects.js";
 import {
   createHostedAuthenticator,
-  InvalidBootstrapFlagError,
   InvalidBootstrapConfigurationError,
+  InvalidBootstrapFlagError,
   InvalidHostedAuthModeError,
   InvalidTenantContractVersionError,
   MissingHostedDatabaseError,
@@ -92,6 +92,11 @@ test("HTTP configuration parses every bound and normalizes origins", (): void =>
     MURMUR_MAX_REQUEST_BYTES: "22",
     MURMUR_MAX_SESSIONS: "23",
     MURMUR_MAX_SESSIONS_PER_TENANT: "24",
+    MURMUR_OAUTH_ALLOWED_REDIRECT_URIS: "https://custom.example/oauth/callback",
+    MURMUR_OAUTH_AUTHORIZATION_CODE_LIFETIME_MS: "30",
+    MURMUR_OAUTH_AUTHORIZATION_RATE_LIMIT_PER_MINUTE: "32",
+    MURMUR_OAUTH_MAX_AUTHORIZATION_CODES: "31",
+    MURMUR_PUBLIC_ORIGIN: "https://api.example.com",
     MURMUR_RATE_LIMIT_PER_MINUTE: "25",
     MURMUR_REGISTRATION_RATE_LIMIT_PER_MINUTE: "26",
     MURMUR_SESSION_IDLE_MS: "27",
@@ -99,6 +104,11 @@ test("HTTP configuration parses every bound and normalizes origins", (): void =>
     PORT: "29",
   });
   expect([...config.allowedOrigins]).toEqual(["https://one.example", "https://two.example"]);
+  expect([...config.oauthAllowedRedirectUris]).toEqual([
+    "https://chatgpt.com/connector_platform_oauth_redirect",
+    "https://grok.com/oauth/callback",
+    "https://custom.example/oauth/callback",
+  ]);
   expect(config).toMatchObject({
     authenticationWaitMs: 11,
     hostname: "127.0.0.1",
@@ -115,6 +125,10 @@ test("HTTP configuration parses every bound and normalizes origins", (): void =>
     maxSessions: 23,
     maxSessionsPerTenant: 24,
     maxStreamLifetimeMs: 18,
+    oauthAuthorizationCodeLifetimeMs: 30,
+    oauthAuthorizationRateLimitPerMinute: 32,
+    oauthMaxAuthorizationCodes: 31,
+    oauthPublicOrigin: "https://api.example.com",
     rateLimitPerMinute: 25,
     registrationRateLimitPerMinute: 26,
     requestedPort: 29,
@@ -146,6 +160,35 @@ test("HTTP configuration parses every bound and normalizes origins", (): void =>
   expect(
     (): HttpServerConfig =>
       parseHttpServerConfig({ MURMUR_REGISTRATION_RATE_LIMIT_PER_MINUTE: "0" }),
+  ).toThrow();
+  expect(
+    (): HttpServerConfig =>
+      parseHttpServerConfig({ MURMUR_OAUTH_ALLOWED_REDIRECT_URIS: "http://unsafe.example/cb" }),
+  ).toThrow();
+  expect(
+    (): HttpServerConfig =>
+      parseHttpServerConfig({
+        MURMUR_OAUTH_ALLOWED_REDIRECT_URIS: "https://safe.example/cb?unexpected=query",
+      }),
+  ).toThrow();
+  expect(
+    (): HttpServerConfig =>
+      parseHttpServerConfig({ MURMUR_OAUTH_AUTHORIZATION_CODE_LIFETIME_MS: "600001" }),
+  ).toThrow();
+  expect(
+    (): HttpServerConfig => parseHttpServerConfig({ MURMUR_OAUTH_MAX_AUTHORIZATION_CODES: "4097" }),
+  ).toThrow();
+  expect(
+    (): HttpServerConfig =>
+      parseHttpServerConfig({ MURMUR_OAUTH_AUTHORIZATION_RATE_LIMIT_PER_MINUTE: "0" }),
+  ).toThrow();
+  expect(
+    (): HttpServerConfig =>
+      parseHttpServerConfig({ MURMUR_PUBLIC_ORIGIN: "http://api.example.com" }),
+  ).toThrow();
+  expect(
+    (): HttpServerConfig =>
+      parseHttpServerConfig({ MURMUR_PUBLIC_ORIGIN: "https://api.example.com/unexpected" }),
   ).toThrow();
 });
 

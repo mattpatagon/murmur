@@ -110,6 +110,11 @@ export class HttpCapacityController {
     };
   }
 
+  public reservePublicRequest(identity: string): (() => void) | null {
+    if (this.activeRequests >= this.config.maxActiveRequests - 1) return null;
+    return this.reserveRequest(identity, null);
+  }
+
   public reserveStream(principalIdentity: string, tenantId: string | null): (() => void) | null {
     const principalStreams: number = this.activeStreamsByPrincipal.get(principalIdentity) ?? 0;
     const tenantStreams: number =

@@ -95,6 +95,29 @@ describe("HTTP capacity controller", (): void => {
     releaseC();
   });
 
+  test("public request reservations leave one global slot for authenticated work", (): void => {
+    const controller: HttpCapacityController = capacity(new FakeTimeSource(), {
+      MURMUR_MAX_ACTIVE_REQUESTS: "2",
+      MURMUR_MAX_ACTIVE_REQUESTS_PER_PRINCIPAL: "2",
+    });
+    const releasePublic: () => void = requiredRelease(
+      controller.reservePublicRequest("oauth-public"),
+    );
+    expect(controller.reservePublicRequest("oauth-public")).toBeNull();
+    const releaseAuthenticated: () => void = requiredRelease(
+      controller.reserveRequest("authenticated", "tenant-a"),
+    );
+    expect(controller.reserveRequest("another", "tenant-b")).toBeNull();
+    releasePublic();
+    releaseAuthenticated();
+
+    const singleSlot: HttpCapacityController = capacity(new FakeTimeSource(), {
+      MURMUR_MAX_ACTIVE_REQUESTS: "1",
+    });
+    expect(singleSlot.reservePublicRequest("oauth-public")).toBeNull();
+    requiredRelease(singleSlot.reserveRequest("authenticated", "tenant-a"))();
+  });
+
   test("stream reservations enforce global, principal, and tenant limits independently", (): void => {
     const controller: HttpCapacityController = capacity(new FakeTimeSource(), {
       MURMUR_MAX_ACTIVE_STREAMS: "3",

@@ -45,3 +45,40 @@ test("feedback migration is tenant-isolated, append-only at runtime, and quota b
   expect(contents).toContain("usage.feedback_content_bytes + content_bytes <= 67108864");
   expect(contents).toContain("tenant retained-feedback quota exceeded");
 });
+
+test("connector provenance constraints are staged, bounded, and restart-safe", async (): Promise<void> => {
+  const migrationNames: readonly string[] = [
+    "20260902175459_allow_connector_client.sql",
+    "20260902175500_validate_message_connector_client.sql",
+    "20260902175501_validate_broadcast_connector_client.sql",
+    "20260902175502_validate_feedback_connector_client.sql",
+    "20260902175503_finalize_connector_client_constraints.sql",
+  ];
+  const migrations: readonly string[] = await Promise.all(
+    migrationNames.map(
+      async (name: string): Promise<string> => await Bun.file(`supabase/migrations/${name}`).text(),
+    ),
+  );
+  migrations.forEach((contents: string): void => {
+    expect(contents.match(/^begin;$/gmu)).toHaveLength(1);
+    expect(contents.match(/^commit;$/gmu)).toHaveLength(1);
+    expect(contents).toContain("set local lock_timeout = '5s'");
+  });
+
+  const expansion: string | undefined = migrations[0];
+  const finalization: string | undefined = migrations[4];
+  if (expansion === undefined || finalization === undefined) {
+    throw new Error("Connector constraint migration phases are missing");
+  }
+  expect(expansion.match(/not valid/gu)).toHaveLength(3);
+  expect(expansion.match(/'connector'/gu)).toHaveLength(3);
+  expect(expansion).not.toContain("validate constraint");
+  migrations.slice(1, 4).forEach((contents: string): void => {
+    expect(contents.match(/validate constraint/gu)).toHaveLength(1);
+    expect(contents).not.toContain("drop constraint");
+  });
+  expect(finalization.match(/drop constraint/gu)).toHaveLength(3);
+  expect(finalization.match(/rename constraint/gu)).toHaveLength(3);
+  expect(migrations.join("\n")).not.toContain("chatgpt");
+  expect(migrations.join("\n")).not.toContain("grok");
+});

@@ -9,13 +9,20 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { AgentClient, BranchName, RepositoryName, TenantId } from "./domain/value-objects.js";
 import { createHostedAuthenticator, type HostedAuthenticator } from "./hosted/authenticator.js";
 import type {
-  CredentialAdmission,
   HostedControlPlane,
   HostedPrincipal,
   IssuedToken,
   TenantSummary,
 } from "./hosted/control-plane.js";
-import { hashTokenSecret } from "./hosted/token-secret.js";
+import { ConnectorAuthorizationCodeStore } from "./http/connector-authorization-code-store.js";
+import {
+  connectorProtectedResourceMetadataUrl,
+  createConnectorOAuthHandler,
+} from "./http/connector-oauth.js";
+import {
+  authenticateHostedCredential,
+  type HostedAuthenticationResult,
+} from "./http/hosted-credential-authentication.js";
 import {
   HttpCapacityController,
   SYSTEM_TIME_SOURCE,
@@ -44,13 +51,13 @@ import {
   unauthorizedResponse,
 } from "./http/http-request.js";
 import { createHttpRequestHandler } from "./http/http-router.js";
+import type { HttpServerDependencies, MurmurHttpServer } from "./http/http-server-contracts.js";
 import {
   cleanupObservabilityStartup,
   cleanupServerStartup,
   cleanupStoreStartup,
   shutdownHttpResources,
 } from "./http/http-server-resources.js";
-import type { HttpServerDependencies, MurmurHttpServer } from "./http/http-server-contracts.js";
 import type { HostedApplicationRequest } from "./http/murmur-application-factory.js";
 import { createHostedMurmurApplication } from "./http/murmur-application-factory.js";
 import type { RemoteSession } from "./http/remote-session.js";
@@ -140,6 +147,26 @@ export async function startHttpServer(
               registrationSecret,
             ),
   });
+  const connectorAuthorizationCodes: ConnectorAuthorizationCodeStore =
+    new ConnectorAuthorizationCodeStore(
+      timeSource,
+      config.oauthAuthorizationCodeLifetimeMs,
+      config.oauthMaxAuthorizationCodes,
+    );
+  const handleConnectorOAuth: (
+    request: Request,
+    observation: RequestObservation,
+  ) => Promise<Response> = createConnectorOAuthHandler({
+    allowedRedirectUris: config.oauthAllowedRedirectUris,
+    authenticator,
+    authorizationCodeLifetimeMs: config.oauthAuthorizationCodeLifetimeMs,
+    authorizationRateLimitPerMinute: config.oauthAuthorizationRateLimitPerMinute,
+    capacity,
+    codeStore: connectorAuthorizationCodes,
+    maximumAuthorizationCodes: config.oauthMaxAuthorizationCodes,
+    publicOrigin: config.oauthPublicOrigin,
+    tenantRateLimitPerMinute,
+  });
   let initializingSessions: number = 0;
   let stopped: boolean = false;
   const expireIdleSessions: (now: number) => Promise<void> = async (now: number): Promise<void> => {
@@ -162,42 +189,26 @@ export async function startHttpServer(
       if (token === null) {
         observation.recordCredential("missing");
         observation.recordAuthentication("invalid");
-        return unauthorizedResponse();
+        return unauthorizedResponse(
+          connectorProtectedResourceMetadataUrl(request, config.oauthPublicOrigin),
+        );
       }
-      const registeredAdmission: CredentialAdmission | null =
-        authenticator.credentialAdmission(token);
-      const admittedTenantKey: string | null =
-        registeredAdmission === null ? null : registeredAdmission.tenantKey;
-      const admissionKey: string =
-        registeredAdmission === null
-          ? hashTokenSecret(token).toString("base64url")
-          : registeredAdmission.key;
-      const knownCredential: boolean = registeredAdmission !== null;
-      observation.recordCredential(knownCredential ? "known" : "unknown");
-      const releaseAuthenticationCapacity: (() => void) | null =
-        await capacity.reserveAuthentication(admissionKey, admittedTenantKey, knownCredential);
-      if (releaseAuthenticationCapacity === null) {
-        observation.recordAuthenticationCapacity("rejected");
-        return authenticationCapacityResponse();
-      }
-      observation.recordAuthenticationCapacity("allowed");
-      let principal: HostedPrincipal | null;
-      try {
-        principal = await authenticator.authenticate(token);
-      } catch (error: unknown) {
-        observation.recordAuthentication("backend_error");
-        observation.recordError(error);
-        logSafeError("Murmur authentication backend error", error);
+      const authentication: HostedAuthenticationResult = await authenticateHostedCredential(
+        token,
+        authenticator,
+        capacity,
+        observation,
+      );
+      if (authentication.kind === "capacity") return authenticationCapacityResponse();
+      if (authentication.kind === "unavailable") {
         return jsonResponse(503, { error: "Authentication service unavailable" });
-      } finally {
-        releaseAuthenticationCapacity();
       }
-      if (principal === null) {
-        observation.recordAuthentication("invalid");
-        return unauthorizedResponse();
+      if (authentication.kind === "invalid") {
+        return unauthorizedResponse(
+          connectorProtectedResourceMetadataUrl(request, config.oauthPublicOrigin),
+        );
       }
-      observation.recordAuthentication("authenticated");
-      observation.recordPrincipal(principal);
+      const principal: HostedPrincipal = authentication.principal;
 
       const principalIdentity: string = authenticator.identity(principal);
       const tenantId: string | null = principal.kind === "tenant" ? principal.tenantId.value : null;
@@ -422,6 +433,7 @@ export async function startHttpServer(
         handleMcpRequest,
         handleTenantRegistration,
         config.releaseMetadata,
+        handleConnectorOAuth,
       ),
       hostname,
       port: requestedPort,
@@ -452,6 +464,7 @@ export async function startHttpServer(
       if (stopped) return;
       stopped = true;
       capacity.stop();
+      connectorAuthorizationCodes.clear();
       const activeSessions: [string, RemoteSession][] = Array.from(sessions.entries());
       await shutdownHttpResources(
         bunServer,
@@ -465,29 +478,23 @@ export async function startHttpServer(
   };
 }
 if (import.meta.main) {
-  startHttpServer()
-    .then((server: MurmurHttpServer): void => {
-      let shuttingDown: boolean = false;
-      const shutdown: () => Promise<void> = async (): Promise<void> => {
-        if (shuttingDown) return;
-        shuttingDown = true;
-        await server.stop();
+  void startHttpServer().then(
+    (server: MurmurHttpServer): void => {
+      let stopped: boolean = false;
+      const stop: () => void = (): void => {
+        if (stopped) return;
+        stopped = true;
+        void server.stop().catch((error: unknown): void => {
+          logSafeError("Murmur HTTP shutdown failed", error);
+          process.exitCode = 1;
+        });
       };
-      process.once("SIGINT", (): void => {
-        void shutdown().catch((error: unknown): void => {
-          logSafeError("Murmur HTTP shutdown failed", error);
-          process.exitCode = 1;
-        });
-      });
-      process.once("SIGTERM", (): void => {
-        void shutdown().catch((error: unknown): void => {
-          logSafeError("Murmur HTTP shutdown failed", error);
-          process.exitCode = 1;
-        });
-      });
-    })
-    .catch((error: unknown): void => {
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
+    },
+    (error: unknown): void => {
       logSafeError("Murmur HTTP startup failed", error);
       process.exitCode = 1;
-    });
+    },
+  );
 }
