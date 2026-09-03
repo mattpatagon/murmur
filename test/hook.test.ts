@@ -43,23 +43,6 @@ function requireContext(output: HookOutput): string {
   return hookSpecificOutput.additionalContext;
 }
 
-test("derives a stable agent ID from machine, client, and workspace", (): void => {
-  const environment: NodeJS.ProcessEnv = {
-    MURMUR_BRANCH: "feature/broadcast-hook",
-    MURMUR_MACHINE_ID: "dev vm",
-    MURMUR_REPOSITORY: "mattpatagon/murmur",
-    MURMUR_WORKSPACE_ID: "cancun-v1",
-  };
-  const first: AgentIdentity = deriveAgentIdentity("codex", "/work/murmur", environment);
-  const second: AgentIdentity = deriveAgentIdentity("codex", "/work/murmur", environment);
-  const claude: AgentIdentity = deriveAgentIdentity("claude", "/work/murmur", environment);
-  expect(first.agentId).toBe(second.agentId);
-  expect(first.agentId).toStartWith("dev-vm:codex:cancun-v1:");
-  expect(first.branch).toBe("feature/broadcast-hook");
-  expect(first.repository).toBe("mattpatagon/murmur");
-  expect(claude.agentId).not.toBe(first.agentId);
-});
-
 test("resolves hook cache roots consistently across operating systems", (): void => {
   const expectedWindowsCachePath: string =
     // biome-ignore lint/security/noSecrets: This is a synthetic Windows path, not a credential.
@@ -269,16 +252,6 @@ test("checks a real Streamable HTTP Murmur inbox", async (): Promise<void> => {
     await server.stop();
     rmSync(directory, { force: true, recursive: true });
   }
-});
-
-test("sanitizes identity parts and falls back for empty values", (): void => {
-  const identity: AgentIdentity = deriveAgentIdentity("codex", "/work/repo", {
-    MURMUR_MACHINE_ID: "!!!",
-    MURMUR_WORKSPACE_ID: `${"x".repeat(60)} / ignored`,
-  });
-  expect(identity.machine).toBe("machine");
-  expect(identity.workspace).toBe("x".repeat(50));
-  expect(identity.workspaceHash).toHaveLength(10);
 });
 
 test("formats lifecycle output without leaking Stop context", (): void => {

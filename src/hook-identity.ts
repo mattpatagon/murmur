@@ -29,12 +29,14 @@ export function deriveAgentIdentity(
   client: MurmurClient,
   cwd: string,
   environment: NodeJS.ProcessEnv = process.env,
+  sessionId?: string | undefined,
 ): AgentIdentity {
   const resolvedWorkspace: string = resolve(cwd);
-  const workspaceHash: string = createHash("sha256")
-    .update(resolvedWorkspace)
-    .digest("hex")
-    .slice(0, 10);
+  const hash: ReturnType<typeof createHash> = createHash("sha256").update(resolvedWorkspace);
+  if (sessionId !== undefined && sessionId.trim() !== "") {
+    hash.update("\u0000").update(sessionId);
+  }
+  const workspaceHash: string = hash.digest("hex").slice(0, 10);
   const machine: string = sanitizedPart(environment["MURMUR_MACHINE_ID"] ?? hostname(), "machine");
   const workspace: string = sanitizedPart(
     environment["MURMUR_WORKSPACE_ID"] ?? basename(resolvedWorkspace),

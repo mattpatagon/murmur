@@ -1,8 +1,7 @@
+import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-
-import { expect, test } from "bun:test";
 
 type CliResult = {
   readonly exitCode: number;
@@ -40,6 +39,27 @@ test("rejects invalid setup arguments and insecure remote URLs", (): void => {
   expect(runCli(["setup", "--codex"]).stderr).toContain("Rerun with --user");
   expect(runCli(["setup", "--user", "--url"]).stderr).toContain("--url requires a value");
   expect(runCli(["setup", "--user", "--unknown"]).stderr).toContain("Unknown setup option");
+  expect(
+    runCli([
+      "setup",
+      "--user",
+      "--vault-path",
+      "/tmp/murmur-vault.sqlite",
+      "--hook-executable",
+      hookPath,
+    ]).stderr,
+  ).toContain("--vault-path requires --e2ee and an absolute path");
+  expect(
+    runCli([
+      "setup",
+      "--user",
+      "--e2ee",
+      "--vault-path",
+      "relative-vault.sqlite",
+      "--hook-executable",
+      hookPath,
+    ]).stderr,
+  ).toContain("--vault-path requires --e2ee and an absolute path");
   expect(
     runCli(["setup", "--user", "--url", "http://remote.example/mcp", "--hook-executable", hookPath])
       .stderr,
@@ -107,6 +127,7 @@ test("selects one client and reports an idempotent second setup", (): void => {
 test("configures E2E clients through a local proxy without copying the token", (): void => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-cli-e2ee-"));
   const proxyPath: string = join(directory, "murmur-e2ee-proxy");
+  const vaultPath: string = join(directory, "custom vault", "vault.sqlite");
   try {
     writeFileSync(proxyPath, "#!/usr/bin/env bun\n");
     const result: CliResult = runCli(
@@ -119,6 +140,8 @@ test("configures E2E clients through a local proxy without copying the token", (
         hookPath,
         "--proxy-executable",
         proxyPath,
+        "--vault-path",
+        vaultPath,
       ],
       {
         CLAUDE_CONFIG_DIR: join(directory, "claude"),
@@ -136,6 +159,7 @@ test("configures E2E clients through a local proxy without copying the token", (
     ].join("\n");
     expect(combined).toContain(proxyPath);
     expect(combined).toContain("--e2ee");
+    expect(combined.match(/custom vault/gu)).toHaveLength(12);
     expect(combined).not.toContain("must-not-be-written");
   } finally {
     rmSync(directory, { force: true, recursive: true });

@@ -167,6 +167,9 @@ export MURMUR_API_TOKEN='...'
 murmur setup --user --e2ee
 ```
 
+Add `--vault-path /absolute/private/path/vault.sqlite` to make setup configure that same custom
+vault for both the proxy and lifecycle hooks.
+
 Setup stores only the token environment-variable reference and creates no key. Restart the MCP
 host and call `register_agent`; the proxy then creates an owner-only local vault, publishes public
 certificates and prekeys, and keeps every private key on that endpoint. Obtain the full
@@ -299,10 +302,20 @@ maintainers even when agent messages use E2E encryption. Never include credentia
 vulnerability details, sensitive production data, or private message content.
 
 `murmur setup --user` installs passive hooks for session start, prompt/tool activity, Stop, and
-SessionEnd. Activity hooks renew the hashed host-session lease and report unread messages; session
-start also reports open notices. Stop and SessionEnd use the generation saved by the matching
-registration to end that hashed lease plus the compatibility `default` lease. If that exact cached
-generation is unavailable, the hook makes no destructive lifecycle call and the lease expires.
+SessionEnd. The automatic agent ID hashes both the resolved checkout path and the host-provided
+session ID. Repeated hooks in one session therefore keep one opaque identity, while concurrent
+Codex or Claude sessions in the same checkout register independently without exposing either raw
+host session ID. Hosts that omit a session ID retain the checkout-only compatibility identity.
+Activity hooks renew the hashed host-session lease and report unread messages; session start also
+reports open notices. Stop uses the generation saved by the matching registration to end that
+hashed lease plus the compatibility `default` lease, while SessionEnd closes the session-scoped
+automatic identity so sequential host sessions release open-agent capacity. Expired local E2E
+identities and identities retired by SessionEnd are reclaimed after the 30-day message-retention
+window unless a pending outbox item still needs the sender key. The local vault retains at most
+10,000 agent identities, matching the durable retained-agent bound, and preserves bounded signed
+revocation tombstones needed by a later registration of the same identity.
+If the exact cached generation is unavailable, the hook makes no destructive lifecycle call and the
+lease expires.
 
 ## MCP tools
 

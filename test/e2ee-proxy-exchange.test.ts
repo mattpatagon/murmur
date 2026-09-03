@@ -12,7 +12,7 @@ import {
   Instant as InstantValue,
   RepositoryName,
 } from "../src/domain/value-objects.js";
-import { trustPeerFingerprint } from "../src/e2ee/local-commands.js";
+import { revokeLocalAgentKey, trustPeerFingerprint } from "../src/e2ee/local-commands.js";
 import { LocalE2eeVault } from "../src/e2ee/local-vault.js";
 import type { StoredPrekey, StoredRootKey } from "../src/e2ee/local-vault-rows.js";
 import type { ProxyInboxOutput, ProxySendMessageOutput } from "../src/e2ee/proxy-contracts.js";
@@ -229,6 +229,8 @@ test("proxy service delegates bounded lifecycle operations and fails closed afte
         reason: "completed",
       }),
     ).toMatchObject({ agent: { state: "closed" }, already_closed: false });
+    vault.purgeExpired("2026-09-10T20:00:00.000Z");
+    expect(vault.keys.getAgent(SENDER_ID)).toBeNull();
     await expect(proxy.getOrchestrator({})).rejects.toThrow(
       "Encrypted orchestration is unavailable",
     );
@@ -240,6 +242,40 @@ test("proxy service delegates bounded lifecycle operations and fails closed afte
     await expect(proxy.listAgents({ limit: 10, state: "all" })).rejects.toThrow(
       "local E2E proxy is closed",
     );
+  } finally {
+    await proxy.close().catch((_error: unknown): void => undefined);
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("retired identity reclamation preserves hosted revocation continuity", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-e2ee-revocation-retire-"));
+  const vault: LocalE2eeVault = new LocalE2eeVault(join(directory, "lifecycle.sqlite"), "linux");
+  const remote: MemoryE2eeRemote = new MemoryE2eeRemote(new MemoryE2eeBackend());
+  const proxy: E2eeProxyService = service(vault, remote, "example/lifecycle", "feature/lifecycle");
+  try {
+    const initial: RegisterAgentOutput = await proxy.registerAgent({ agent_id: SENDER_ID });
+    await revokeLocalAgentKey(
+      vault,
+      SENDER_ID,
+      "Retain this signed incident revocation after endpoint retirement.",
+      InstantValue.parse(NOW_TEXT),
+    );
+    await proxy.registerAgent({ agent_id: SENDER_ID });
+    expect(vault.keys.listAgentKeyRevocations(SENDER_ID)).toHaveLength(1);
+
+    await proxy.closeAgent({
+      agent_id: SENDER_ID,
+      expected_generation: initial.agent.generation,
+      reason: "completed",
+    });
+    vault.purgeExpired("2026-09-10T20:00:00.000Z");
+    expect(vault.keys.getAgent(SENDER_ID)).toBeNull();
+    expect(vault.keys.listAgentKeyRevocations(SENDER_ID)).toHaveLength(1);
+
+    const reopened: RegisterAgentOutput = await proxy.registerAgent({ agent_id: SENDER_ID });
+    expect(reopened.agent.state).toBe("active");
+    expect(vault.keys.listAgentKeyRevocations(SENDER_ID)).toHaveLength(1);
   } finally {
     await proxy.close().catch((_error: unknown): void => undefined);
     rmSync(directory, { force: true, recursive: true });

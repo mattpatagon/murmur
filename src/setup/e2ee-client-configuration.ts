@@ -67,8 +67,18 @@ function exactStringArray(value: unknown, expected: readonly string[]): boolean 
   );
 }
 
-function proxyArguments(url: string, client: "claude" | "codex"): readonly string[] {
-  return ["--url", url, "--client", client];
+function proxyArguments(
+  url: string,
+  client: "claude" | "codex",
+  vaultPath?: string | undefined,
+): readonly string[] {
+  return [
+    "--url",
+    url,
+    "--client",
+    client,
+    ...(vaultPath === undefined ? [] : ["--vault-path", vaultPath]),
+  ];
 }
 
 function codexMurmurServer(content: string): JsonRecord | null {
@@ -86,11 +96,11 @@ function codexMurmurServer(content: string): JsonRecord | null {
   return isRecord(murmur) ? murmur : null;
 }
 
-function codexProxyBlock(url: string, executable: string): string {
+function codexProxyBlock(url: string, executable: string, vaultPath?: string | undefined): string {
   return [
     "[mcp_servers.murmur]",
     `command = ${JSON.stringify(executable)}`,
-    `args = ${JSON.stringify(proxyArguments(url, "codex"))}`,
+    `args = ${JSON.stringify(proxyArguments(url, "codex", vaultPath))}`,
   ].join("\n");
 }
 
@@ -99,8 +109,9 @@ export function configureCodexE2eeMcp(
   url: string,
   executable: string,
   replace: boolean = false,
+  vaultPath?: string | undefined,
 ): string {
-  const expectedArguments: readonly string[] = proxyArguments(url, "codex");
+  const expectedArguments: readonly string[] = proxyArguments(url, "codex", vaultPath);
   const existing: JsonRecord | null = codexMurmurServer(current);
   if (
     existing !== null &&
@@ -119,12 +130,16 @@ export function configureCodexE2eeMcp(
     );
   }
   const prefix: string = withoutMurmur.trimEnd();
-  return `${prefix === "" ? "" : `${prefix}\n\n`}${codexProxyBlock(url, executable)}\n`;
+  return `${prefix === "" ? "" : `${prefix}\n\n`}${codexProxyBlock(url, executable, vaultPath)}\n`;
 }
 
-function claudeProxyServer(url: string, executable: string): JsonRecord {
+function claudeProxyServer(
+  url: string,
+  executable: string,
+  vaultPath?: string | undefined,
+): JsonRecord {
   return {
-    args: proxyArguments(url, "claude"),
+    args: proxyArguments(url, "claude", vaultPath),
     command: executable,
     type: "stdio",
   };
@@ -135,13 +150,14 @@ export function configureClaudeE2eeMcp(
   url: string,
   executable: string,
   replace: boolean = false,
+  vaultPath?: string | undefined,
 ): JsonRecord {
   const result: JsonRecord = structuredClone(current);
   const servers: JsonRecord = isRecord(result["mcpServers"])
     ? structuredClone(result["mcpServers"])
     : {};
   const existing: unknown = servers["murmur"];
-  const expectedArguments: readonly string[] = proxyArguments(url, "claude");
+  const expectedArguments: readonly string[] = proxyArguments(url, "claude", vaultPath);
   if (
     isRecord(existing) &&
     existing["type"] === "stdio" &&
@@ -157,7 +173,7 @@ export function configureClaudeE2eeMcp(
       "Claude already has a different Murmur MCP configuration. Inspect it or rerun with --replace.",
     );
   }
-  servers["murmur"] = claudeProxyServer(url, executable);
+  servers["murmur"] = claudeProxyServer(url, executable, vaultPath);
   result["mcpServers"] = servers;
   return result;
 }

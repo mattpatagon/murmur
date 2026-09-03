@@ -169,7 +169,12 @@ export class E2eeProxyService implements E2eeProxyOperations {
 
   public async closeAgent(input: CloseAgentInput): Promise<CloseAgentOutput> {
     this.#ensureOpen();
-    return await this.#dependencies.remote.closeAgent(input);
+    const output: CloseAgentOutput = await this.#dependencies.remote.closeAgent(input);
+    this.#dependencies.vault.keys.retireAgent(
+      input.agent_id,
+      this.#dependencies.clock.now().toISOString(),
+    );
+    return output;
   }
 
   public async submitFeedback(input: SubmitFeedbackInput): Promise<SubmitFeedbackOutput> {

@@ -88,10 +88,20 @@ server cannot determine must be supplied by the client before a send or broadcas
 
 ## Data model and consistency
 
-Agents register a stable ID plus machine/client/workspace metadata. The ID owns monotonically
-increasing generations, and each generation owns named 60-minute session leases. State is derived:
+Agents register an ID plus machine/client/workspace metadata. Automatic hook identities are stable
+within one host session and hash the resolved checkout path together with the opaque host session
+ID, so concurrent sessions from the same client and checkout remain separate without disclosing
+the raw session identifier. Hooks without a session identifier retain the checkout-only
+compatibility identity. The ID owns monotonically increasing generations, and each generation owns
+named 60-minute session leases. State is derived:
 an open generation with a live lease is `active`, an open generation without one is `inactive`, and
 an explicitly or automatically retired identity is `closed`. Registration renews one lease. A
+Stop hook ends the current lease without destroying the identity needed by a later prompt in the
+same host session; SessionEnd closes a session-scoped automatic identity so sequential sessions do
+not consume open-agent capacity. Local E2E vault cleanup removes expired automatic identities and
+their prekeys, or removes identities retired by SessionEnd after the 30-day retained-message
+window, while preserving any sender with pending outbox work. Its 10,000-identity ceiling matches
+the durable retained-agent bound.
 repository move advances the generation only when no other session is live; a conflicting live
 registration is surfaced as repository divergence without silently changing ownership metadata.
 

@@ -159,6 +159,15 @@ test("configures portable content-free hooks for E2E setup", (): void => {
     "/usr/local/bin/murmur-hook --client codex --e2ee",
   );
   expect(JSON.stringify(configured)).not.toContain("MURMUR_E2EE=1");
+
+  const custom: Record<string, unknown> = configureHooks(
+    {},
+    "codex",
+    "/usr/local/bin/murmur-hook",
+    true,
+    "/var/lib/murmur agent/vault.sqlite",
+  );
+  expect(JSON.stringify(custom)).toContain("--vault-path '/var/lib/murmur agent/vault.sqlite'");
 });
 
 test("installs both clients and a second run changes nothing", (): void => {

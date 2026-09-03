@@ -48,6 +48,7 @@ import type {
   WaitForEncryptedMessagesInput,
   WaitForEncryptedMessagesOutput,
 } from "../../src/e2ee/wire-tools.js";
+import { requireMemoryMonotonicBundle } from "./e2ee-memory-bundle-validation.js";
 
 const TENANT_ID: string = "00000000-0000-4000-8000-000000000010";
 const NOW: string = "2026-08-10T20:00:00.000Z";
@@ -188,6 +189,8 @@ export class MemoryE2eeBackend {
   }
 
   public publish(input: PublishAgentKeyBundleInput): PublishAgentKeyBundleOutput {
+    const previous: PublicAgentKeyBundleDto | undefined = this.#bundles.get(input.agent_id);
+    if (previous !== undefined) requireMemoryMonotonicBundle(previous, input.bundle);
     this.#bundles.set(input.agent_id, structuredClone(input.bundle));
     return {
       agent_id: input.agent_id,

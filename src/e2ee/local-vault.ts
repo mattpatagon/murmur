@@ -4,6 +4,7 @@ import process from "node:process";
 import { z } from "zod";
 
 import { LocalVaultKeys } from "./local-vault-keys.js";
+import { purgeExpiredLocalAgentKeys } from "./local-vault-key-prune.js";
 import {
   type CachedMessage,
   mapCachedMessageRow,
@@ -442,6 +443,7 @@ export class LocalE2eeVault {
   public purgeExpired(now: string): number {
     this.#ensureOpen();
     this.keys.purgeExpiredPrivatePrekeys(now);
+    purgeExpiredLocalAgentKeys(this.#database, now);
     using statement: Statement<unknown, [string]> = this.#database.prepare(
       "DELETE FROM decrypted_cache WHERE expires_at <= ?",
     );

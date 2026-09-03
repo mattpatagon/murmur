@@ -209,6 +209,7 @@ async function closeRemoteSession(url: string, headers: Headers, deadline: numbe
 export async function endRemoteAgentSession(
   identity: AgentIdentity,
   options: {
+    readonly closeAgent: boolean;
     readonly eventName: "SessionEnd" | "Stop";
     readonly expectedGeneration: number;
     readonly sessionKey: string;
@@ -244,20 +245,28 @@ export async function endRemoteAgentSession(
       timeoutMs: remainingTimeoutMs(deadline),
       url: options.url,
     });
+    const toolName: string = options.closeAgent ? "close_agent" : "end_session";
+    const toolArguments: Record<string, unknown> = options.closeAgent
+      ? {
+          agent_id: identity.agentId,
+          expected_generation: options.expectedGeneration,
+          reason: "completed",
+        }
+      : {
+          agent_id: identity.agentId,
+          end_default_session: true,
+          expected_generation: options.expectedGeneration,
+          reason: options.eventName === "Stop" ? "stop" : "session_end",
+          session_key: options.sessionKey,
+        };
     const response: JsonRpcExchange = await postJsonRpc({
       body: {
         jsonrpc: "2.0",
         id: 2,
         method: "tools/call",
         params: {
-          name: "end_session",
-          arguments: {
-            agent_id: identity.agentId,
-            end_default_session: true,
-            expected_generation: options.expectedGeneration,
-            reason: options.eventName === "Stop" ? "stop" : "session_end",
-            session_key: options.sessionKey,
-          },
+          name: toolName,
+          arguments: toolArguments,
         },
       },
       headers,
