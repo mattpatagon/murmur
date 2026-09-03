@@ -2,6 +2,27 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.12.1.0] - 2026-09-03
+
+### Fixed
+
+- Give concurrent Codex and Claude host sessions distinct automatic Murmur agent identities inside
+  the same checkout while keeping every hook from one host session on the same durable identity;
+  close that identity at SessionEnd so sequential sessions release open-agent capacity.
+
+### Security
+
+- Use the opaque host session identifier only as hashed identity input, never expose it in the
+  derived agent ID, retain the checkout-only identity when a host omits session information, and
+  retire local E2E identities on close, reclaim them after the 30-day message window without
+  discarding pending outbox sender keys or signed revocation history, align their bounded capacity
+  with retained agents, and keep custom vault paths identical across proxies and lifecycle hooks.
+
+### For contributors
+
+- Keep SQLite upgrade fixtures independent of the calendar and hold migration-test table locks
+  until the expected bounded timeout completes instead of relying on fixed wall-clock sleeps.
+
 ## [0.12.0.1] - 2026-09-02
 
 ### Changed
