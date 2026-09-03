@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 
+import { MAX_RETAINED_AGENTS } from "../domain/lifecycle-values.js";
 import {
   type AgentKeyRevocation,
   createAgentKeyRevocation,
@@ -8,9 +9,13 @@ import {
 import {
   mapAgentKeyRevocationRow,
   mapAgentKeyRow,
+  safeSqlCount,
   type StoredAgentKey,
   type StoredRootKey,
 } from "./local-vault-rows.js";
+
+const MAX_REVOCATIONS_PER_AGENT: number = 100;
+const MAX_LOCAL_AGENT_KEY_REVOCATIONS: number = MAX_RETAINED_AGENTS * MAX_REVOCATIONS_PER_AGENT;
 
 export function listLocalAgentKeyRevocations(
   database: Database,
@@ -22,11 +27,13 @@ export function listLocalAgentKeyRevocations(
       FROM agent_key_revocations
       WHERE agent_id = ?
       ORDER BY revoked_signing_key_id
-      LIMIT 101
+      LIMIT ${MAX_REVOCATIONS_PER_AGENT + 1}
     `)
     .all(agentId)
     .map(mapAgentKeyRevocationRow);
-  if (revocations.length > 100) throw new Error("Local E2E agent revocation limit exceeded");
+  if (revocations.length > MAX_REVOCATIONS_PER_AGENT) {
+    throw new Error("Local E2E agent revocation limit exceeded");
+  }
   return revocations;
 }
 
@@ -68,7 +75,9 @@ export async function revokeLocalCurrentAgentKey(
     throw new Error("The local E2E agent key is not initialized; use an encrypted tool first");
   }
   const existing: readonly AgentKeyRevocation[] = listLocalAgentKeyRevocations(database, agentId);
-  if (existing.length >= 100) throw new Error("Local E2E agent revocation limit exceeded");
+  if (existing.length >= MAX_REVOCATIONS_PER_AGENT) {
+    throw new Error("Local E2E agent revocation limit exceeded");
+  }
   const prior: AgentKeyRevocation | undefined = existing.find(
     (revocation: AgentKeyRevocation): boolean =>
       revocation.revokedSigningKeyId === agent.certificate.signingKeyId,
@@ -90,6 +99,12 @@ export async function revokeLocalCurrentAgentKey(
     const current: StoredAgentKey | null = currentAgent(database, agentId);
     if (current === null || current.certificate.signingKeyId !== agent.certificate.signingKeyId) {
       throw new Error("E2E agent key changed during revocation");
+    }
+    const retainedRevocations: number = safeSqlCount(
+      database.query<unknown, []>("SELECT COUNT(*) AS count FROM agent_key_revocations").get(),
+    );
+    if (retainedRevocations >= MAX_LOCAL_AGENT_KEY_REVOCATIONS) {
+      throw new Error("Local E2E agent revocation capacity reached");
     }
     database
       .query<unknown, [string, string, string, string, string, Uint8Array]>(`

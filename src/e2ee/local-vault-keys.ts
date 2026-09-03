@@ -1,6 +1,7 @@
 import type { Changes, Database, Statement } from "bun:sqlite";
 import sodium from "libsodium-wrappers";
 import { z } from "zod";
+import { MAX_RETAINED_AGENTS } from "../domain/lifecycle-values.js";
 import {
   type AgentKeyCertificate,
   type AgentKeyCertificateFields,
@@ -15,6 +16,11 @@ import {
   prekeyId,
   rootKeyId,
 } from "./certificates.js";
+import {
+  activateLocalAgentKey,
+  ensureLocalAgentKeyCapacity,
+  retireLocalAgentKey,
+} from "./local-vault-key-prune.js";
 import { parseExpectedPeerRoot, peerPinRank } from "./local-vault-peer-validation.js";
 import {
   isLocalAgentKeyRevoked,
@@ -96,11 +102,15 @@ export class LocalVaultKeys {
     using statement: Statement<unknown, []> = this.#database.prepare(`
       SELECT agent_id, root_key_id, signing_key_id, public_key, private_key,
              created_at, expires_at, certificate_signature
-      FROM agent_keys ORDER BY agent_id LIMIT 1001
+      FROM agent_keys ORDER BY agent_id LIMIT ${MAX_RETAINED_AGENTS + 1}
     `);
     const agents: readonly StoredAgentKey[] = statement.all().map(mapAgentKeyRow);
-    if (agents.length > 1_000) throw new Error("Local E2E agent key limit exceeded");
+    if (agents.length > MAX_RETAINED_AGENTS) throw new Error("Local E2E agent key limit exceeded");
     return agents;
+  }
+
+  public retireAgent(agentId: string, retiredAt: string): void {
+    retireLocalAgentKey(this.#database, agentId, retiredAt);
   }
 
   public listAgentKeyRevocations(agentId: string): readonly AgentKeyRevocation[] {
@@ -136,6 +146,7 @@ export class LocalVaultKeys {
       existing !== null &&
       Date.parse(existing.certificate.expiresAt) > minimumValidMillis
     ) {
+      activateLocalAgentKey(this.#database, agentId);
       return existing;
     }
     const root: StoredRootKey = await this.getOrCreateRoot(createdAt);
@@ -169,10 +180,12 @@ export class LocalVaultKeys {
         this.#database.exec("COMMIT");
         sodium.memzero(pair.privateKey);
         if (current === null) throw new Error("Concurrent E2E rotation winner is unavailable");
+        activateLocalAgentKey(this.#database, agentId);
         return current;
       }
       let result: Changes;
       if (current === null) {
+        ensureLocalAgentKeyCapacity(this.#database);
         using insert: Statement<
           unknown,
           [string, string, string, Uint8Array, Uint8Array, string, string, Uint8Array]
@@ -199,7 +212,7 @@ export class LocalVaultKeys {
         > = this.#database.prepare(`
           UPDATE agent_keys SET
             signing_key_id = ?, public_key = ?, private_key = ?,
-            created_at = ?, expires_at = ?, certificate_signature = ?
+            created_at = ?, expires_at = ?, certificate_signature = ?, retired_at = NULL
           WHERE agent_id = ? AND signing_key_id = ?
         `);
         result = rotate.run(

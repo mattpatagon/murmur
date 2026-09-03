@@ -1,7 +1,7 @@
 import type { Database, Statement } from "bun:sqlite";
 import { z } from "zod";
 
-const VAULT_SCHEMA_VERSION: number = 10;
+const VAULT_SCHEMA_VERSION: number = 11;
 const UserVersionRowSchema: z.ZodType<{ readonly user_version: number }> = z.object({
   user_version: z
     .union([z.number().int(), z.bigint()])
@@ -234,6 +234,14 @@ export function migrateLocalVault(database: Database): void {
         );
         CREATE INDEX decrypted_cache_expiration ON decrypted_cache(expires_at);
         PRAGMA user_version = 10;
+      `);
+    }
+    if (version <= 10) {
+      database.exec(`
+        ALTER TABLE agent_keys ADD COLUMN retired_at TEXT;
+        CREATE INDEX agent_keys_retired_cleanup
+          ON agent_keys(retired_at, agent_id) WHERE retired_at IS NOT NULL;
+        PRAGMA user_version = 11;
       `);
     }
     database.exec("COMMIT");

@@ -109,6 +109,12 @@ at 10,000, public prekeys at 100,000, retained ciphertext messages at 100,000, p
 bound. Never raise one layer without reviewing application validation, database constraints,
 operational capacity, tests, and this document together.
 
+Each endpoint vault retains at most 10,000 local agent identities. A successful agent close marks
+its local identity retired; bounded cleanup keeps its private key through the 30-day message window,
+then removes the identity and prekeys unless a pending outbox item still depends on the sender key.
+Signed revocation tombstones remain under a separate 100-per-identity and 1,000,000-total bound so
+a later registration cannot omit history already accepted by the hosted bundle.
+
 ## Rollback and recovery
 
 `rollback_off` is a capability rollback, not decryption or conversion. It is refused while any

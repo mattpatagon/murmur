@@ -109,16 +109,17 @@ validation='20260902175500_validate_message_connector_client.sql'
 cp "supabase/migrations/$validation" "$work_directory/supabase/migrations/$validation"
 lock_ready="$work_directory/message-lock-ready"
 lock_output="$work_directory/message-lock-output"
-psql "$migration_url" --set ON_ERROR_STOP=1 >"$lock_output" 2>&1 <<SQL &
-begin;
-lock table murmur.messages in access exclusive mode;
-\o $lock_ready
-select 'ready';
-\o
-select pg_catalog.pg_sleep(7);
-commit;
-SQL
+lock_control="$work_directory/message-lock-control"
+mkfifo "$lock_control"
+psql "$migration_url" --set ON_ERROR_STOP=1 <"$lock_control" >"$lock_output" 2>&1 &
 locker_pid=$!
+exec 3>"$lock_control"
+printf '%s\n' \
+  'begin;' \
+  'lock table murmur.messages in access exclusive mode;' \
+  "\\o $lock_ready" \
+  "select 'ready';" \
+  '\o' >&3
 timeout 3s bash -c 'while [ ! -s "$1" ]; do :; done' connector-lock "$lock_ready"
 failed_push="$work_directory/failed-push"
 if bunx supabase db push --workdir "$work_directory" \
@@ -130,6 +131,8 @@ if ! grep -q 'lock timeout' "$failed_push"; then
   echo 'Connector validation did not report its bounded lock timeout' >&2
   exit 1
 fi
+printf '%s\n' 'commit;' '\q' >&3
+exec 3>&-
 wait "$locker_pid"
 bunx supabase db push --workdir "$work_directory" \
   --db-url "$migration_url" --include-all --yes

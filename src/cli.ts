@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { existsSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import process from "node:process";
 
 import { runE2eeCli } from "./e2ee/cli.js";
@@ -19,6 +20,7 @@ type SetupArguments = {
   readonly proxyExecutable: string | null;
   readonly replace: boolean;
   readonly url: string;
+  readonly vaultPath: string | null;
 };
 
 export type SetupAction = (arguments_: readonly string[]) => readonly string[];
@@ -40,6 +42,7 @@ Options:
   --e2ee                Use the local end-to-end encryption proxy
   --replace             Replace a conflicting Murmur MCP entry
   --url URL             MCP endpoint (default: ${DEFAULT_MURMUR_URL})
+  --vault-path PATH     Absolute E2E vault path for both proxy and hooks
   --user                Required acknowledgement of user-level scope
   -h, --help            Show this help
 
@@ -64,6 +67,7 @@ function parseSetupArguments(arguments_: readonly string[]): SetupArguments {
   let replace: boolean = false;
   let url: string = DEFAULT_MURMUR_URL;
   let userScope: boolean = false;
+  let vaultPath: string | null = null;
 
   for (let index: number = 0; index < arguments_.length; index += 1) {
     const argument: string | undefined = arguments_[index];
@@ -95,6 +99,10 @@ function parseSetupArguments(arguments_: readonly string[]): SetupArguments {
       case "--user":
         userScope = true;
         break;
+      case "--vault-path":
+        vaultPath = nextArgument(arguments_, index, argument);
+        index += 1;
+        break;
       default:
         throw new Error(`Unknown setup option: ${argument ?? ""}`);
     }
@@ -102,6 +110,9 @@ function parseSetupArguments(arguments_: readonly string[]): SetupArguments {
 
   if (!userScope) {
     throw new Error("Murmur setup currently supports user scope only. Rerun with --user.");
+  }
+  if (vaultPath !== null && (!e2ee || !isAbsolute(vaultPath))) {
+    throw new Error("--vault-path requires --e2ee and an absolute path");
   }
   const parsedUrl: URL = new URL(url);
   if (parsedUrl.protocol !== "https:" && parsedUrl.hostname !== "localhost") {
@@ -114,6 +125,7 @@ function parseSetupArguments(arguments_: readonly string[]): SetupArguments {
     proxyExecutable,
     replace,
     url: parsedUrl.toString(),
+    vaultPath,
   };
 }
 
@@ -158,6 +170,7 @@ export function setup(arguments_: readonly string[]): readonly string[] {
     hookExecutable,
     replace: parsed.replace,
     url: parsed.url,
+    ...(parsed.vaultPath === null ? {} : { e2eeVaultPath: parsed.vaultPath }),
   });
 }
 

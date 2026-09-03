@@ -199,8 +199,10 @@ test("rejects issuer substitution and upgrades a populated version-one vault", a
       DROP TABLE agent_key_revocations;
       DROP TABLE active_tenant_binding;
       DROP TABLE peer_root_expectations;
+      DROP INDEX agent_keys_retired_cleanup;
       DROP INDEX prekeys_signing_generation;
       ALTER TABLE prekeys DROP COLUMN agent_signing_key_id;
+      ALTER TABLE agent_keys DROP COLUMN retired_at;
       DROP TABLE trust_policy_revocations;
       DROP TABLE trust_policy_state;
       ALTER TABLE outbox DROP COLUMN claim_id;

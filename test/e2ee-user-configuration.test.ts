@@ -14,6 +14,7 @@ import {
 } from "../src/setup/user-configuration.js";
 
 const PROXY: string = "/usr/local/bin/murmur-e2ee-proxy";
+const CUSTOM_VAULT: string = "/var/lib/murmur agent/vault.sqlite";
 
 test("configures an idempotent local Codex proxy without embedding credentials", (): void => {
   const current: string = 'model = "gpt-5"\n';
@@ -77,6 +78,7 @@ test("installs proxy clients and content-free hooks atomically", (): void => {
       clients: ["codex", "claude"],
       e2ee: true,
       e2eeProxyExecutable: PROXY,
+      e2eeVaultPath: CUSTOM_VAULT,
       hookExecutable: "/usr/local/bin/murmur-hook",
       paths,
       url: DEFAULT_MURMUR_URL,
@@ -90,12 +92,14 @@ test("installs proxy clients and content-free hooks atomically", (): void => {
     ].join("\n");
     expect(installed).toContain("murmur-e2ee-proxy");
     expect(installed).toContain("--e2ee");
+    expect(installed.match(/murmur agent\/vault\.sqlite/gu)).toHaveLength(12);
     expect(installed).not.toContain("Bearer ");
     expect(
       installUserConfiguration({
         clients: ["codex", "claude"],
         e2ee: true,
         e2eeProxyExecutable: PROXY,
+        e2eeVaultPath: CUSTOM_VAULT,
         hookExecutable: "/usr/local/bin/murmur-hook",
         paths,
         url: DEFAULT_MURMUR_URL,
@@ -114,4 +118,14 @@ test("validates the E2E proxy dependency before writing any configuration", (): 
       hookExecutable: "/usr/local/bin/murmur-hook",
     }),
   ).toThrow("requires the local proxy executable");
+
+  expect((): readonly string[] =>
+    installUserConfiguration({
+      clients: ["codex"],
+      e2ee: true,
+      e2eeProxyExecutable: PROXY,
+      e2eeVaultPath: "relative-vault.sqlite",
+      hookExecutable: "/usr/local/bin/murmur-hook",
+    }),
+  ).toThrow("requires E2E setup and an absolute path");
 });

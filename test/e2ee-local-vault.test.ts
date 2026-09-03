@@ -410,12 +410,14 @@ test("upgrades version-four prekeys with their original signing generation", asy
     if (prekey === undefined) throw new Error("Expected upgrade prekey");
     const legacy: Database = new Database(path, { create: false, readwrite: true });
     legacy.exec(`
+      DROP INDEX agent_keys_retired_cleanup;
       DROP TABLE orchestration_routes;
       DROP TABLE agent_key_revocations;
       DROP TABLE active_tenant_binding;
       DROP TABLE peer_root_expectations;
       DROP INDEX prekeys_signing_generation;
       ALTER TABLE prekeys DROP COLUMN agent_signing_key_id;
+      ALTER TABLE agent_keys DROP COLUMN retired_at;
       PRAGMA user_version = 4;
     `);
     legacy.close(false);
@@ -442,9 +444,11 @@ test("upgrades a populated version-six vault with an empty active tenant binding
     original.close();
     const legacy: Database = new Database(path, { create: false, readwrite: true });
     legacy.exec(`
+      DROP INDEX agent_keys_retired_cleanup;
       DROP TABLE orchestration_routes;
       DROP TABLE agent_key_revocations;
       DROP TABLE active_tenant_binding;
+      ALTER TABLE agent_keys DROP COLUMN retired_at;
       PRAGMA user_version = 6;
     `);
     legacy.close(false);
@@ -477,7 +481,7 @@ test("rejects a vault schema newer than the running binary", async (): Promise<v
     const path: string = join(directory, "future.sqlite");
     mkdirSync(directory, { recursive: true });
     const database: Database = new Database(path, { create: true, readwrite: true });
-    database.exec("PRAGMA user_version = 11");
+    database.exec("PRAGMA user_version = 12");
     database.close(false);
     expect((): LocalE2eeVault => new LocalE2eeVault(path, "linux")).toThrow("newer");
   });

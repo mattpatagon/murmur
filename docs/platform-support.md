@@ -43,8 +43,9 @@ enforce POSIX mode bits; existing configuration files preserve their current mod
 are written inside the selected user profile and inherit its Windows ACLs. Operators must keep that
 profile restricted to the intended account. See `murmur setup --help` before using `--replace`.
 
-The E2E vault uses the platform application-data directory unless `--vault-path` selects an
-absolute file inside a dedicated non-root directory. Linux and macOS create the directory as
+The E2E vault uses the platform application-data directory unless `murmur setup --user --e2ee
+--vault-path PATH` selects an absolute file inside a dedicated non-root directory. Setup passes
+that canonical path to both the proxy and lifecycle hooks. Linux and macOS create the directory as
 `0700`, the SQLite file as `0600`, and protect WAL/SHM sidecars before use. Windows applies an
 owner-only `icacls` ACL to the directory and database file and rejects an unavailable or malformed
 account identity. Private vaults are endpoint state, not portable configuration: do not copy them

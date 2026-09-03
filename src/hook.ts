@@ -5,10 +5,12 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { dirname, join } from "node:path";
 import process from "node:process";
 
+import { retireConfiguredLocalAgentKey } from "./e2ee/local-vault-retirement.js";
+import { type HookArguments, parseHookArguments } from "./hook-arguments.js";
 import { deriveAgentIdentity } from "./hook-identity.js";
 import { type HookOrchestrationState, hookOrchestrationGuidance } from "./hook-orchestration.js";
-import { checkRemoteInbox, endRemoteAgentSession } from "./hook-remote-client.js";
 import { isRecord } from "./hook-protocol.js";
+import { checkRemoteInbox, endRemoteAgentSession } from "./hook-remote-client.js";
 import type { AgentIdentity, InboxSummary } from "./hook-types.js";
 import { defaultHookCacheDirectory, environmentPath, positiveInteger } from "./platform-paths.js";
 import {
@@ -17,16 +19,16 @@ import {
   type MurmurClient,
 } from "./setup/user-configuration.js";
 
-export { checkRemoteInbox, endRemoteAgentSession } from "./hook-remote-client.js";
+export { deriveAgentIdentity } from "./hook-identity.js";
+export { parseHookInbox, summarizeHookInbox } from "./hook-message-compatibility.js";
 export {
   postJsonRpc,
   remainingTimeoutMs,
   requestHeaders,
   rpcResult,
 } from "./hook-protocol.js";
+export { checkRemoteInbox, endRemoteAgentSession } from "./hook-remote-client.js";
 export type { AgentIdentity, InboxSummary } from "./hook-types.js";
-export { deriveAgentIdentity } from "./hook-identity.js";
-export { parseHookInbox, summarizeHookInbox } from "./hook-message-compatibility.js";
 
 const DEFAULT_DEBOUNCE_MS: number = 10_000;
 const DEFAULT_TIMEOUT_MS: number = 4_000;
@@ -66,6 +68,7 @@ type CheckInbox = (
 type EndRemoteSession = (
   identity: AgentIdentity,
   options: {
+    readonly closeAgent: boolean;
     readonly eventName: "SessionEnd" | "Stop";
     readonly expectedGeneration: number;
     readonly sessionKey: string;
@@ -81,6 +84,7 @@ type HandleHookOptions = {
   readonly debounceMs?: number | undefined;
   readonly endSession?: EndRemoteSession | undefined;
   readonly environment?: NodeJS.ProcessEnv | undefined;
+  readonly e2eeVaultPath?: string | undefined;
   readonly now?: number | undefined;
   readonly timeoutMs?: number | undefined;
   readonly url?: string | undefined;
@@ -252,6 +256,7 @@ export async function handleHook(
     client,
     input.cwd ?? process.cwd(),
     environment,
+    input.session_id,
   );
   const token: string | undefined = environment[MURMUR_TOKEN_ENV];
   if (token === undefined || token.trim() === "") {
@@ -267,12 +272,15 @@ export async function handleHook(
     defaultHookCacheDirectory(environment);
   const hasNamedSession: boolean = input.session_id !== undefined && input.session_id.trim() !== "";
   const generationPath: string = sessionCachePath(cacheDirectory, identity, sessionKey);
+  const path: string = cachePath(cacheDirectory, identity);
+  const e2ee: boolean = environment["MURMUR_E2EE"] === "1";
   if (eventName === "Stop" || eventName === "SessionEnd") {
     const expectedGeneration: number | null = hasNamedSession
       ? readSessionGeneration(generationPath)
       : null;
     if (expectedGeneration !== null) {
       await (options.endSession ?? endRemoteAgentSession)(identity, {
+        closeAgent: eventName === "SessionEnd",
         eventName,
         expectedGeneration,
         sessionKey,
@@ -280,11 +288,21 @@ export async function handleHook(
         token,
         url,
       });
+      if (eventName === "SessionEnd" && e2ee) {
+        retireConfiguredLocalAgentKey(
+          identity.agentId,
+          new Date(options.now ?? Date.now()).toISOString(),
+          environment,
+          options.e2eeVaultPath,
+        );
+      }
+    }
+    if (eventName === "SessionEnd") {
       rmSync(generationPath, { force: true });
+      rmSync(path, { force: true });
     }
     return null;
   }
-  const path: string = cachePath(cacheDirectory, identity);
   const cache: HookCache = readCache(path);
   const now: number = options.now ?? Date.now();
   const debounceMs: number =
@@ -295,7 +313,6 @@ export async function handleHook(
     lastCheckedAt: now,
     lastNotifiedInboxVersion: cache.lastNotifiedInboxVersion,
   });
-  const e2ee: boolean = environment["MURMUR_E2EE"] === "1";
   const summary: InboxSummary = await (options.checkInbox ?? checkRemoteInbox)(identity, {
     afterSequence: eventName === "SessionStart" ? 0 : cache.lastNotifiedInboxVersion,
     e2ee,
@@ -326,32 +343,6 @@ export async function handleHook(
   });
 }
 
-type HookArguments = { readonly client: MurmurClient; readonly e2ee: boolean };
-
-function parseHookArguments(arguments_: readonly string[]): HookArguments {
-  let client: MurmurClient | null = null;
-  let e2ee: boolean = false;
-  for (let index: number = 0; index < arguments_.length; index += 1) {
-    const argument: string | undefined = arguments_[index];
-    if (argument === "--e2ee") {
-      e2ee = true;
-      continue;
-    }
-    if (argument === "--client") {
-      const value: string | undefined = arguments_[index + 1];
-      if (value !== "claude" && value !== "codex") {
-        throw new Error("Usage: murmur-hook --client <claude|codex> [--e2ee]");
-      }
-      client = value;
-      index += 1;
-      continue;
-    }
-    throw new Error("Usage: murmur-hook --client <claude|codex> [--e2ee]");
-  }
-  if (client === null) throw new Error("Usage: murmur-hook --client <claude|codex> [--e2ee]");
-  return { client, e2ee };
-}
-
 async function readHookInput(): Promise<HookInput> {
   const content: string = await Bun.stdin.text();
   if (content.trim() === "") return {};
@@ -374,6 +365,7 @@ async function main(): Promise<void> {
       : process.env;
     const output: HookOutput | null = await handleHook(input, parsedArguments.client, {
       environment,
+      ...(parsedArguments.vaultPath === null ? {} : { e2eeVaultPath: parsedArguments.vaultPath }),
     });
     if (output !== null && Object.keys(output).length > 0) {
       process.stdout.write(`${JSON.stringify(output)}\n`);

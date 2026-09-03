@@ -1,22 +1,27 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { NoticeContent, SessionKey } from "../src/domain/lifecycle-values.js";
 import type { Agent } from "../src/domain/models.js";
-import { AgentId, IdempotencyKey, RepositoryName } from "../src/domain/value-objects.js";
 import {
+  AgentId,
+  DisplayName,
+  IdempotencyKey,
+  RepositoryName,
+} from "../src/domain/value-objects.js";
+import {
+  type AgentIdentity,
   checkRemoteInbox,
   deriveAgentIdentity,
   endRemoteAgentSession,
+  type HookOutput,
   handleHook,
   hookSessionKey,
-  type AgentIdentity,
-  type HookOutput,
   type InboxSummary,
 } from "../src/hook.js";
-import { startHttpServer, type MurmurHttpServer } from "../src/http-server.js";
+import { type MurmurHttpServer, startHttpServer } from "../src/http-server.js";
 import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
 
 function requireAgent(store: SqliteMessageStore, id: string): Agent {
@@ -26,6 +31,16 @@ function requireAgent(store: SqliteMessageStore, id: string): Agent {
   }
   return agent;
 }
+
+type EndSessionOptions = {
+  readonly closeAgent: boolean;
+  readonly eventName: "SessionEnd" | "Stop";
+  readonly expectedGeneration: number;
+  readonly sessionKey: string;
+  readonly timeoutMs: number;
+  readonly token: string;
+  readonly url: string;
+};
 
 test("hook session keys are deterministic hashes that never expose raw host session IDs", (): void => {
   const raw: string = "host-session-super-secret-value";
@@ -37,12 +52,15 @@ test("hook session keys are deterministic hashes that never expose raw host sess
   expect(hookSessionKey(undefined)).toBe("default");
 });
 
-test("Stop bypasses debounce, does not check the inbox, and ends hash plus default", async (): Promise<void> => {
+test("Stop ends the lease and SessionEnd closes a named automatic identity", async (): Promise<void> => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-hook-stop-"));
   let checked: boolean = false;
-  let endedGeneration: number = 0;
-  let endedSessionKey: string = "";
-  let endedEvent: string = "";
+  const ended: {
+    readonly closeAgent: boolean;
+    readonly eventName: string;
+    readonly generation: number;
+    readonly sessionKey: string;
+  }[] = [];
   const rawSessionId: string = "stop-session-id";
   const environment: NodeJS.ProcessEnv = {
     MURMUR_API_TOKEN: "test-token",
@@ -70,20 +88,13 @@ test("Stop bypasses debounce, does not check the inbox, and ends hash plus defau
         cacheDirectory: directory,
         checkInbox,
         debounceMs: 60_000,
-        endSession: async (
-          _identity: AgentIdentity,
-          options: {
-            readonly eventName: "SessionEnd" | "Stop";
-            readonly expectedGeneration: number;
-            readonly sessionKey: string;
-            readonly token: string;
-            readonly timeoutMs: number;
-            readonly url: string;
-          },
-        ): Promise<void> => {
-          endedSessionKey = options.sessionKey;
-          endedEvent = options.eventName;
-          endedGeneration = options.expectedGeneration;
+        endSession: async (_identity: AgentIdentity, options: EndSessionOptions): Promise<void> => {
+          ended.push({
+            closeAgent: options.closeAgent,
+            eventName: options.eventName,
+            generation: options.expectedGeneration,
+            sessionKey: options.sessionKey,
+          });
         },
         environment,
         now: 1,
@@ -91,11 +102,120 @@ test("Stop bypasses debounce, does not check the inbox, and ends hash plus defau
     );
     expect(output).toBeNull();
     expect(checked).toBe(false);
-    expect(endedEvent).toBe("Stop");
-    expect(endedGeneration).toBe(7);
-    expect(endedSessionKey).toBe(hookSessionKey(rawSessionId));
+    expect(ended).toEqual([
+      {
+        closeAgent: false,
+        eventName: "Stop",
+        generation: 7,
+        sessionKey: hookSessionKey(rawSessionId),
+      },
+    ]);
+    await handleHook(
+      { cwd: "/work/repo", hook_event_name: "SessionEnd", session_id: rawSessionId },
+      "codex",
+      {
+        cacheDirectory: directory,
+        endSession: async (_identity: AgentIdentity, options: EndSessionOptions): Promise<void> => {
+          ended.push({
+            closeAgent: options.closeAgent,
+            eventName: options.eventName,
+            generation: options.expectedGeneration,
+            sessionKey: options.sessionKey,
+          });
+        },
+        environment,
+      },
+    );
+    expect(ended[1]).toEqual({
+      closeAgent: true,
+      eventName: "SessionEnd",
+      generation: 7,
+      sessionKey: hookSessionKey(rawSessionId),
+    });
+    expect(readdirSync(directory)).toEqual([]);
   } finally {
     rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("SessionEnd clears its hook cache without a saved generation", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-hook-missing-generation-"));
+  let destructiveCalls: number = 0;
+  const environment: NodeJS.ProcessEnv = {
+    MURMUR_API_TOKEN: "test-token",
+    MURMUR_MACHINE_ID: "vm",
+  };
+  try {
+    await handleHook(
+      { cwd: "/work/repo", hook_event_name: "SessionStart", session_id: "ended-session" },
+      "codex",
+      {
+        cacheDirectory: directory,
+        checkInbox: async (): Promise<InboxSummary> => ({
+          agentGeneration: 7,
+          inboxVersion: 0,
+          messageCount: 0,
+          senderIds: [],
+        }),
+        environment,
+        now: 1,
+      },
+    );
+    const cacheFiles: readonly string[] = readdirSync(directory);
+    const generationFile: string | undefined = cacheFiles.find((file: string): boolean =>
+      file.endsWith(".session.json"),
+    );
+    const ordinaryCache: string | undefined = cacheFiles.find(
+      (file: string): boolean => file.endsWith(".json") && !file.endsWith(".session.json"),
+    );
+    if (generationFile === undefined || ordinaryCache === undefined) {
+      throw new Error("Expected hook generation and notification cache files");
+    }
+    expect(cacheFiles).toContain(ordinaryCache);
+    rmSync(join(directory, generationFile));
+
+    await handleHook(
+      { cwd: "/work/repo", hook_event_name: "SessionEnd", session_id: "ended-session" },
+      "codex",
+      {
+        cacheDirectory: directory,
+        endSession: async (): Promise<void> => {
+          destructiveCalls += 1;
+        },
+        environment,
+      },
+    );
+    expect(destructiveCalls).toBe(0);
+    expect(readdirSync(directory)).toEqual([]);
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("more than one thousand sequential automatic identities release open capacity", (): void => {
+  const store: SqliteMessageStore = new SqliteMessageStore(":memory:");
+  try {
+    for (let index: number = 0; index < 1_001; index += 1) {
+      const identity: AgentIdentity = deriveAgentIdentity(
+        "codex",
+        "/work/repo",
+        { MURMUR_MACHINE_ID: "vm" },
+        `session-${index}`,
+      );
+      const registered: ReturnType<SqliteMessageStore["registerAgent"]> = store.registerAgent({
+        agentId: AgentId.parse(identity.agentId),
+        displayName: DisplayName.parse(identity.displayName),
+        metadata: {},
+        sessionKey: SessionKey.parse(hookSessionKey(`session-${index}`)),
+      });
+      store.closeAgent({
+        agentId: AgentId.parse(identity.agentId),
+        closeReason: "completed",
+        expectedGeneration: registered.agent.generation,
+      });
+    }
+  } finally {
+    store.close();
   }
 });
 
@@ -142,6 +262,7 @@ test("real hook teardown preserves another pane and SessionStart reports open no
       });
       expect(start.noticeCount).toBe(1);
       await endRemoteAgentSession(identity, {
+        closeAgent: false,
         eventName: "Stop",
         expectedGeneration: 1,
         sessionKey: "hook-pane-a",
@@ -151,6 +272,7 @@ test("real hook teardown preserves another pane and SessionStart reports open no
       });
       expect(requireAgent(verificationStore, identity.agentId).liveSessionCount).toBe(1);
       await endRemoteAgentSession(identity, {
+        closeAgent: true,
         eventName: "SessionEnd",
         expectedGeneration: 1,
         sessionKey: "hook-pane-b",
@@ -158,7 +280,7 @@ test("real hook teardown preserves another pane and SessionStart reports open no
         token,
         url,
       });
-      expect(requireAgent(verificationStore, identity.agentId).state).toBe("inactive");
+      expect(requireAgent(verificationStore, identity.agentId).state).toBe("closed");
     } finally {
       verificationStore.close();
     }
