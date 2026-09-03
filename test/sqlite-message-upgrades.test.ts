@@ -14,12 +14,17 @@ import {
   AgentId,
   DisplayName,
   IdempotencyKey,
+  Instant,
   MessageContent,
   Sequence,
 } from "../src/domain/value-objects.js";
 import { migrateSqliteDatabase } from "../src/storage/sqlite-message-migrations.js";
 import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
-import { baseMessageCommand } from "./support/store-fixture.js";
+import { baseMessageCommand, MutableClock } from "./support/store-fixture.js";
+
+function legacyFixtureClock(): MutableClock {
+  return new MutableClock(Instant.parse("2026-08-05T00:00:00.000Z"));
+}
 
 test("upgrades an existing SQLite schema before storing message context", (): void => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-store-v1-"));
@@ -62,7 +67,7 @@ test("upgrades an existing SQLite schema before storing message context", (): vo
   `);
   legacyDatabase.close();
 
-  const store: SqliteMessageStore = new SqliteMessageStore(databasePath);
+  const store: SqliteMessageStore = new SqliteMessageStore(databasePath, legacyFixtureClock());
   try {
     store.registerAgent({
       agentId: AgentId.parse("alice"),
@@ -153,7 +158,7 @@ test("upgrades a SQLite v2 message while preserving repository context", (): voi
   `);
   legacyDatabase.close();
 
-  const store: SqliteMessageStore = new SqliteMessageStore(databasePath);
+  const store: SqliteMessageStore = new SqliteMessageStore(databasePath, legacyFixtureClock());
   try {
     const legacyMessages: readonly Message[] = store.getMessages({
       afterSequence: Sequence.zero(),
@@ -234,7 +239,8 @@ test("upgrades populated SQLite v4 lifecycle and provenance rows", (): void => {
     ) VALUES (
       '00000000-0000-4000-8000-000000000004', 'legacy-v4-thread', 'alice', 'bob',
       'legacy v4 message', 'mattpatagon/murmur', 'feature/legacy', 'codex', NULL,
-      '2026-08-04T11:45:00.000Z', '2026-09-03T11:45:00.000Z', NULL
+      strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-15 minutes'),
+      strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+30 days'), NULL
     );
     PRAGMA user_version = 4;
   `);
