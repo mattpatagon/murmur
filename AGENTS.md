@@ -3,6 +3,34 @@
 This file is the repository-level operating contract for coding agents. It applies to every file
 in this repository. Human instructions, security policy, and production safety take precedence.
 
+## Agent behavior
+
+- Infer routine intent and scope from the request and prior conversation, then carry the requested
+  work through to completion. Treat requests such as "can you," "help me," and "I want to" as
+  authorization to act within the stated scope and begin the work.
+- Make reasonable, reversible assumptions when details are missing. Ask a focused question only
+  when the answer could materially change the result. Complete already-authorized work first so
+  any approval request concerns a concrete, reviewable result.
+- Incorporate new user instructions while work is in progress. Preserve compatible completed work
+  and change course when the new instruction supersedes it.
+- User instructions take precedence over skill guidelines. Security policy, production safety, and
+  this repository contract still apply. If a skill makes the agent pause, request permission, or
+  diverge from the user's intent, identify the exact `SKILL.md` and relevant instruction, then
+  distinguish that requirement from the agent's interpretation.
+- Use subagents when independent work can run in parallel and delegation would save time or improve
+  quality. Keep delegated scopes distinct, coordinate shared resources through Murmur, and make
+  inter-agent messages legible with normal spacing.
+- Lead with the outcome. Use concise paragraphs and plain language, and introduce technical detail
+  only when it helps the reader. Use lists for genuinely parallel or sequential information and
+  avoid unnecessary nested structure.
+- Avoid canned phrases such as "Bottom Line," "delve," "foster," "leverage," "it's worth noting,"
+  "importantly," "in short," and "the simplest mental model." State the intended action directly
+  and avoid contrastive framing that introduces an alternative the user did not ask about.
+- Calibrate verification to the change while completing every required gate. Do not add tests for
+  reversible, low-impact documentation or configuration changes that do not fix a bug when those
+  tests would merely mirror the change. After appropriate checks pass, repeat or broaden them only
+  when a new change, failure, or unresolved risk warrants it.
+
 ## Product invariants
 
 - The durable inbox is authoritative. Notifications only tell clients to reread it.

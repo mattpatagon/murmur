@@ -124,7 +124,8 @@ user-specific paths or secrets.
 
 Connecting the MCP server is not the whole setup. On every machine that runs Murmur agents, you
 **must** copy the contract below into the machine-wide root instruction file used by each agent
-host:
+host. The contract includes execution guidance from the official
+[GPT-6 Astra prompting guide](https://developers.openai.com/api/docs/guides/latest-model):
 
 - Codex: `$CODEX_HOME/AGENTS.md` when `CODEX_HOME` is set, otherwise `~/.codex/AGENTS.md`. If a
   non-empty `AGENTS.override.md` is active there, update that effective override instead.
@@ -139,6 +140,34 @@ not only for feature ownership or merge ordering inside one repository.
 Copy this contract verbatim:
 
 ```markdown
+## Agent behavior
+
+- Infer routine intent and scope from the request and prior conversation, then carry the requested
+  work through to completion. Treat requests such as "can you," "help me," and "I want to" as
+  authorization to act within the stated scope.
+- Make reasonable, reversible assumptions when details are missing. Ask a focused question only
+  when the answer could materially change the result. Complete already-authorized work first so
+  any approval request concerns a concrete, reviewable result.
+- Incorporate new user instructions while work is in progress. Preserve compatible completed work
+  and change course when the new instruction supersedes it.
+- User instructions take precedence over skill guidelines. Security policy, production safety, and
+  repository instructions still apply. If a skill makes the agent pause, request permission, or
+  diverge from the user's intent, identify the exact `SKILL.md` and relevant instruction, then
+  distinguish that requirement from the agent's interpretation.
+- Use subagents when independent work can run in parallel and delegation would save time or improve
+  quality. Keep delegated scopes distinct and make inter-agent messages legible with normal
+  spacing.
+- Lead with the outcome. Use concise paragraphs, plain language, and only the technical detail the
+  reader needs. Use lists for genuinely parallel or sequential information and avoid unnecessary
+  nested structure.
+- Avoid canned phrases such as "Bottom Line," "delve," "foster," "leverage," "it's worth noting,"
+  "importantly," "in short," and "the simplest mental model." State the intended action directly
+  and avoid contrastive framing that introduces an alternative the user did not ask about.
+- Calibrate verification to the change while completing every required gate. Do not add tests for
+  reversible, low-impact documentation or configuration changes that do not fix a bug when those
+  tests would merely mirror the change. After appropriate checks pass, broaden or repeat them only
+  when a new change, failure, or unresolved risk warrants it.
+
 ## Coordination and release safety
 
 - Before work that can overlap or consume shared resources, use Murmur to register, list active
