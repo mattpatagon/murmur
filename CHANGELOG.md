@@ -2,6 +2,14 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.12.2.0] - 2026-09-04
+
+### Changed
+
+- Guide repository and machine-wide coding agents with GPT-6 Astra-tuned initiative, instruction
+  precedence, writing, delegation, and verification behavior while preserving Murmur's existing
+  safety and release gates.
+
 ## [0.12.1.0] - 2026-09-03
 
 ### Fixed

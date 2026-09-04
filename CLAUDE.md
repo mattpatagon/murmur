@@ -1,6 +1,6 @@
 @AGENTS.md
 
-# Claude Code project notes
+# Project notes
 
 Follow `AGENTS.md` as the authoritative repository contract. Before editing, inspect the working
 tree and use Murmur to coordinate overlapping work. Do not weaken the strict type, lint, coverage,
