@@ -20,7 +20,9 @@ export class ResponseLifetimeIncomingMessage extends IncomingMessage {
 
   public releaseAfterResponse(): void {
     this.responseFinished = true;
-    this.destroy();
+    // Incomplete input destruction resets Bun's socket even after response end. The
+    // response already carries Connection: close; leave that native delivery intact.
+    if (this.complete && this.readableEnded) this.destroy();
   }
 }
 

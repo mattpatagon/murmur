@@ -13,8 +13,12 @@ the response; kernel buffers and intermediary proxies remain separate.
 
 Bun 1.3.14 automatically destroys completed request input and clears a native callback shared with
 the unfinished response. A narrowly scoped IncomingMessage subclass defers successful automatic
-input destruction until output settlement. Errors and incomplete-input destruction are not
-deferred. Peer disconnect aborts the Web Request and cancels response readers and drain waits.
+input destruction until output settlement. Successful response cleanup does not forcibly destroy
+unfinished input: on this Bun revision that resets the socket even after the local response end
+callback and can discard an early 401/503 response. The already-required `Connection: close`
+response owns native delivery and closure, without waiting for or parsing the remaining upload.
+Explicit aborts and errors still destroy immediately. Peer disconnect aborts the Web Request and
+cancels response readers and drain waits.
 Underlying authentication and MCP handler reservations still last until actual work settles.
 
 Application-response cancellation, fixed-error rejection delivery, and server shutdown have bounded
