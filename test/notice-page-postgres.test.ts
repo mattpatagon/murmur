@@ -83,6 +83,9 @@ test.skipIf(databaseUrl === undefined || adminDatabaseUrl === undefined)(
     });
     const tenant: TenantId = TenantId.generate();
     const other: TenantId = TenantId.generate();
+    // The populated upgrade starts with a global agent key until hosted bootstrap finalizes v2.
+    const reader: AgentId = AgentId.parse(`reader:${tenant.value}`);
+    const otherReader: AgentId = AgentId.parse(`reader:${other.value}`);
     const read: (
       overrides?: Partial<ListNoticesQuery>,
       selected?: TenantId,
@@ -90,24 +93,34 @@ test.skipIf(databaseUrl === undefined || adminDatabaseUrl === undefined)(
       overrides: Partial<ListNoticesQuery> = {},
       selected: TenantId = tenant,
     ): Promise<ListNoticesResult> =>
-      await listPostgresNotices(app, selected, { ...noticePageQuery(), ...overrides }, now);
+      await listPostgresNotices(
+        app,
+        selected,
+        {
+          ...noticePageQuery(),
+          actorId: selected.value === tenant.value ? reader : otherReader,
+          ...overrides,
+        },
+        now,
+      );
     try {
       for (const selected of [tenant, other]) {
+        const actor: AgentId = selected.value === tenant.value ? reader : otherReader;
         await admin`INSERT INTO murmur.tenants(tenant_id, slug, display_name)
           VALUES (${selected.value}::uuid, ${`notice-page-${selected.value}`}, 'Notice page fixture')`;
         await admin`INSERT INTO murmur.agents(tenant_id, agent_id, display_name, metadata, created_at, last_seen_at)
-          VALUES (${selected.value}::uuid, 'reader', 'Reader', '{}'::jsonb, ${now.toISOString()}::timestamptz, ${now.toISOString()}::timestamptz)`;
+          VALUES (${selected.value}::uuid, ${actor.value}, 'Reader', '{}'::jsonb, ${now.toISOString()}::timestamptz, ${now.toISOString()}::timestamptz)`;
       }
       for (let index: number = 1; index <= 7; index += 1) {
         await admin`INSERT INTO murmur.notices(tenant_id, notice_id, kind, creator_id, creator_generation,
           repository_name, content, created_at, expires_at)
-          VALUES (${tenant.value}::uuid, ${noticePageRow(index, "").notice_id}::uuid, 'handoff', 'reader', 1,
+          VALUES (${tenant.value}::uuid, ${noticePageRow(index, "").notice_id}::uuid, 'handoff', ${reader.value}, 1,
             'audit/notices', ${"\u0001".repeat(100_000)}, ${now.toISOString()}::timestamptz,
             ${now.addHours(24).toISOString()}::timestamptz)`;
       }
       await admin`INSERT INTO murmur.notices(tenant_id, notice_id, kind, creator_id, creator_generation,
         repository_name, content, created_at, expires_at)
-        VALUES (${other.value}::uuid, ${noticePageRow(1, "").notice_id}::uuid, 'handoff', 'reader', 1,
+        VALUES (${other.value}::uuid, ${noticePageRow(1, "").notice_id}::uuid, 'handoff', ${otherReader.value}, 1,
           'audit/notices', 'other tenant fixture', ${now.toISOString()}::timestamptz,
           ${now.addHours(24).toISOString()}::timestamptz)`;
       expect<unknown>(await app`SELECT current_user AS name`).toEqual([{ name: "murmur_app" }]);
@@ -157,10 +170,10 @@ test.skipIf(databaseUrl === undefined || adminDatabaseUrl === undefined)(
       await admin`UPDATE murmur.notices SET branch_name = 'feature/two' WHERE tenant_id = ${tenant.value}::uuid AND notice_id = ${noticePageRow(2, "").notice_id}::uuid`;
       await admin`UPDATE murmur.notices SET kind = 'decision' WHERE tenant_id = ${tenant.value}::uuid AND notice_id = ${noticePageRow(3, "").notice_id}::uuid`;
       await admin`UPDATE murmur.notices SET resolved_at = ${now.toISOString()}::timestamptz,
-        resolved_by_id = 'reader', resolved_by_generation = 1, resolution_note = 'done'
+        resolved_by_id = ${reader.value}, resolved_by_generation = 1, resolution_note = 'done'
         WHERE tenant_id = ${tenant.value}::uuid AND notice_id = ${noticePageRow(4, "").notice_id}::uuid`;
       await admin`UPDATE murmur.notices SET withdrawn_at = ${now.toISOString()}::timestamptz,
-        withdrawn_by_id = 'reader', withdrawn_by_generation = 1, resolution_note = 'withdrawn'
+        withdrawn_by_id = ${reader.value}, withdrawn_by_generation = 1, resolution_note = 'withdrawn'
         WHERE tenant_id = ${tenant.value}::uuid AND notice_id = ${noticePageRow(5, "").notice_id}::uuid`;
       await admin`UPDATE murmur.notices SET created_at = ${now.toISOString()}::timestamptz - interval '1 hour',
         expires_at = ${now.toISOString()}::timestamptz
@@ -186,6 +199,9 @@ test.skipIf(databaseUrl === undefined || adminDatabaseUrl === undefined)(
       const emptyScope: MaterializationScope = new MaterializationScope(budget);
       try {
         await withMaterializationScope(emptyScope, async (): Promise<void> => {
+          await expect(read({ actorId: reader }, other)).rejects.toThrow("Unknown agent");
+          expect(budget.reservedBytes).toBe(0);
+          expect(transferredContentBytes).toBe(0);
           expect(
             (await read({ repositoryName: RepositoryName.parse("missing/repository") })).notices,
           ).toEqual([]);
