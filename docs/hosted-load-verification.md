@@ -94,6 +94,13 @@ It prints no credentials, message bodies, raw session IDs, URLs, or exception te
 latency, RSS, completeness, or cleanup failure exits nonzero. Retain the full report, not just the
 exit status. A failed run is evidence of an unmet gate, not a passing capacity claim.
 
+Attempt status `0` means no HTTP response was received. If reading or parsing a received response
+fails, its actual status remains counted and the operation still fails without retry. The fixed
+failure diagnostic identifies `fetch`, `body-read` or `body-parse`, the observed status, and only an
+allowlisted error name/code (`ConnectionClosed`, `ECONNRESET`, `EPIPE`, `ETIMEDOUT`, `ABORT_ERR`,
+`AbortError`, `TimeoutError`, `TypeError`, `SyntaxError`); all other labels become `unclassified`.
+Raw exception messages, stacks and response content are never included.
+
 The child stops before cleanup. The runner deletes only its generated tenant IDs and dependent
 fixture rows, then verifies they are gone. PostgreSQL may retain allocated files after deletion;
 drop the explicitly provisioned disposable database afterward through the provisioning workflow.

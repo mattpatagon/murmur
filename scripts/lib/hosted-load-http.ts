@@ -28,8 +28,30 @@ import {
 import type { LoadPhase } from "./hosted-load-metrics.js";
 
 type HttpResult = { readonly headers: Headers; readonly payload: unknown; readonly status: number };
+type FailureStage = "fetch" | "body-read" | "body-parse";
 const EnvelopeSchema: z.ZodType<{ result: unknown }> = z.object({ result: z.unknown() });
 const ErrorSchema: z.ZodType<{ error: string }> = z.object({ error: z.string().max(200) });
+const FailureLabelSchema: z.ZodType<string> = z.enum([
+  "ConnectionClosed",
+  "ECONNRESET",
+  "EPIPE",
+  "ETIMEDOUT",
+  "ABORT_ERR",
+  "AbortError",
+  "TimeoutError",
+  "TypeError",
+  "SyntaxError",
+]);
+
+function failureLabel(error: unknown): string {
+  if (!(error instanceof Error)) return "unclassified";
+  if ("code" in error) {
+    const code: z.ZodSafeParseResult<string> = FailureLabelSchema.safeParse(error.code);
+    if (code.success) return code.data;
+  }
+  const name: z.ZodSafeParseResult<string> = FailureLabelSchema.safeParse(error.name);
+  return name.success ? name.data : "unclassified";
+}
 
 function headers(token: string, session: string | null): Headers {
   const result: Headers = new Headers({
@@ -60,7 +82,11 @@ function initializeBody(): Record<string, unknown> {
   };
 }
 
-async function payload(response: Response): Promise<unknown> {
+async function payload(
+  response: Response,
+  onStage: (stage: FailureStage) => void = (): void => {},
+): Promise<unknown> {
+  onStage("body-read");
   if (response.body === null) return null;
   const reader: ReadableStreamDefaultReader<Uint8Array> = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -78,6 +104,7 @@ async function payload(response: Response): Promise<unknown> {
     await reader.cancel();
     reader.releaseLock();
   }
+  onStage("body-parse");
   const body: string = Buffer.concat(chunks).toString("utf8");
   if (body === "") return null;
   if ((response.headers.get("content-type") ?? "").includes("text/event-stream")) {
@@ -115,6 +142,8 @@ export class LoadHttpClient {
       requireLoad(before < deadline, "Load request exceeded its bounded request deadline");
       let response: Response;
       let result: unknown;
+      let status: number = 0;
+      let stage: FailureStage = "fetch";
       try {
         response = await this.runtime.fetch(this.url, {
           method,
@@ -125,10 +154,15 @@ export class LoadHttpClient {
             AbortSignal.timeout(Math.max(1, Math.floor(Math.min(10_000, deadline - before)))),
           ]),
         });
-        result = await payload(response);
-      } catch (_error: unknown) {
-        this.phase.recordAttempt(0, this.runtime.now() - before);
-        throw new HostedLoadFailure("Load HTTP request failed or exceeded its deadline");
+        status = response.status;
+        result = await payload(response, (nextStage: FailureStage): void => {
+          stage = nextStage;
+        });
+      } catch (error: unknown) {
+        this.phase.recordAttempt(status, this.runtime.now() - before);
+        throw new HostedLoadFailure(
+          `Load HTTP request failed (stage=${stage}, label=${failureLabel(error)}, status=${status})`,
+        );
       }
       this.phase.recordAttempt(response.status, this.runtime.now() - before);
       const capacity: boolean = response.status === 200 && isLoadCapacityResponse(result, body);

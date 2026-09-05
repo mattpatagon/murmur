@@ -353,3 +353,97 @@ test("authentication and non-overload HTTP errors never trigger MCP capacity ret
     expect(phase.report().operations).toBe(0);
   }
 });
+
+test("load HTTP failure diagnostics preserve received status and redact fetch, read and parse failures", async (): Promise<void> => {
+  const secret: string = "private-load-exception-sentinel";
+  const cases: readonly {
+    readonly stage: "fetch" | "body-read" | "body-parse";
+    readonly status: number;
+    readonly label: string;
+    readonly error: unknown;
+  }[] = [
+    ...["ConnectionClosed", "ECONNRESET", "EPIPE", "ETIMEDOUT", "ABORT_ERR"].map(
+      (code: string): { stage: "fetch"; status: number; label: string; error: Error } => ({
+        stage: "fetch",
+        status: 0,
+        label: code,
+        error: Object.assign(new Error(secret), { code }),
+      }),
+    ),
+    ...["AbortError", "TimeoutError", "TypeError"].map(
+      (name: string): { stage: "fetch"; status: number; label: string; error: Error } => ({
+        stage: "fetch",
+        status: 0,
+        label: name,
+        error: Object.assign(new Error(secret), { name }),
+      }),
+    ),
+    { stage: "fetch", status: 0, label: "unclassified", error: { name: "ECONNRESET", secret } },
+    {
+      stage: "fetch",
+      status: 0,
+      label: "unclassified",
+      error: Object.assign(new Error(secret), { name: secret, code: secret, stack: secret }),
+    },
+    {
+      stage: "body-read",
+      status: 503,
+      label: "ECONNRESET",
+      error: Object.assign(new Error(secret), { code: "ECONNRESET" }),
+    },
+    { stage: "body-parse", status: 200, label: "SyntaxError", error: null },
+    { stage: "body-parse", status: 503, label: "SyntaxError", error: null },
+  ];
+  for (const scenario of cases) {
+    const phase: LoadPhase = new LoadPhase("failure-diagnostics", 1);
+    let fetchCalls: number = 0;
+    let waits: number = 0;
+    const runtime: LoadHttpRuntime = {
+      now: (): number => fetchCalls * 17,
+      wait: async (): Promise<void> => {
+        waits += 1;
+      },
+      fetch: async (): Promise<Response> => {
+        fetchCalls += 1;
+        if (scenario.stage === "fetch") return await Promise.reject(scenario.error);
+        if (scenario.stage === "body-read") {
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller: ReadableStreamDefaultController<Uint8Array>): void {
+                controller.error(scenario.error);
+              },
+            }),
+            { status: scenario.status },
+          );
+        }
+        return new Response(secret, { status: scenario.status });
+      },
+    };
+    const client: LoadHttpClient = new LoadHttpClient(
+      new URL("http://127.0.0.1:1/mcp"),
+      phase,
+      new AbortController().signal,
+      runtime,
+    );
+    let failure: unknown = null;
+    try {
+      await request(client);
+    } catch (error: unknown) {
+      failure = error;
+    }
+    if (!(failure instanceof Error)) throw new Error("Expected classified load failure");
+    expect(failure.message).toBe(
+      `Load HTTP request failed (stage=${scenario.stage}, label=${scenario.label}, status=${scenario.status})`,
+    );
+    const report: PhaseReport = phase.report();
+    expect(report.statusCodes).toEqual({ [String(scenario.status)]: 1 });
+    expect(report.httpAttempts).toBe(1);
+    expect(report.attemptP95Ms).toBe(17);
+    expect(report.operations).toBe(0);
+    expect(report.retries).toBe(0);
+    expect(report.mcpCapacityResponses).toBe(0);
+    expect(fetchCalls).toBe(1);
+    expect(waits).toBe(0);
+    expect(JSON.stringify({ failure: failure.message, report })).not.toContain(secret);
+  }
+});
