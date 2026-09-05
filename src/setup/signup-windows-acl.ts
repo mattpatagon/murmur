@@ -51,12 +51,12 @@ if ($protect) {
   $stage = 'add_rule'
   $acl.AddAccessRule($rule)
   $stage = 'apply_acl'
-  # Set-Acl copies all descriptor sections, including unset group/audit fields. Persist
-  # only the owner and access sections changed above, retaining unrelated security fields.
+  # Direct methods avoid Security module autoload dependencies. Set-Acl also copies all
+  # descriptor sections; persist only our owner/access changes, retaining group/audit fields.
   $item.SetAccessControl($acl)
 }
 $stage = 'read_acl'
-$actual = Get-Acl -LiteralPath $path
+$actual = $item.GetAccessControl()
 $stage = 'verify_inheritance'
 if (-not $actual.AreAccessRulesProtected) { throw 'inheritance' }
 $stage = 'verify_owner'
