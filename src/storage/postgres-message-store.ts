@@ -62,8 +62,14 @@ import {
   type PostgresPlaintextInboxWatcher,
 } from "./postgres-e2ee-message-store.js";
 import { verifyPostgresE2eeSchema } from "./postgres-e2ee-schema.js";
-import { submitPostgresFeedback } from "./postgres-feedback-store.js";
 import { postgresHasPruneCandidates } from "./postgres-expiry-preflight.js";
+import { submitPostgresFeedback } from "./postgres-feedback-store.js";
+import {
+  type DispatcherSubscription,
+  type InboxDispatcherTimeSource,
+  PostgresInboxDispatcher,
+  SYSTEM_INBOX_DISPATCHER_TIME,
+} from "./postgres-inbox-dispatcher.js";
 import {
   getPostgresInboxVersion,
   getPostgresMessages,
@@ -71,12 +77,6 @@ import {
   pruneExpiredPostgresMessages,
 } from "./postgres-inbox-store.js";
 import { prunePostgresLifecycle } from "./postgres-lifecycle-prune.js";
-import {
-  type DispatcherSubscription,
-  type InboxDispatcherTimeSource,
-  PostgresInboxDispatcher,
-  SYSTEM_INBOX_DISPATCHER_TIME,
-} from "./postgres-inbox-dispatcher.js";
 import { type InboxNotification, InboxNotificationSchema } from "./postgres-message-rows.js";
 import { verifyPostgresMessageSchema } from "./postgres-message-schema.js";
 import { setPostgresTenantContext } from "./postgres-message-transactions.js";
@@ -299,7 +299,6 @@ export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvi
     this.ensureOpen();
     const now: Instant = this.clock.now();
     await this.pruneExpired(now);
-    await this.requireAgent(query.agentId);
     return await getPostgresMessages(this.database, this.tenantId, query, now);
   }
 
@@ -307,7 +306,6 @@ export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvi
     this.ensureOpen();
     const now: Instant = this.clock.now();
     await this.pruneExpired(now);
-    await this.requireAgent(command.agentId);
     return await markPostgresMessagesRead(this.database, this.tenantId, command, now);
   }
 

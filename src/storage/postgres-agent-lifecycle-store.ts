@@ -46,6 +46,17 @@ import {
   setPostgresTenantContext,
 } from "./postgres-message-transactions.js";
 
+const AgentRowsSchema: z.ZodType<AgentRow[]> = z.array(AgentRowSchema);
+const PresentRowsSchema: z.ZodType<{ readonly present: number }[]> = z.array(
+  z.strictObject({ present: z.number().int() }),
+);
+const EndedRowsSchema: z.ZodType<{ readonly ended: number }[]> = z.array(
+  z.strictObject({ ended: z.number().int() }),
+);
+const UnreadCountRowsSchema: z.ZodType<{ readonly count: number }[]> = z.array(
+  z.strictObject({ count: z.number().int().nonnegative() }),
+);
+
 function agentSelect(now: Instant): string {
   return now.toISOString();
 }
@@ -94,7 +105,7 @@ export async function postgresAgentInTransaction(
     WHERE agent.tenant_id = ${tenantId.value}::uuid
       AND agent.agent_id = ${agentId.value}
   `;
-  const rows: AgentRow[] = z.array(AgentRowSchema).parse(raw);
+  const rows: AgentRow[] = AgentRowsSchema.parse(raw);
   const row: AgentRow | undefined = rows[0];
   if (row === undefined) throw new UnknownAgentError(agentId.value);
   return mapAgentRow(row);
@@ -142,9 +153,7 @@ export async function renewPostgresSessionInTransaction(
       AND ended_at IS NULL
       AND lease_expires_at > ${now.toISOString()}::timestamptz
   `;
-  const existing: { readonly present: number }[] = z
-    .array(z.strictObject({ present: z.number().int() }))
-    .parse(rawExisting);
+  const existing: { readonly present: number }[] = PresentRowsSchema.parse(rawExisting);
   if (
     existing.length === 0 &&
     (await postgresLiveSessionCount(transaction, tenantId, agentId, generation, now)) >=
@@ -351,9 +360,7 @@ export async function endPostgresSession(
         AND ended_at IS NULL
       RETURNING 1 AS ended
     `;
-    const ended: { readonly ended: number }[] = z
-      .array(z.strictObject({ ended: z.number().int() }))
-      .parse(raw);
+    const ended: { readonly ended: number }[] = EndedRowsSchema.parse(raw);
     await transaction`
       UPDATE murmur.agents SET last_seen_at = ${now.toISOString()}::timestamptz
       WHERE tenant_id = ${tenantId.value}::uuid AND agent_id = ${command.agentId.value}
@@ -402,7 +409,7 @@ export async function closePostgresAgent(
           AND ended_at IS NULL
         RETURNING 1 AS ended
       `;
-      endedSessions = z.array(z.strictObject({ ended: z.number().int() })).parse(endedRaw).length;
+      endedSessions = EndedRowsSchema.parse(endedRaw).length;
     }
     const unreadRaw: unknown = await transaction`
       SELECT COUNT(*)::int AS count FROM murmur.messages
@@ -412,9 +419,7 @@ export async function closePostgresAgent(
         AND read_at IS NULL
         AND expires_at > ${now.toISOString()}::timestamptz
     `;
-    const unreadRows: { readonly count: number }[] = z
-      .array(z.strictObject({ count: z.number().int().nonnegative() }))
-      .parse(unreadRaw);
+    const unreadRows: { readonly count: number }[] = UnreadCountRowsSchema.parse(unreadRaw);
     return {
       agent: await postgresAgentInTransaction(transaction, tenantId, command.agentId, now),
       alreadyClosed,

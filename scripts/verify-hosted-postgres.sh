@@ -118,7 +118,8 @@ else
     bun test test/hosted.mcp.e2e.test.ts test/postgres-runtime-locks.test.ts \
       test/postgres-expiry-preflight.test.ts test/agent-page-budget.postgres.test.ts \
       test/inbox-page-postgres.test.ts test/e2ee-postgres-broadcast-finalize-bounds.test.ts \
-      test/orchestration-policy-page.postgres.test.ts test/notice-page-postgres.test.ts
+      test/orchestration-policy-page.postgres.test.ts test/notice-page-postgres.test.ts \
+      test/postgres-inbox-transactions.test.ts
 fi
 
 # Global-budget mutations must follow bootstrap and finish before other database suites.

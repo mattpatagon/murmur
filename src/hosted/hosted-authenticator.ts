@@ -13,6 +13,8 @@ import {
   hashTokenSecret,
 } from "./token-secret.js";
 
+const AuthRowsV2Schema: z.ZodType<AuthRowV2[]> = z.array(AuthRowV2Schema).max(1);
+
 export class HostedAuthenticator {
   private readonly admissions: CredentialAdmissionCache;
   private closed: boolean;
@@ -78,7 +80,7 @@ export class HostedAuthenticator {
         personal_id::text AS personal_id, repository_name, orchestrator_agent_id
       FROM murmur.authenticate_principal_v2(${credentialHash})
     `;
-    const row: AuthRowV2 | undefined = z.array(AuthRowV2Schema).max(1).parse(rawRows)[0];
+    const row: AuthRowV2 | undefined = AuthRowsV2Schema.parse(rawRows)[0];
     if (row === undefined) return null;
     if (row.principal_kind === "bootstrap") {
       if (

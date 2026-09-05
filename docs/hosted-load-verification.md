@@ -53,7 +53,10 @@ are separate from legitimate-request latency metrics.
 The full account sweep must successfully exercise every seeded tenant. A final phase fills the
 configured session ceiling and all 64 stream slots, requires the corresponding 503 gate messages,
 releases them, and proves both messaging and standalone-stream recovery. It does not raise the
-application's authentication, request, stream, tenant, or rate limits to make the workload pass.
+application’s authentication, request, stream, tenant, or rate limits to make the workload pass.
+
+The [PostgreSQL inbox query contract](postgres-inbox-query-bounds.md) records fixed per-operation
+query reductions and their isolation regressions. These reductions do not replace this load gate.
 
 ## Bounds and output
 

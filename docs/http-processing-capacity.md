@@ -34,6 +34,12 @@ The non-HTTP/stdio application path has no HTTP processing reservation callback.
 change its existing local resource limits. Custom hosted application factories must forward
 the supplied `reserveProcessingCapacity` callback, as the default factory does.
 
+Session construction reuses validated JSON Schema snapshots keyed only by the fixed application
+schema objects. Weak keys cannot retain discarded schema objects, and no tenant, credential,
+request, or authorization result is cached. Each catalog receives fresh, deeply cloned schema
+metadata and annotations. Principal and encryption-entitlement filtering still runs for each
+application; runtime input, output, and database-row validation is unchanged.
+
 Tests use deterministic blocked fake stores and actual localhost HTTP/SDK round trips for all
 three configured budgets, initialization, reads, tools, subscription cancellation, session close,
 cross-session rejection, numeric/string IDs, handler failure, and recovery after settlement. They do not

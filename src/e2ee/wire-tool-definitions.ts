@@ -1,8 +1,8 @@
 import type { Tool, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
+import type { z } from "zod";
 
 import { MarkMessagesReadInputSchema, MarkMessagesReadOutputSchema } from "../domain/contracts.js";
+import { toolSchemaMetadata } from "../mcp/tool-schema-metadata.js";
 import {
   ClaimOrchestratorPrekeyInputSchema,
   ClaimOrchestratorPrekeyOutputSchema,
@@ -40,14 +40,16 @@ function wireTool<Input, Output>(
   outputSchema: z.ZodType<Output>,
   annotations: ToolAnnotations,
 ): Tool {
-  const generatedInput: unknown = z.toJSONSchema(inputSchema);
-  const generatedOutput: unknown = z.toJSONSchema(outputSchema);
+  const metadata: ReturnType<typeof toolSchemaMetadata> = toolSchemaMetadata(
+    inputSchema,
+    outputSchema,
+  );
   return {
-    annotations,
+    annotations: structuredClone(annotations),
     description,
-    inputSchema: ToolSchema.shape.inputSchema.parse(generatedInput),
+    inputSchema: metadata.inputSchema,
     name,
-    outputSchema: ToolSchema.shape.outputSchema.unwrap().parse(generatedOutput),
+    outputSchema: metadata.outputSchema,
     title,
   };
 }

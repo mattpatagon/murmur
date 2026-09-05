@@ -30,6 +30,9 @@ All notable changes to Murmur are documented in this file.
 
 - Keep hosted credential enrichment on an indexed single-principal lookup instead of scanning the
   growing token directory on each request; token revocation and suspension remain authoritative.
+- Reuse static tool and row schemas and remove duplicate inbox prechecks while preserving
+  per-request validation, tenant isolation and independently mutable tool catalogs.
+- Let the native HTTP transport finish early-response delivery before closing incomplete inputs.
 
 ## [0.13.0.0] - 2026-09-05
 
