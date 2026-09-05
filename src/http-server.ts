@@ -35,6 +35,8 @@ import {
   SSE_KEEP_ALIVE_MS,
   TENANT_REGISTRATION_PATH,
 } from "./http/http-config.js";
+import { HttpMaterializationBudget } from "./http/http-materialization-budget.js";
+import { runHttpProcess } from "./http/http-process.js";
 import {
   authenticationCapacityResponse,
   bearerToken,
@@ -51,10 +53,7 @@ import {
   streamCapacityResponse,
   unauthorizedResponse,
 } from "./http/http-request.js";
-import { runHttpProcess } from "./http/http-process.js";
 import { createHttpRequestHandler } from "./http/http-router.js";
-import { createPublicSetupHandler } from "./http/public-setup.js";
-import { configuredPublicDownloads } from "./http/public-distribution.js";
 import type { HttpServerDependencies, MurmurHttpServer } from "./http/http-server-contracts.js";
 import {
   cleanupObservabilityStartup,
@@ -64,8 +63,12 @@ import {
 } from "./http/http-server-resources.js";
 import type { HostedApplicationRequest } from "./http/murmur-application-factory.js";
 import { createHostedMurmurApplication } from "./http/murmur-application-factory.js";
+import { type NodeHttpServer, startNodeHttpServer } from "./http/node-http-server.js";
+import { configuredPublicDownloads } from "./http/public-distribution.js";
+import { createPublicSetupHandler } from "./http/public-setup.js";
 import type { RemoteSession } from "./http/remote-session.js";
 import { trackSessionResponse } from "./http/remote-stream-lifecycle.js";
+import { HttpRequestIdAdmission } from "./http/request-id-admission.js";
 import { responseWithFinish } from "./http/response-lifecycle.js";
 import { createTenantRegistrationHandler } from "./http/self-service-registration.js";
 import { type SessionAdmission, SessionAdmissionController } from "./http/session-admission.js";
@@ -83,6 +86,7 @@ import {
 import { logSafeError } from "./safe-errors.js";
 import { createStore } from "./storage/create-store.js";
 import type { MessageStore } from "./storage/message-store.js";
+
 export type { HttpServerDependencies, MurmurHttpServer } from "./http/http-server-contracts.js";
 export async function startHttpServer(
   environment: NodeJS.ProcessEnv = process.env,
@@ -98,6 +102,8 @@ export async function startHttpServer(
   const timeSource: TimeSource = dependencies.timeSource ?? SYSTEM_TIME_SOURCE;
   const capacity: HttpCapacityController = new HttpCapacityController(config, timeSource);
   const processingCapacity: HttpCapacityController = new HttpCapacityController(config, timeSource);
+  const materialization: HttpMaterializationBudget = new HttpMaterializationBudget();
+  const requestIds: HttpRequestIdAdmission = new HttpRequestIdAdmission();
   const store: MessageStore = await createStore(environment);
   const applicationFactory: (request: HostedApplicationRequest) => Promise<MurmurApplication> =
     dependencies.applicationFactory ?? createHostedMurmurApplication;
@@ -203,6 +209,7 @@ export async function startHttpServer(
         capacity,
         observation,
       );
+      if (request.signal.aborted) return jsonResponse(408, { error: "HTTP request cancelled" });
       if (authentication.kind === "capacity") return authenticationCapacityResponse();
       if (authentication.kind === "unavailable") {
         return jsonResponse(503, { error: "Authentication service unavailable" });
@@ -292,9 +299,9 @@ export async function startHttpServer(
             observation.recordSessionLookup("found");
             observation.recordSession(sessionId);
             session.lastSeenAt = now;
-            const response: Response = await session.transport.handleRequest(
-              request,
-              parsedPostBody === undefined ? undefined : { parsedBody: parsedPostBody },
+            const response: Response = await materialization.handle(
+              async (): Promise<Response> =>
+                await requestIds.handle(session.transport, request, parsedPostBody),
             );
             return trackSessionResponse(
               response,
@@ -383,9 +390,10 @@ export async function startHttpServer(
             };
             try {
               await application.server.connect(transport);
-              const response: Response = await transport.handleRequest(request, {
-                parsedBody: parsedPostBody,
-              });
+              const response: Response = await materialization.handle(
+                async (): Promise<Response> =>
+                  await requestIds.handle(transport, request, parsedPostBody),
+              );
               const initializedSessionId: string | undefined = transport.sessionId;
               if (initializedSessionId === undefined) {
                 await application.close();
@@ -423,9 +431,9 @@ export async function startHttpServer(
         if (!responseHandedOff) releaseResponseCapacity();
       }
     };
-  let bunServer: Bun.Server<undefined>;
+  let httpServer: NodeHttpServer;
   try {
-    bunServer = Bun.serve({
+    httpServer = await startNodeHttpServer({
       fetch: createHttpRequestHandler(
         observability,
         handleMcpRequest,
@@ -436,6 +444,7 @@ export async function startHttpServer(
         createPublicSetupHandler({ allowedOrigins, capacity, time: timeSource }),
       ),
       hostname,
+      maxRequestBytes,
       port: requestedPort,
     });
   } catch (error: unknown) {
@@ -443,10 +452,10 @@ export async function startHttpServer(
     await cleanupServerStartup(authenticator, store, observability, null);
     throw error;
   }
-  const boundPort: number | undefined = bunServer.port;
+  const boundPort: number | undefined = httpServer.port;
   if (boundPort === undefined) {
     capacity.stop();
-    await cleanupServerStartup(authenticator, store, observability, bunServer);
+    await cleanupServerStartup(authenticator, store, observability, httpServer);
     throw new Error("The HTTP server did not bind a TCP port");
   }
   const port: number = boundPort;
@@ -467,7 +476,7 @@ export async function startHttpServer(
       connectorAuthorizationCodes.clear();
       const activeSessions: [string, RemoteSession][] = Array.from(sessions.entries());
       await shutdownHttpResources(
-        bunServer,
+        httpServer,
         async (): Promise<void> =>
           await invalidator.close(activeSessions, "Murmur active-session shutdown failed"),
         authenticator,

@@ -71,8 +71,14 @@ Smaller populations/session ceilings are development profiles and are recorded e
 successful default-population run is evidence for the 25,000-account workload. Thresholds are
 per-request-operation percentiles including retry/backoff time. Legitimate 429/503 responses get
 at most eight attempts within a 15-second deadline, honoring bounded numeric `Retry-After` values.
-No retry hides its status code or latency. Each attempt has a 10-second maximum; the overall
-workload deadline aborts active HTTP. Database statements and lock acquisition also have deadlines.
+HTTP 200 JSON or SSE responses also retry only the exact processing/materialization JSON-RPC
+capacity error: matching request ID, code `-32003`, the fixed capacity message, and precisely
+`{"retryable":true,"retry_after_ms":1000}`. Other tool, schema, authentication, or malformed errors
+are not retried. Capacity waits start at one second; all waits, including jitter, share the same
+15-second deadline and stop on cancellation. No retry hides its status code or latency: each
+capacity response remains an actual HTTP 200 attempt and increments `mcpCapacityResponses` in
+the phase report, even when retries are disabled or exhausted. Each attempt has a 10-second maximum;
+the overall workload deadline aborts active HTTP. Database statements and lock acquisition also have deadlines.
 Cleanup starts no new batch after 60 seconds; a hard process backstop at the configured workload
 duration plus 120 seconds exits nonzero if shutdown cannot finish.
 

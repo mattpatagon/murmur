@@ -1,22 +1,14 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import type { AnyObjectSchema, SchemaOutput } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type {
   CallToolRequest,
   CallToolResult,
   ListToolsResult,
-  Notification,
-  Request,
-  Result,
   ServerNotification,
   ServerRequest,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  McpError,
-} from "@modelcontextprotocol/sdk/types.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import packageMetadata from "../../package.json" with { type: "json" };
 
 import { RETENTION_DAYS } from "../domain/contracts.js";
@@ -38,6 +30,7 @@ import {
   type EffectiveOrchestratorDto,
   toEffectiveOrchestratorDto,
 } from "../hosted/orchestration-contracts.js";
+import { MaterializationCapacityError } from "../materialization-budget.js";
 import { logSafeError } from "../safe-errors.js";
 import type { E2eeMessageStore, E2eeOrchestrationScope } from "../storage/e2ee-message-store.js";
 import type { MessageStore } from "../storage/message-store.js";
@@ -57,6 +50,7 @@ import {
   callOrchestrationTool,
   type OrchestrationToolContext,
 } from "./murmur-orchestration-tools.js";
+import { callSetupGuideTool } from "./murmur-setup-guide.js";
 import { toolsForPrincipal } from "./murmur-tool-definitions.js";
 import { toolError } from "./murmur-tool-results.js";
 import {
@@ -64,46 +58,12 @@ import {
   type MurmurUpgradeChecker,
 } from "./murmur-upgrade-checker.js";
 import { callUpgradeTool } from "./murmur-upgrade-tool.js";
-import { callSetupGuideTool } from "./murmur-setup-guide.js";
+import {
+  installProcessingAdmission,
+  RequestProcessingServer,
+} from "./request-processing-admission.js";
 
 const SERVER_VERSION: string = packageMetadata.version;
-
-function installProcessingAdmission(
-  server: Server,
-  reserveCapacity: (() => (() => void) | null) | undefined,
-): void {
-  if (reserveCapacity === undefined) return;
-  const register: Server["setRequestHandler"] = server.setRequestHandler.bind(server);
-  server.setRequestHandler = <T extends AnyObjectSchema>(
-    schema: T,
-    handler: (
-      request: SchemaOutput<T>,
-      extra: RequestHandlerExtra<ServerRequest | Request, ServerNotification | Notification>,
-    ) => Result | Promise<Result>,
-  ): void => {
-    register(
-      schema,
-      async (
-        request: SchemaOutput<T>,
-        extra: RequestHandlerExtra<ServerRequest | Request, ServerNotification | Notification>,
-      ): Promise<Result> => {
-        const release: (() => void) | null = reserveCapacity();
-        if (release === null) {
-          throw new McpError(-32003, "MCP processing capacity reached; retry later.", {
-            retryable: true,
-            retry_after_ms: 1000,
-          });
-        }
-        try {
-          // HTTP disconnect and SDK cancellation do not terminate a pending storage operation.
-          return await handler(request, extra);
-        } finally {
-          release();
-        }
-      },
-    );
-  };
-}
 
 export type MurmurApplicationDependencies = {
   readonly branchName: BranchName | null;
@@ -188,7 +148,7 @@ export class MurmurApplication {
     this.upgradeChecker = dependencies.upgradeChecker ?? defaultMurmurUpgradeChecker;
     this.tools = this.createTools();
     this.exposedToolNames = new Set<string>(this.tools.map((tool: Tool): string => tool.name));
-    this.server = new Server(
+    this.server = new RequestProcessingServer(
       { name: "murmur", version: SERVER_VERSION },
       {
         capabilities: {
@@ -406,6 +366,7 @@ export class MurmurApplication {
       }
       return toolError(new Error(`Unknown tool '${name}'`));
     } catch (error: unknown) {
+      if (error instanceof MaterializationCapacityError) throw error;
       return toolError(normalizePostgresStorageError(error));
     }
   }

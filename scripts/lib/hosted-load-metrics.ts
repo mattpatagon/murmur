@@ -14,6 +14,7 @@ export type PhaseReport = {
   readonly durationMs: number;
   readonly httpAttempts: number;
   readonly retries: number;
+  readonly mcpCapacityResponses: number;
   readonly statusCodes: Readonly<Record<string, number>>;
   readonly attemptsPerSecond: number;
   readonly operations: number;
@@ -29,6 +30,7 @@ export class LoadPhase {
   private readonly operations: number[] = [];
   private readonly statusCodes: Record<string, number> = {};
   public retries: number = 0;
+  public mcpCapacityResponses: number = 0;
 
   public constructor(
     private readonly phase: string,
@@ -55,6 +57,7 @@ export class LoadPhase {
       durationMs: Math.round(durationMs),
       httpAttempts: this.attempts.length,
       retries: this.retries,
+      mcpCapacityResponses: this.mcpCapacityResponses,
       statusCodes: { ...this.statusCodes },
       attemptsPerSecond:
         Math.round((this.attempts.length / Math.max(durationMs, 1)) * 100_000) / 100,

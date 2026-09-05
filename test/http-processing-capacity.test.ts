@@ -259,6 +259,9 @@ test("processing registration releases throwing handlers and the non-HTTP path n
     await application.server.connect(serverTransport);
     await client.connect(clientTransport);
     try {
+      // Built-in initialization now uses the same admission wrapper as later handlers.
+      expect(reservations).toBe(bounded ? 1 : 0);
+      expect(active).toBe(0);
       for (const asynchronous of [false, true]) {
         application.server.setRequestHandler(
           ListToolsRequestSchema,
@@ -277,7 +280,7 @@ test("processing registration releases throwing handlers and the non-HTTP path n
       );
       expect(await client.listTools()).toEqual({ tools: [] });
       expect(active).toBe(0);
-      expect(reservations).toBe(bounded ? 3 : 0);
+      expect(reservations).toBe(bounded ? 4 : 0);
     } finally {
       await client.close();
       await application.close();

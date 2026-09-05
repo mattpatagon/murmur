@@ -62,6 +62,7 @@ import { broadcastSqliteMessage } from "./sqlite-broadcast-store.js";
 import { sendSqliteMessage } from "./sqlite-direct-message-store.js";
 import { SqliteE2eeMessageStore } from "./sqlite-e2ee-message-store.js";
 import { submitSqliteFeedback } from "./sqlite-feedback-store.js";
+import { readSqliteInboxPage } from "./sqlite-inbox-page.js";
 import { pruneSqliteLifecycle } from "./sqlite-lifecycle-prune.js";
 import { migrateSqliteDatabase } from "./sqlite-message-migrations.js";
 import {
@@ -288,32 +289,15 @@ export class SqliteMessageStore implements MessageStore {
     }
     const generation: number =
       query.generation == null ? agent.generation.value : query.generation.value;
-    const unreadFlag: number = query.unreadOnly ? 1 : 0;
-    const threadId: string | null = query.threadId === null ? null : query.threadId.value;
-    const statement: Statement<
-      unknown,
-      [string, number, number, string, number, string | null, string | null, number]
-    > = this.database.query(`
-      SELECT * FROM messages
-      WHERE recipient_id = ?
-        AND recipient_generation = ?
-        AND sequence > ?
-        AND expires_at > ?
-        AND (? = 0 OR read_at IS NULL)
-        AND (? IS NULL OR thread_id = ?)
-      ORDER BY sequence ASC
-      LIMIT ?
-    `);
-    const rows: unknown[] = statement.all(
-      query.agentId.value,
+    const rows: unknown[] = readSqliteInboxPage(this.database, "plaintext", {
+      afterSequence: query.afterSequence.value,
+      agentId: query.agentId.value,
+      expiresAfter: now.toISOString(),
       generation,
-      query.afterSequence.value,
-      now.toISOString(),
-      unreadFlag,
-      threadId,
-      threadId,
-      query.limit,
-    );
+      limit: query.limit,
+      threadId: query.threadId === null ? null : query.threadId.value,
+      unreadOnly: query.unreadOnly,
+    });
     return rows.map((row: unknown): Message => mapMessageRow(row));
   }
 

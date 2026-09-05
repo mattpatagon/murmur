@@ -116,7 +116,9 @@ else
     MURMUR_TEST_BOOTSTRAP_LEGACY_TOKEN='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
     MURMUR_TEST_DATABASE_TLS_INSECURE=1 \
     bun test test/hosted.mcp.e2e.test.ts test/postgres-runtime-locks.test.ts \
-      test/postgres-expiry-preflight.test.ts
+      test/postgres-expiry-preflight.test.ts test/agent-page-budget.postgres.test.ts \
+      test/inbox-page-postgres.test.ts test/e2ee-postgres-broadcast-finalize-bounds.test.ts \
+      test/orchestration-policy-page.postgres.test.ts test/notice-page-postgres.test.ts
 fi
 
 # Global-budget mutations must follow bootstrap and finish before other database suites.
@@ -125,7 +127,7 @@ MURMUR_TEST_APP_DATABASE_URL="$app_url" \
   MURMUR_TEST_DATABASE_TLS_INSECURE=1 \
   MURMUR_TEST_STORAGE_BUDGET=1 \
   bun test test/hosted-storage-budget.postgres.test.ts \
-    test/hosted-storage-budget-e2ee.postgres.test.ts
+    test/hosted-storage-budget-e2ee.postgres.test.ts test/hosted-audit-headroom.postgres.test.ts
 
 MURMUR_TEST_APP_DATABASE_URL="$app_url" \
   MURMUR_TEST_ADMIN_DATABASE_URL="$admin_url" \

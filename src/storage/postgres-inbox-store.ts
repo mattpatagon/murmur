@@ -16,6 +16,16 @@ import {
   type TenantId,
 } from "../domain/value-objects.js";
 import {
+  type MaterializationReservation,
+  reserveMaterializationBytes,
+} from "../materialization-budget.js";
+import {
+  INBOX_PAGE_ROW_OVERHEAD_BYTES,
+  MAX_INBOX_PAGE_BYTES,
+  PLAINTEXT_PAGE_CONTENT_MULTIPLIER,
+  parsePostgresInboxPage,
+} from "./inbox-page-budget.js";
+import {
   postgresAgentInTransaction,
   renewPostgresSessionInTransaction,
 } from "./postgres-agent-lifecycle-store.js";
@@ -71,32 +81,64 @@ export async function getPostgresMessages(
         ? agent.generation.value
         : query.generation.value;
     const threadId: string | null = query.threadId === null ? null : query.threadId.value;
-    const raw: unknown = await transaction`
+    const reservation: MaterializationReservation =
+      reserveMaterializationBytes(MAX_INBOX_PAGE_BYTES);
+    try {
+      const raw: unknown = await transaction`
+      WITH candidates AS MATERIALIZED (
+        SELECT tenant_sequence,
+          ${PLAINTEXT_PAGE_CONTENT_MULTIPLIER}::bigint * octet_length(content)
+            + ${INBOX_PAGE_ROW_OVERHEAD_BYTES}::bigint AS estimated_bytes
+        FROM murmur.messages
+        WHERE tenant_id = ${tenantId.value}::uuid
+          AND recipient_id = ${query.agentId.value}
+          AND recipient_generation = ${generation}
+          AND tenant_sequence > ${query.afterSequence.value}
+          AND expires_at > ${now.toISOString()}::timestamptz
+          AND (${query.unreadOnly} = false OR read_at IS NULL)
+          AND (${threadId}::text IS NULL OR thread_id = ${threadId})
+        ORDER BY tenant_sequence ASC
+        LIMIT ${query.limit}
+      ), budget AS (
+        SELECT COALESCE(SUM(estimated_bytes), 0)::bigint AS estimated_page_bytes FROM candidates
+      )
       SELECT
-        tenant_sequence AS sequence, message_id::text AS message_id,
-        broadcast_id::text AS broadcast_id, thread_id, sender_id, recipient_id,
-        sender_generation, recipient_generation,
-        content, sender_authority, message_kind,
-        orchestrator_policy_id::text AS orchestrator_policy_id,
-        repository_name, branch_name, client_name,
-        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
-        to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS expires_at,
-        CASE WHEN read_at IS NULL THEN NULL
-          ELSE to_char(read_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        budget.estimated_page_bytes,
+        message.tenant_sequence AS sequence, message.message_id::text AS message_id,
+        message.broadcast_id::text AS broadcast_id, message.thread_id, message.sender_id,
+        message.recipient_id, message.sender_generation, message.recipient_generation,
+        message.content, message.sender_authority, message.message_kind,
+        message.orchestrator_policy_id::text AS orchestrator_policy_id,
+        message.repository_name, message.branch_name, message.client_name,
+        to_char(message.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
+        to_char(message.expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS expires_at,
+        CASE WHEN message.read_at IS NULL THEN NULL
+          ELSE to_char(message.read_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
         END AS read_at
-      FROM murmur.messages
-      WHERE tenant_id = ${tenantId.value}::uuid
-        AND recipient_id = ${query.agentId.value}
-        AND recipient_generation = ${generation}
-        AND tenant_sequence > ${query.afterSequence.value}
-        AND expires_at > ${now.toISOString()}::timestamptz
-        AND (${query.unreadOnly} = false OR read_at IS NULL)
-        AND (${threadId}::text IS NULL OR thread_id = ${threadId})
-      ORDER BY tenant_sequence ASC
-      LIMIT ${query.limit}
+      FROM budget
+      LEFT JOIN candidates ON budget.estimated_page_bytes <= ${MAX_INBOX_PAGE_BYTES}
+      LEFT JOIN murmur.messages AS message
+        ON message.tenant_id = ${tenantId.value}::uuid
+        AND message.tenant_sequence = candidates.tenant_sequence
+      WHERE budget.estimated_page_bytes > ${MAX_INBOX_PAGE_BYTES}
+        OR message.tenant_sequence IS NOT NULL
+      ORDER BY message.tenant_sequence ASC
     `;
-    const rows: MessageRow[] = z.array(MessageRowSchema).parse(raw);
-    return rows.map((row: MessageRow): Message => mapMessageRow(row));
+      const {
+        estimatedBytes,
+        rows,
+      }: { readonly estimatedBytes: number; readonly rows: MessageRow[] } = parsePostgresInboxPage(
+        raw,
+        MessageRowSchema,
+        { kind: "plaintext", limit: query.limit },
+      );
+      const messages: Message[] = rows.map((row: MessageRow): Message => mapMessageRow(row));
+      reservation.settle(estimatedBytes);
+      return messages;
+    } catch (error: unknown) {
+      reservation.fail();
+      throw error;
+    }
   });
 }
 

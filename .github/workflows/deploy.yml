@@ -144,7 +144,7 @@ jobs:
             --max 1 \
             --max-instances 1 \
             --memory 512Mi \
-            --port 8080 \
+            --port 8080 --no-use-http2 \
             --timeout 3600 \
             --quiet
           curl --fail --silent --show-error "$PRODUCTION_URL/health" >/dev/null
@@ -247,7 +247,7 @@ jobs:
             --max 1 \
             --max-instances 1 \
             --memory 512Mi \
-            --port 8080 \
+            --port 8080 --no-use-http2 \
             --timeout 3600 \
             --quiet
           unset secret_mapping

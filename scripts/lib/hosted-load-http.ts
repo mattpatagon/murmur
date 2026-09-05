@@ -20,6 +20,11 @@ import {
 } from "../../src/domain/contracts.js";
 import { HostedLoadFailure, requireLoad } from "./hosted-load-config.js";
 import type { LoadTenant } from "./hosted-load-fixture.js";
+import {
+  isLoadCapacityResponse,
+  LOAD_HTTP_RUNTIME,
+  type LoadHttpRuntime,
+} from "./hosted-load-http-runtime.js";
 import type { LoadPhase } from "./hosted-load-metrics.js";
 
 type HttpResult = { readonly headers: Headers; readonly payload: unknown; readonly status: number };
@@ -91,6 +96,7 @@ export class LoadHttpClient {
     public readonly url: URL,
     public readonly phase: LoadPhase,
     private readonly signal: AbortSignal,
+    private readonly runtime: LoadHttpRuntime = LOAD_HTTP_RUNTIME,
   ) {}
 
   public async request(
@@ -101,44 +107,66 @@ export class LoadHttpClient {
     expected: readonly number[],
     retry: boolean = true,
   ): Promise<HttpResult> {
-    const started: number = performance.now();
-    const deadline: number = Date.now() + 15_000;
+    const started: number = this.runtime.now();
+    const deadline: number = started + 15_000;
     for (let attempt: number = 0; attempt < 8; attempt += 1) {
       this.signal.throwIfAborted();
-      const before: number = performance.now();
+      const before: number = this.runtime.now();
+      requireLoad(before < deadline, "Load request exceeded its bounded request deadline");
       let response: Response;
       let result: unknown;
       try {
-        response = await fetch(this.url, {
+        response = await this.runtime.fetch(this.url, {
           method,
           headers: headers(token, session),
           ...(body === null ? {} : { body: JSON.stringify(body) }),
           signal: AbortSignal.any([
             this.signal,
-            AbortSignal.timeout(Math.max(1, Math.min(10_000, deadline - Date.now()))),
+            AbortSignal.timeout(Math.max(1, Math.floor(Math.min(10_000, deadline - before)))),
           ]),
         });
         result = await payload(response);
       } catch (_error: unknown) {
-        this.phase.recordAttempt(0, performance.now() - before);
+        this.phase.recordAttempt(0, this.runtime.now() - before);
         throw new HostedLoadFailure("Load HTTP request failed or exceeded its deadline");
       }
-      this.phase.recordAttempt(response.status, performance.now() - before);
-      if (expected.includes(response.status)) {
-        this.phase.recordOperation(performance.now() - started);
+      this.phase.recordAttempt(response.status, this.runtime.now() - before);
+      const capacity: boolean = response.status === 200 && isLoadCapacityResponse(result, body);
+      if (capacity) this.phase.mcpCapacityResponses += 1;
+      this.signal.throwIfAborted();
+      requireLoad(
+        this.runtime.now() < deadline,
+        "Load request exceeded its bounded request deadline",
+      );
+      if (expected.includes(response.status) && !capacity) {
+        this.phase.recordOperation(this.runtime.now() - started);
         return { headers: response.headers, payload: result, status: response.status };
       }
-      if (!retry || (response.status !== 503 && response.status !== 429) || attempt === 7) {
+      if (
+        !retry ||
+        (!capacity && response.status !== 503 && response.status !== 429) ||
+        attempt === 7
+      ) {
+        if (capacity)
+          throw new HostedLoadFailure("Load MCP capacity exhausted its bounded retries");
         throw new HostedLoadFailure(`Unexpected hosted load HTTP status ${response.status}`);
       }
       const retryAfter: string | null = response.headers.get("retry-after");
-      const delay: number = retryAfter === null ? 100 * (attempt + 1) : Number(retryAfter) * 1_000;
+      const delay: number = capacity
+        ? 1_000
+        : retryAfter === null
+          ? 100 * (attempt + 1)
+          : Number(retryAfter) * 1_000;
+      const wait: number = delay + attempt * 7;
       requireLoad(
-        Number.isFinite(delay) && delay >= 0 && delay <= 10_000 && Date.now() + delay < deadline,
+        Number.isFinite(delay) &&
+          delay >= 0 &&
+          delay <= 10_000 &&
+          this.runtime.now() + wait < deadline,
         "Load retry exceeds its bounded request deadline",
       );
       this.phase.retries += 1;
-      await Bun.sleep(delay + attempt * 7);
+      await this.runtime.wait(wait, this.signal);
     }
     throw new HostedLoadFailure("Load request exhausted retries");
   }

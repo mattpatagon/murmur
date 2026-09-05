@@ -51,6 +51,7 @@ import {
   SqliteE2eeVersionRowSchema,
 } from "./sqlite-e2ee-rows.js";
 import { updateSqliteE2eeUsage } from "./sqlite-e2ee-usage.js";
+import { readSqliteInboxPage } from "./sqlite-inbox-page.js";
 
 function agentGeneration(database: Database, agentId: string): number {
   const raw: unknown = database
@@ -300,29 +301,15 @@ export function getSqliteEncryptedMessages(
 ): EncryptedInboxOutput {
   const input: GetEncryptedMessagesInput = GetEncryptedMessagesInputSchema.parse(inputValue);
   const generation: number = agentGeneration(database, input.agent_id);
-  const threadId: string | null = input.thread_id === undefined ? null : input.thread_id;
-  const rows: unknown[] = database
-    .query<
-      unknown,
-      [string, number, number, string, number, string | null, string | null, number]
-    >(`
-      SELECT sequence, envelope_json, sender_chain_json, read_at
-      FROM e2ee_messages
-      WHERE recipient_id = ? AND recipient_generation = ? AND sequence > ? AND expires_at > ?
-        AND (? = 0 OR read_at IS NULL)
-        AND (? IS NULL OR thread_id = ?)
-      ORDER BY sequence ASC LIMIT ?
-    `)
-    .all(
-      input.agent_id,
-      generation,
-      input.after_sequence,
-      now.toISOString(),
-      input.unread_only ? 1 : 0,
-      threadId,
-      threadId,
-      input.limit,
-    );
+  const rows: unknown[] = readSqliteInboxPage(database, "encrypted", {
+    afterSequence: input.after_sequence,
+    agentId: input.agent_id,
+    expiresAfter: now.toISOString(),
+    generation,
+    limit: input.limit,
+    threadId: input.thread_id === undefined ? null : input.thread_id,
+    unreadOnly: input.unread_only,
+  });
   const messages: EncryptedMessageDto[] = rows.map(
     (row: unknown): EncryptedMessageDto => messageFromRow(SqliteE2eeMessageRowSchema.parse(row)),
   );

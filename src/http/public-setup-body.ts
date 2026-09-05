@@ -1,3 +1,4 @@
+import { parseBoundedJsonText } from "./bounded-json.js";
 import { SYSTEM_TIME_SOURCE, type TimeSource } from "./http-capacity.js";
 
 export async function readPublicSetupBody(
@@ -42,7 +43,9 @@ export async function readPublicSetupBody(
       bytes.set(chunk.value, total);
       total += chunk.value.byteLength;
     }
-    return JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(bytes.subarray(0, total)));
+    return parseBoundedJsonText(
+      new TextDecoder("utf8", { fatal: true }).decode(bytes.subarray(0, total)),
+    );
   } finally {
     cancellation.cancel();
     request.signal.removeEventListener("abort", abort.listener);

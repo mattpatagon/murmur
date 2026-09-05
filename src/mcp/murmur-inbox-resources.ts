@@ -1,6 +1,7 @@
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type {
+  ListResourcesRequest,
   ListResourcesResult,
   ListResourceTemplatesResult,
   ReadResourceRequest,
@@ -20,8 +21,15 @@ import {
   UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { type InboxOutput, InboxOutputSchema, toMessageDto } from "../domain/contracts.js";
-import type { Agent, GetMessagesQuery, Message } from "../domain/models.js";
+import {
+  encodeAgentCursor,
+  type InboxOutput,
+  InboxOutputSchema,
+  ListAgentsInputSchema,
+  listAgentsQuery,
+  toMessageDto,
+} from "../domain/contracts.js";
+import type { Agent, GetMessagesQuery, ListAgentsResult, Message } from "../domain/models.js";
 import { AgentId, Sequence } from "../domain/value-objects.js";
 import { logSafeError, safeErrorMessage } from "../safe-errors.js";
 import type {
@@ -202,14 +210,17 @@ export class MurmurInboxResources {
   public registerHandlers(): void {
     this.server.setRequestHandler(
       ListResourcesRequestSchema,
-      async (): Promise<ListResourcesResult> =>
-        await safeStorageRequest(
-          async (): Promise<ListResourcesResult> => ({
-            resources: (this.store === null
-              ? []
-              : (await this.store.listAgents({ cursor: null, limit: 1_000, state: "active" }))
-                  .agents
-            ).map(
+      async (request: ListResourcesRequest): Promise<ListResourcesResult> =>
+        await safeStorageRequest(async (): Promise<ListResourcesResult> => {
+          if (this.store === null) return { resources: [] };
+          const cursor: string | undefined =
+            request.params === undefined ? undefined : request.params.cursor;
+          const page: ListAgentsResult = await this.store.listAgents(
+            listAgentsQuery(ListAgentsInputSchema.parse({ cursor, limit: 1_000, state: "active" })),
+          );
+          return {
+            ...(page.nextCursor === null ? {} : { nextCursor: encodeAgentCursor(page.nextCursor) }),
+            resources: page.agents.map(
               (agent: Agent): ListedResource => ({
                 description: `Durable inbox for ${agent.agentId.value}`,
                 mimeType: "application/json",
@@ -217,8 +228,8 @@ export class MurmurInboxResources {
                 uri: inboxUri(agent.agentId),
               }),
             ),
-          }),
-        ),
+          };
+        }),
     );
     this.server.setRequestHandler(
       ListResourceTemplatesRequestSchema,

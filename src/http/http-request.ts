@@ -1,5 +1,6 @@
 import { AgentClient, BranchName, RepositoryName } from "../domain/value-objects.js";
 import { logSafeError } from "../safe-errors.js";
+import { parseBoundedJsonText } from "./bounded-json.js";
 import { SYSTEM_TIME_SOURCE, type TimeSource } from "./http-capacity.js";
 
 const BRANCH_HEADER: string = "x-murmur-branch";
@@ -176,7 +177,7 @@ export async function parseRequestBody(
 ): Promise<unknown> {
   try {
     const bytes: Uint8Array = await requestBodyBytes(request, maxBytes, time);
-    return JSON.parse(new TextDecoder().decode(bytes));
+    return parseBoundedJsonText(new TextDecoder().decode(bytes));
   } catch (error: unknown) {
     if (error instanceof RequestBodyTooLargeError || error instanceof RequestBodyTimeoutError) {
       throw error;
