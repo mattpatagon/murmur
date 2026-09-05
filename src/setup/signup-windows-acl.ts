@@ -51,7 +51,9 @@ if ($protect) {
   $stage = 'add_rule'
   $acl.AddAccessRule($rule)
   $stage = 'apply_acl'
-  Set-Acl -LiteralPath $path -AclObject $acl
+  # Set-Acl copies all descriptor sections, including unset group/audit fields. Persist
+  # only the owner and access sections changed above, retaining unrelated security fields.
+  $item.SetAccessControl($acl)
 }
 $stage = 'read_acl'
 $actual = Get-Acl -LiteralPath $path

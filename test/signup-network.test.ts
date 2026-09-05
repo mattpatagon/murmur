@@ -11,11 +11,14 @@ import {
 } from "../src/setup/signup-network.js";
 import {
   OWNER_SECRET,
-  WORKER_SECRET,
   signupOwnerFixture,
   signupWorkerFixture,
+  WORKER_SECRET,
 } from "./support/signup-fixtures.js";
-import { signupTestService, type SignupTestService } from "./support/signup-service.js";
+import { type SignupTestService, signupTestService } from "./support/signup-service.js";
+
+// The Windows fresh-signup and retained-rerun scenario launches 16 bounded ACL processes.
+const SIGNUP_TEST_TIMEOUT_MS: number = process.platform === "win32" ? 30_000 : 5000;
 
 const INPUT: SelfServiceRegistrationInput = {
   slug: "example-org",
@@ -36,82 +39,98 @@ function argumentsFor(directory: string, endpoint: string): readonly string[] {
   ];
 }
 
-test("real signup HTTP and SSE wait for human consent and return commands without secrets", async (): Promise<void> => {
-  const directory: string = mkdtempSync(join(tmpdir(), "murmur-signup-network-"));
-  const server: SignupTestService = signupTestService(signupOwnerFixture(), signupWorkerFixture());
-  const waiters: { approve: ((accepted: boolean) => void) | null; prompted: (() => void) | null } =
-    { approve: null, prompted: null };
-  const approval: Promise<boolean> = new Promise<boolean>(
-    (resolve: (accepted: boolean) => void): void => {
-      waiters.approve = resolve;
-    },
-  );
-  const prompted: Promise<void> = new Promise<void>((resolve: () => void): void => {
-    waiters.prompted = resolve;
-  });
-  const operations: SignupRuntime = createSignupNetworkRuntime(
-    async (message: string): Promise<boolean> => {
-      expect(message).toContain("role agent");
-      if (waiters.prompted === null) throw new Error("Prompt waiter is absent");
-      waiters.prompted();
-      return await approval;
-    },
-  );
-  try {
-    const pending: Promise<string> = runSignupCli(argumentsFor(directory, server.endpoint), {
-      interactive: true,
-      operations,
-      platform: "linux",
+test(
+  "real signup HTTP and SSE wait for human consent and return commands without secrets",
+  async (): Promise<void> => {
+    const directory: string = mkdtempSync(join(tmpdir(), "murmur-signup-network-"));
+    const server: SignupTestService = signupTestService(
+      signupOwnerFixture(),
+      signupWorkerFixture(),
+    );
+    const waiters: {
+      approve: ((accepted: boolean) => void) | null;
+      prompted: (() => void) | null;
+    } = { approve: null, prompted: null };
+    const approval: Promise<boolean> = new Promise<boolean>(
+      (resolve: (accepted: boolean) => void): void => {
+        waiters.approve = resolve;
+      },
+    );
+    const prompted: Promise<void> = new Promise<void>((resolve: () => void): void => {
+      waiters.prompted = resolve;
     });
-    await prompted;
-    expect(server.issued()).toBe(0);
-    expect(existsSync(join(directory, "owner.json"))).toBe(true);
-    expect(existsSync(join(directory, "worker.json"))).toBe(false);
-    if (waiters.approve === null) throw new Error("Approval waiter is absent");
-    waiters.approve(true);
-    const output: string = await pending;
-    expect(server.issued()).toBe(1);
-    expect(server.registrations()).toBe(1);
-    expect(output).toContain("export MURMUR_API_TOKEN=");
-    expect(output).toContain("murmur setup --user");
-    expect(output).not.toContain(OWNER_SECRET);
-    expect(output).not.toContain(WORKER_SECRET);
-    const windowsOutput: string = await runSignupCli(argumentsFor(directory, server.endpoint), {
-      interactive: true,
-      operations,
-      platform: "win32",
-    });
-    expect(windowsOutput).toContain("$env:MURMUR_API_TOKEN = (");
-    expect(server.issued()).toBe(1);
-  } finally {
-    if (waiters.approve !== null) waiters.approve(false);
-    await server.stop();
-    rmSync(directory, { force: true, recursive: true });
-  }
-});
-
-test("declined signup approval preserves owner recovery and fixed-safe CLI failures", async (): Promise<void> => {
-  const directory: string = mkdtempSync(join(tmpdir(), "murmur-signup-decline-"));
-  const server: SignupTestService = signupTestService(signupOwnerFixture(), signupWorkerFixture());
-  try {
-    await expect(
-      runSignupCli(argumentsFor(directory, server.endpoint), {
+    const operations: SignupRuntime = createSignupNetworkRuntime(
+      async (message: string): Promise<boolean> => {
+        expect(message).toContain("role agent");
+        if (waiters.prompted === null) throw new Error("Prompt waiter is absent");
+        waiters.prompted();
+        return await approval;
+      },
+    );
+    try {
+      const pending: Promise<string> = runSignupCli(argumentsFor(directory, server.endpoint), {
         interactive: true,
-        operations: createSignupNetworkRuntime(async (): Promise<boolean> => false),
-        platform: process.platform,
-      }),
-    ).rejects.toThrow("Signup did not complete");
-    expect(server.issued()).toBe(0);
-    expect(readFileSync(join(directory, "owner.json"), "utf8")).toContain(OWNER_SECRET);
-    expect(existsSync(join(directory, "worker.json"))).toBe(false);
-    await expect(
-      createSignupWorker(server.endpoint, WORKER_SECRET, async (): Promise<boolean> => true),
-    ).rejects.toThrow("Worker credential was not confirmed");
-  } finally {
-    await server.stop();
-    rmSync(directory, { force: true, recursive: true });
-  }
-});
+        operations,
+        platform: "linux",
+      });
+      await prompted;
+      expect(server.issued()).toBe(0);
+      expect(existsSync(join(directory, "owner.json"))).toBe(true);
+      expect(existsSync(join(directory, "worker.json"))).toBe(false);
+      if (waiters.approve === null) throw new Error("Approval waiter is absent");
+      waiters.approve(true);
+      const output: string = await pending;
+      expect(server.issued()).toBe(1);
+      expect(server.registrations()).toBe(1);
+      expect(output).toContain("export MURMUR_API_TOKEN=");
+      expect(output).toContain("murmur setup --user");
+      expect(output).not.toContain(OWNER_SECRET);
+      expect(output).not.toContain(WORKER_SECRET);
+      const windowsOutput: string = await runSignupCli(argumentsFor(directory, server.endpoint), {
+        interactive: true,
+        operations,
+        platform: "win32",
+      });
+      expect(windowsOutput).toContain("$env:MURMUR_API_TOKEN = (");
+      expect(server.issued()).toBe(1);
+    } finally {
+      if (waiters.approve !== null) waiters.approve(false);
+      await server.stop();
+      rmSync(directory, { force: true, recursive: true });
+    }
+  },
+  SIGNUP_TEST_TIMEOUT_MS,
+);
+
+test(
+  "declined signup approval preserves owner recovery and fixed-safe CLI failures",
+  async (): Promise<void> => {
+    const directory: string = mkdtempSync(join(tmpdir(), "murmur-signup-decline-"));
+    const server: SignupTestService = signupTestService(
+      signupOwnerFixture(),
+      signupWorkerFixture(),
+    );
+    try {
+      await expect(
+        runSignupCli(argumentsFor(directory, server.endpoint), {
+          interactive: true,
+          operations: createSignupNetworkRuntime(async (): Promise<boolean> => false),
+          platform: process.platform,
+        }),
+      ).rejects.toThrow("Signup did not complete");
+      expect(server.issued()).toBe(0);
+      expect(readFileSync(join(directory, "owner.json"), "utf8")).toContain(OWNER_SECRET);
+      expect(existsSync(join(directory, "worker.json"))).toBe(false);
+      await expect(
+        createSignupWorker(server.endpoint, WORKER_SECRET, async (): Promise<boolean> => true),
+      ).rejects.toThrow("Worker credential was not confirmed");
+    } finally {
+      await server.stop();
+      rmSync(directory, { force: true, recursive: true });
+    }
+  },
+  SIGNUP_TEST_TIMEOUT_MS,
+);
 
 test("registration rejects invalid media, lengths, JSON, UTF-8, status and stream overflow safely", async (): Promise<void> => {
   const responses: Response[] = [

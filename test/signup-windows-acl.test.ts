@@ -148,4 +148,6 @@ test.skipIf(process.platform !== "win32")(
       rmSync(directory, { force: true, recursive: true });
     }
   },
+  // Eight bounded PowerShell launches and two icacls launches share this scenario budget.
+  30_000,
 );
