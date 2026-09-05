@@ -41,6 +41,7 @@ hosted verifier creates isolated roles and databases; never aim it at production
 | `bun run test:linux` | Required host-to-Linux-container MCP test; needs Docker and `MURMUR_TEST_DATABASE_URL` for disposable PostgreSQL 17 |
 | `bun run test:coverage` | Strict coverage for an already-provisioned hosted-test environment; fails early instead of auditing skipped hosted code |
 | `MURMUR_VERIFY_COVERAGE=1 bash scripts/verify-hosted-postgres.sh` | Authoritative PostgreSQL 17, RLS, upgrade, and hosted coverage gate |
+| `bun scripts/verify-hosted-load.ts` | Coordinated, explicitly disposable local PostgreSQL workload; defaults to 25,000 registered tenants with bounded concurrency |
 | `bun run build` | Bundles the stdio MCP entry point |
 | `bun run build:http` | Bundles the hosted HTTP entry point |
 | `bun run format` | Applies deterministic Biome formatting |
@@ -49,6 +50,11 @@ The full hosted test needs an isolated database administrator URL as documented 
 supplies it through a disposable PostgreSQL service, then runs the Linux-container test against the
 same service. Environment-backed tests may skip in `bun run test`; that does not replace either
 required CI result.
+
+The [hosted load guide](docs/hosted-load-verification.md) defines separate fixture credentials,
+admission/retry accounting, latency and RSS thresholds, and cleanup. Reserve the host's load and
+database resources through Murmur first. Never run this workload against production; a passing
+contributor suite or a smaller population does not establish the full workload result.
 
 ## Change design
 

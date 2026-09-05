@@ -6,11 +6,11 @@ Hosted HTTP has two independent budgets, both configured by
 
 - Response admission bounds active non-GET HTTP requests until their response finishes or the
   client disconnects. Exhaustion returns HTTP 503, as before.
-- Processing admission bounds unfinished MCP domain request handlers across every session on
+- Processing admission bounds unfinished MCP request handlers across every session on
   the server. A client disconnect, MCP cancellation notification, or session close does not
   release processing capacity while the original handler is still running.
 
-Processing exhaustion rejects before invoking a domain handler. The transport may already have
+Processing exhaustion rejects before invoking a request handler. The transport may already have
 opened an HTTP 200 SSE response; its JSON-RPC error has code **-32003**, a fixed message
 `MCP error -32003: MCP processing capacity reached; retry later.`, and data
 `{"retryable":true,"retry_after_ms":1000}`. Clients should use bounded backoff of at least one
@@ -18,15 +18,15 @@ second and retain rejected-operation counts; an HTTP 200 alone does not indicate
 The original JSON-RPC ID remains unchanged, including numeric IDs.
 
 The global processing controller is shared across hosted sessions. The generic registration
-wrapper covers domain tools and resources, including subsequently registered handlers. It
+wrapper covers tools, resources, SDK initialization and ping, including later registrations. It
 awaits each original handler promise and releases its reservation exactly once in `finally`,
 including error paths. It does not race cancellation against that promise or claim to interrupt
 an already-issued database statement. Queued resource mutations may settle immediately when
 canceled before execution; active mutations retain their charge until their actual work ends.
 
-SDK initialization, ping, and notifications are control messages, not domain processing. They
-still pass normal HTTP authentication, request admission, and rate limits. Once a canceled
-response releases its response slot, an authenticated cancellation notification can reach the
+Notifications do not acquire processing capacity; initialization and ping do. All still pass
+normal HTTP authentication, request admission, and rate limits. Once a canceled response releases
+its response slot, an authenticated cancellation notification can reach the
 SDK even while all processing slots remain occupied. A DELETE can close a session without
 creating another opportunity to exceed the shared processing budget.
 
@@ -35,6 +35,9 @@ change its existing local resource limits. Custom hosted application factories m
 the supplied `reserveProcessingCapacity` callback, as the default factory does.
 
 Tests use deterministic blocked fake stores and actual localhost HTTP/SDK round trips for all
-three configured budgets, reads, tools, subscription cancellation, session close, cross-session
-rejection, numeric/string IDs, handler failure, and recovery after actual settlement. They do not
+three configured budgets, initialization, reads, tools, subscription cancellation, session close,
+cross-session rejection, numeric/string IDs, handler failure, and recovery after settlement. They do not
 establish production throughput, database cancellation, or a maximum duration for blocked work.
+
+See [resource mutation bounds](mcp-resource-mutation-bounds.md) for the separate per-session queue
+and [rate-window bounds](http-rate-window-bounds.md) for bounded rate-limit bookkeeping.

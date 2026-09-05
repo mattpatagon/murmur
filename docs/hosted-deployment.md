@@ -319,9 +319,12 @@ gcloud run deploy murmur-mcp \
   --set-secrets MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:latest,/etc/murmur/secrets/database-ca.pem=MURMUR_DATABASE_CA:latest \
   --allow-unauthenticated \
   --concurrency 80 \
+  --cpu 1 \
+  --max 1 \
   --max-instances 1 \
   --memory 512Mi \
   --port 8080 \
+  --no-use-http2 \
   --timeout 3600
 ```
 

@@ -400,6 +400,10 @@ Dependencies are exact-pinned, installs use the frozen Bun lockfile, and
 
 - [Self-service tenant onboarding](docs/self-service-onboarding.md)
 - [Hosted deployment and rollback](docs/hosted-deployment.md)
+- [Hosted storage admission and audit headroom](docs/hosted-storage-budget.md)
+- [Hosted processing and response capacity](docs/http-processing-capacity.md)
+- [HTTP request IDs, single-message requests, and cancellation recovery](docs/http-request-id-admission.md)
+- [Disposable hosted load verification](docs/hosted-load-verification.md)
 - [Owner-only operator recovery](docs/operator-recovery.md)
 - [Contributing](CONTRIBUTING.md)
 - [Agent development guide](AGENTS.md)
