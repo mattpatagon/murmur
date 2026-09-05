@@ -111,6 +111,7 @@ jobs:
           set -euo pipefail
           website_origin="${WEBSITE_SITE_URL%/}"
           website_headers="$RUNNER_TEMP/murmur-website-headers.txt"
+          website_body="$RUNNER_TEMP/murmur-website-body.txt"
           website_version="$RUNNER_TEMP/murmur-website-version.json"
           curl --fail --silent --show-error --max-time 20 --max-filesize 4096 \
             --retry 3 --retry-max-time 60 --output "$website_version" \
@@ -127,9 +128,19 @@ jobs:
           '
           for website_path in / /how-it-works/ /get-started/ /security/ /license/ /robots.txt; do
             curl --fail --silent --show-error --max-time 20 --retry 3 --retry-max-time 60 \
-              --dump-header "$website_headers" --output /dev/null "$website_origin$website_path"
+              --max-filesize 1048576 --dump-header "$website_headers" \
+              --output "$website_body" "$website_origin$website_path"
             if ! grep --ignore-case --quiet '^x-content-type-options: nosniff' "$website_headers"; then
               echo 'The published website is missing its nosniff security header.' >&2
+              exit 1
+            fi
+            if ! grep --ignore-case --extended-regexp --quiet \
+              '^cache-control:.*[[:space:],]no-transform([[:space:],]|$)' "$website_headers"; then
+              echo 'The published website does not prevent proxy content transformations.' >&2
+              exit 1
+            fi
+            if grep --extended-regexp --quiet 'static\.cloudflareinsights\.com|data-cf-beacon' "$website_body"; then
+              echo 'The published website contains an injected analytics beacon.' >&2
               exit 1
             fi
           done

@@ -45,7 +45,10 @@ function completeWebsite(): Map<string, Uint8Array> {
   const files: Map<string, Uint8Array> = new Map<string, Uint8Array>([
     ["robots.txt", bytes(`User-agent: *\nAllow: /\nSitemap: ${ORIGIN}/sitemap.xml\n`)],
     ["version.json", bytes(JSON.stringify({ revision: "development" }))],
-    ["_headers", bytes("/*\n  X-Content-Type-Options: nosniff\n")],
+    [
+      "_headers",
+      bytes("/*\n  X-Content-Type-Options: nosniff\n  Cache-Control: public, no-transform\n"),
+    ],
     ["social.png", new Uint8Array([137, 80, 78, 71])],
     ["assets/site.css", bytes('@font-face{font-family:Demo;src:url("./font.woff2")}')],
     ["assets/font.woff2", new Uint8Array([119, 79, 70, 50])],
@@ -193,6 +196,29 @@ describe("website artifact verification", (): void => {
     expect((await auditWebsite(files)).errors).toContain(
       "robots.txt must advertise the public sitemap",
     );
+  });
+
+  test("rejects headers that permit proxy analytics injection", async (): Promise<void> => {
+    const files: Map<string, Uint8Array> = completeWebsite();
+    for (const headers of [
+      "/*\n  X-Content-Type-Options: nosniff\n",
+      "/*\n  X-Content-Type-Options: nosniff\n/_astro/*\n  Cache-Control: public, no-transform\n",
+      "/*\n  X-Content-Type-Options: nosniff\n  Cache-Control: public, no-transform-extra\n",
+      "/*\n  X-Content-Type-Options: nosniff\n  Cache-Control: public, no-transform\n  ! Cache-Control\n",
+      "/*\n  Cache-Control: public\n/*\n  Cache-Control: no-transform\n",
+    ]) {
+      files.set("_headers", bytes(headers));
+      expect((await auditWebsite(files)).errors).toContain(
+        "Cloudflare _headers must disable proxy transformations globally with public, no-transform",
+      );
+    }
+    files.set(
+      "_headers",
+      bytes(
+        "# Website privacy\r\n/*\r\n  X-Content-Type-Options: nosniff\r\n  Cache-Control: Public, No-Transform\r\n",
+      ),
+    );
+    expect((await auditWebsite(files)).errors).toHaveLength(0);
   });
 
   test("accepts an Astro sitemap index and verifies its child sitemap", async (): Promise<void> => {

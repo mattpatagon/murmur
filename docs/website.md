@@ -128,11 +128,19 @@ CI passes that response path through `WEBSITE_IDENTITY_FILE` to
 `bun run scripts/verify-website-identity.ts`; `CLOUDFLARE_ACCOUNT_ID` identifies the required account.
 
 After deployment the job verifies that `/version.json` serves the exact deployed Git revision,
-then checks the public pages, `robots.txt`, the `nosniff` response header,
+then checks the public pages, `robots.txt`, the `nosniff` response header, proxy transformation
+protection, absence of Cloudflare analytics injection,
 and a real HTTP 404 for an unknown route. A failed smoke check fails the workflow even when the
 upload succeeded. Inspect the deployment before deciding whether to roll it back.
 The version marker is served with `Cache-Control: no-store`; the live check bounds its response
 to 4 KiB and requests the expected revision explicitly to avoid accepting stale deployment evidence.
+
+The website sends `Cache-Control: public, max-age=0, must-revalidate, no-transform` globally.
+Cloudflare documents that [`public, no-transform` prevents automatic analytics injection](https://developers.cloudflare.com/web-analytics/faq/).
+This policy applies to website responses without changing zone-wide settings or the hosted API.
+Scoped header overrides retain year-long immutable caching for hashed assets and `no-store` for
+the revision marker; both retain `no-transform`. The artifact verifier rejects a missing global
+transformation policy, and production smoke checks reject injected Cloudflare analytics.
 
 ## Verification and maintenance
 

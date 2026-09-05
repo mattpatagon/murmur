@@ -256,6 +256,29 @@ function localTarget(
   return { hash, path };
 }
 
+function preventsProxyTransformations(headers: string): boolean {
+  let path: string = "";
+  let globalRules: number = 0;
+  const directives: Set<string> = new Set<string>();
+  for (const line of headers.split(/\r?\n/u)) {
+    const trimmed: string = line.trim();
+    if (trimmed === "" || trimmed.startsWith("#")) continue;
+    if (/^\S/u.test(line)) {
+      path = trimmed;
+      if (path === "/*") globalRules += 1;
+      continue;
+    }
+    if (path !== "/*") continue;
+    if (trimmed.toLowerCase() === "! cache-control") return false;
+    const separator: number = trimmed.indexOf(":");
+    if (trimmed.slice(0, separator).toLowerCase() !== "cache-control") continue;
+    for (const directive of trimmed.slice(separator + 1).split(",")) {
+      directives.add(directive.trim().toLowerCase());
+    }
+  }
+  return globalRules === 1 && directives.has("public") && directives.has("no-transform");
+}
+
 export async function auditWebsite(
   files: ReadonlyMap<string, Uint8Array>,
   origin: URL = websiteOrigin(undefined),
@@ -311,6 +334,10 @@ export async function auditWebsite(
   }
   if (!/X-Content-Type-Options:\s*nosniff/iu.test(readText(files, "_headers")))
     errors.push("Cloudflare _headers must include X-Content-Type-Options: nosniff");
+  if (!preventsProxyTransformations(readText(files, "_headers")))
+    errors.push(
+      "Cloudflare _headers must disable proxy transformations globally with public, no-transform",
+    );
   if (javascriptGzipBytes > MAXIMUM_JAVASCRIPT_GZIP_BYTES)
     errors.push("JavaScript exceeds the 100 KiB gzip budget");
   if (fontBytes > MAXIMUM_FONT_BYTES) errors.push("Fonts exceed the 250 KiB asset budget");

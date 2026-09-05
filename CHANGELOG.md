@@ -15,6 +15,8 @@ All notable changes to Murmur are documented in this file.
 - Automate Cloudflare Pages publication from `main`, with source and artifact checks, bounded
   deployment jobs, authenticated account verification, security headers, and revision and 404
   smoke checks for `usemurmur.dev`. Run Wrangler with the pinned Node runtime.
+- Prevent Cloudflare proxy analytics injection with website response headers and verify the
+  privacy policy in both artifact validation and production smoke checks.
 
 ### For contributors
 
