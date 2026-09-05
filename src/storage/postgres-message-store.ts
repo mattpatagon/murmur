@@ -83,6 +83,10 @@ import {
   pruneExpiredPostgresMessages,
 } from "./postgres-inbox-store.js";
 import { prunePostgresLifecycle } from "./postgres-lifecycle-prune.js";
+import {
+  createPruneAwarePostgresTransactionRunner,
+  type PostgresTenantTransactionRunner,
+} from "./postgres-message-operation.js";
 import { type InboxNotification, InboxNotificationSchema } from "./postgres-message-rows.js";
 import { verifyPostgresMessageSchema } from "./postgres-message-schema.js";
 import { setPostgresTenantContext } from "./postgres-message-transactions.js";
@@ -282,8 +286,13 @@ export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvi
   public async sendMessage(command: SendMessageCommand): Promise<SendMessageResult> {
     this.ensureOpen();
     const now: Instant = this.clock.now();
-    await this.pruneExpired(now);
-    return await sendPostgresMessage(this.database, this.tenantId, command, now);
+    return await sendPostgresMessage(
+      this.database,
+      this.tenantId,
+      command,
+      now,
+      this.messageTransaction(now),
+    );
   }
 
   public async submitFeedback(command: F.SubmitFeedbackCommand): Promise<F.SubmitFeedbackResult> {
@@ -304,22 +313,37 @@ export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvi
   public async getMessages(query: GetMessagesQuery): Promise<readonly Message[]> {
     this.ensureOpen();
     const now: Instant = this.clock.now();
-    await this.pruneExpired(now);
-    return await getPostgresMessages(this.database, this.tenantId, query, now);
+    return await getPostgresMessages(
+      this.database,
+      this.tenantId,
+      query,
+      now,
+      this.messageTransaction(now),
+    );
   }
 
   public async getMessagesWithVersion(query: GetMessagesQuery): Promise<InboxReadResult> {
     this.ensureOpen();
     const now: Instant = this.clock.now();
-    await this.pruneExpired(now);
-    return await getPostgresMessagesWithVersion(this.database, this.tenantId, query, now);
+    return await getPostgresMessagesWithVersion(
+      this.database,
+      this.tenantId,
+      query,
+      now,
+      this.messageTransaction(now),
+    );
   }
 
   public async markMessagesRead(command: MarkMessagesReadCommand): Promise<MarkMessagesReadResult> {
     this.ensureOpen();
     const now: Instant = this.clock.now();
-    await this.pruneExpired(now);
-    return await markPostgresMessagesRead(this.database, this.tenantId, command, now);
+    return await markPostgresMessagesRead(
+      this.database,
+      this.tenantId,
+      command,
+      now,
+      this.messageTransaction(now),
+    );
   }
 
   public async postNotice(command: PostNoticeCommand): Promise<PostNoticeResult> {
@@ -396,6 +420,23 @@ export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvi
     this.ensureOpen();
     try {
       if (!(await postgresHasPruneCandidates(this.database, this.tenantId, now))) return 0;
+      return await this.pruneCandidates(now);
+    } catch (error: unknown) {
+      throw normalizePostgresStorageError(error);
+    }
+  }
+
+  private messageTransaction(now: Instant): PostgresTenantTransactionRunner {
+    return createPruneAwarePostgresTransactionRunner(
+      this.database,
+      this.tenantId,
+      now,
+      async (): Promise<number> => await this.pruneCandidates(now),
+    );
+  }
+
+  private async pruneCandidates(now: Instant): Promise<number> {
+    try {
       const messageChanges: number = await pruneExpiredPostgresMessages(
         this.database,
         this.tenantId,

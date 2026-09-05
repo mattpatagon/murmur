@@ -86,15 +86,22 @@ for (const method of ["get_messages", "get_message_history", "resources/read"]) 
         expect(output.inbox_version).toBe(17);
         expect(output.messages).toHaveLength(1);
       }
-      expect(fixture.transactions).toHaveLength(2); // One unchanged prune preflight plus one paired read.
-      expect(fixture.completedTransactions).toBe(2);
+      expect(fixture.transactions).toHaveLength(1);
+      expect(fixture.completedTransactions).toBe(1);
       expect(fixture.clockCalls).toBe(1);
-      const paired: ReadStatement[] | undefined = fixture.transactions[1];
+      const paired: ReadStatement[] | undefined = fixture.transactions[0];
       if (paired === undefined) throw new Error("Missing paired read transaction");
-      expect(paired).toHaveLength(4);
+      expect(paired).toHaveLength(5);
       const first: ReadStatement | undefined = paired[0];
       if (first === undefined) throw new Error("Missing tenant context query");
       expect(first.text).toContain("set_config");
+      const preflight: ReadStatement | undefined = paired[1];
+      if (preflight === undefined) throw new Error("Missing fresh expiry preflight");
+      expect(preflight.text).toContain("AS candidates");
+      expect(preflight.values).toContain(READ_NOW.toISOString());
+      expect(
+        paired.filter((statement: ReadStatement): boolean => statement.text.includes("set_config")),
+      ).toHaveLength(1);
       const page: ReadStatement | undefined = paired.find((statement: ReadStatement): boolean =>
         statement.text.includes("WITH candidates AS MATERIALIZED"),
       );
@@ -197,7 +204,7 @@ test("a returned page remains charged during a blocked version read after its re
     expect(budget.reservedBytes).toBe(READ_BYTES);
     scope.finishResponse();
     expect(budget.reservedBytes).toBe(READ_BYTES);
-    expect(fixture.completedTransactions).toBe(1);
+    expect(fixture.completedTransactions).toBe(0);
     release.resolve();
     await operation;
     expect(budget.reservedBytes).toBe(READ_BYTES);
@@ -226,7 +233,7 @@ test("a populated wait_for_messages read does not fetch an unused inbox version"
         .statements()
         .some((statement: ReadStatement): boolean => statement.text.includes("AS version")),
     ).toBe(false);
-    expect(fixture.transactions).toHaveLength(2);
+    expect(fixture.transactions).toHaveLength(1);
   } finally {
     await fixture.store.close();
   }

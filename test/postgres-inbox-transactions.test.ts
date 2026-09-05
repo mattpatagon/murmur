@@ -148,11 +148,19 @@ function query(agentId: AgentId): GetMessagesQuery {
 function expectInboxTransactions(statements: readonly string[], expectedStatements: number): void {
   expect(
     statements.filter((statement: string): boolean => statement.trim() === "begin"),
-  ).toHaveLength(2);
+  ).toHaveLength(1);
   expect(
     statements.filter((statement: string): boolean => statement.trim() === "commit"),
-  ).toHaveLength(2);
+  ).toHaveLength(1);
   expect(statements).toHaveLength(expectedStatements);
+  expect(
+    statements.filter((statement: string): boolean => statement.includes("set_config")),
+  ).toHaveLength(1);
+  expect(
+    statements.filter((statement: string): boolean => statement.includes("AS candidates")),
+  ).toHaveLength(1);
+  expect(statements[1]).toContain("set_config");
+  expect(statements[2]).toContain("AS candidates");
   expect(
     statements.filter((statement: string): boolean =>
       statement.includes("session.live_session_count"),
@@ -166,7 +174,7 @@ function expectInboxTransactions(statements: readonly string[], expectedStatemen
 }
 
 test.skipIf(!postgresConfigured)(
-  "PostgreSQL paired inbox reads save four statements without losing filters, sessions or tenant isolation",
+  "PostgreSQL paired inbox reads include fresh expiry preflight without losing filters, sessions or tenant isolation",
   async (): Promise<void> => {
     await withFixture(async (fixture: Fixture): Promise<void> => {
       const first: SendMessageResult = await fixture.store.sendMessage({
@@ -186,7 +194,7 @@ test.skipIf(!postgresConfigured)(
         limit: 1,
         threadId: first.message.threadId,
       });
-      expectInboxTransactions(fixture.statements, 10);
+      expectInboxTransactions(fixture.statements, 7);
       expect(page.messages.map((message: Message): string => message.messageId.value)).toEqual([
         first.message.messageId.value,
       ]);
@@ -312,12 +320,12 @@ test.skipIf(!postgresConfigured)(
           (message: Message): string => message.messageId.value,
         ),
       ).toEqual([first.message.messageId.value]);
-      expectInboxTransactions(fixture.statements, 9);
+      expectInboxTransactions(fixture.statements, 6);
       fixture.statements.length = 0;
       expect(
         await fixture.store.markMessagesRead({ agentId: fixture.reader, messageIds: [] }),
       ).toEqual({ readAt: fixture.now, updated: 0 });
-      expectInboxTransactions(fixture.statements, 8);
+      expectInboxTransactions(fixture.statements, 5);
       await verifySessionsAndIsolation(fixture);
       await fixture.store.closeAgent({
         agentId: fixture.reader,
@@ -389,7 +397,7 @@ test.skipIf(!postgresConfigured)(
           })
         ).updated,
       ).toBe(1);
-      expectInboxTransactions(fixture.statements, 9);
+      expectInboxTransactions(fixture.statements, 6);
       expect(
         await fixture.store.getMessages({ ...query(fixture.reader), unreadOnly: true }),
       ).toEqual([]);
@@ -399,6 +407,66 @@ test.skipIf(!postgresConfigured)(
           generation: AgentGeneration.parse(1),
           unreadOnly: true,
         }),
+      ).toHaveLength(1);
+    });
+  },
+  20_000,
+);
+
+test.skipIf(!postgresConfigured)(
+  "PostgreSQL operation failure cannot roll back previously committed expiration and quota reclamation",
+  async (): Promise<void> => {
+    await withFixture(async (fixture: Fixture): Promise<void> => {
+      const sent: SendMessageResult = await fixture.store.sendMessage({
+        ...baseMessageCommand(),
+        recipientId: fixture.reader,
+        senderId: fixture.sender,
+      });
+      const expiresAt: Instant = fixture.now.addDays(30);
+      fixture.clock.set(expiresAt);
+      await fixture.admin`
+        UPDATE murmur.agents SET last_seen_at = ${expiresAt.toISOString()}::timestamptz
+        WHERE tenant_id = ${fixture.tenant.value}::uuid
+      `;
+      expect(sent.message.expiresAt.toISOString()).toBe(expiresAt.toISOString());
+      expect(
+        Array.from(
+          await fixture.admin`
+          SELECT message_count::int AS count FROM murmur.tenant_resource_usage
+          WHERE tenant_id = ${fixture.tenant.value}::uuid
+        `,
+        ),
+      ).toEqual([{ count: 1 }]);
+      fixture.statements.length = 0;
+      await expect(
+        fixture.store.getMessagesWithVersion(query(fixture.otherReader)),
+      ).rejects.toBeInstanceOf(UnknownAgentError);
+      expect(
+        Array.from(
+          await fixture.admin`
+          SELECT message_id FROM murmur.messages
+          WHERE tenant_id = ${fixture.tenant.value}::uuid
+        `,
+        ),
+      ).toEqual([]);
+      expect(
+        Array.from(
+          await fixture.admin`
+          SELECT message_count::int AS count FROM murmur.tenant_resource_usage
+          WHERE tenant_id = ${fixture.tenant.value}::uuid
+        `,
+        ),
+      ).toEqual([{ count: 0 }]);
+      expect(
+        fixture.statements.filter((statement: string): boolean => statement.trim() === "commit"),
+      ).toHaveLength(3);
+      expect(
+        fixture.statements.filter((statement: string): boolean => statement.trim() === "rollback"),
+      ).toHaveLength(1);
+      expect(
+        fixture.statements.filter((statement: string): boolean =>
+          statement.includes("AS candidates"),
+        ),
       ).toHaveLength(1);
     });
   },

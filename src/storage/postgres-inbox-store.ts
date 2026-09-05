@@ -31,6 +31,10 @@ import {
   renewPostgresSessionInTransaction,
 } from "./postgres-agent-lifecycle-store.js";
 import {
+  createPostgresTenantTransactionRunner,
+  type PostgresTenantTransactionRunner,
+} from "./postgres-message-operation.js";
+import {
   type CountRow,
   CountRowSchema,
   firstRow,
@@ -67,8 +71,9 @@ export async function getPostgresMessages(
   tenantId: TenantId,
   query: GetMessagesQuery,
   now: Instant,
+  run: PostgresTenantTransactionRunner = createPostgresTenantTransactionRunner(database, tenantId),
 ): Promise<readonly Message[]> {
-  return (await readPostgresInbox(database, tenantId, query, now, false)).messages;
+  return (await readPostgresInbox(tenantId, query, now, false, run)).messages;
 }
 
 export async function getPostgresMessagesWithVersion(
@@ -76,19 +81,19 @@ export async function getPostgresMessagesWithVersion(
   tenantId: TenantId,
   query: GetMessagesQuery,
   now: Instant,
+  run: PostgresTenantTransactionRunner = createPostgresTenantTransactionRunner(database, tenantId),
 ): Promise<InboxReadResult> {
-  return await readPostgresInbox(database, tenantId, query, now, true);
+  return await readPostgresInbox(tenantId, query, now, true, run);
 }
 
 async function readPostgresInbox(
-  database: Sql,
   tenantId: TenantId,
   query: GetMessagesQuery,
   now: Instant,
   includeVersion: boolean,
+  run: PostgresTenantTransactionRunner,
 ): Promise<InboxReadResult> {
-  return await database.begin(async (transaction: TransactionSql): Promise<InboxReadResult> => {
-    await setPostgresTenantContext(transaction, tenantId);
+  return await run(async (transaction: TransactionSql): Promise<InboxReadResult> => {
     const agent: Agent = await readingAgent(
       transaction,
       tenantId,
@@ -170,26 +175,25 @@ export async function markPostgresMessagesRead(
   tenantId: TenantId,
   command: MarkMessagesReadCommand,
   now: Instant,
+  run: PostgresTenantTransactionRunner = createPostgresTenantTransactionRunner(database, tenantId),
 ): Promise<MarkMessagesReadResult> {
-  return await database.begin(
-    async (transaction: TransactionSql): Promise<MarkMessagesReadResult> => {
-      await setPostgresTenantContext(transaction, tenantId);
-      const agent: Agent = await readingAgent(
-        transaction,
-        tenantId,
-        command.agentId,
-        command.sessionKey,
-        now,
-      );
-      if (command.messageIds.length === 0) return { readAt: now, updated: 0 };
-      const generation: number =
-        command.generation === null || command.generation === undefined
-          ? agent.generation.value
-          : command.generation.value;
-      const messageIds: string[] = command.messageIds.map(
-        (messageId: MessageId): string => messageId.value,
-      );
-      const raw: unknown = await transaction`
+  return await run(async (transaction: TransactionSql): Promise<MarkMessagesReadResult> => {
+    const agent: Agent = await readingAgent(
+      transaction,
+      tenantId,
+      command.agentId,
+      command.sessionKey,
+      now,
+    );
+    if (command.messageIds.length === 0) return { readAt: now, updated: 0 };
+    const generation: number =
+      command.generation === null || command.generation === undefined
+        ? agent.generation.value
+        : command.generation.value;
+    const messageIds: string[] = command.messageIds.map(
+      (messageId: MessageId): string => messageId.value,
+    );
+    const raw: unknown = await transaction`
       UPDATE murmur.messages
       SET read_at = COALESCE(read_at, ${now.toISOString()}::timestamptz)
       WHERE tenant_id = ${tenantId.value}::uuid
@@ -199,10 +203,9 @@ export async function markPostgresMessagesRead(
         AND expires_at > ${now.toISOString()}::timestamptz
       RETURNING message_id::text AS message_id
     `;
-      const rows: { readonly message_id: string }[] = z.array(MessageIdRowSchema).parse(raw);
-      return { readAt: now, updated: rows.length };
-    },
-  );
+    const rows: { readonly message_id: string }[] = z.array(MessageIdRowSchema).parse(raw);
+    return { readAt: now, updated: rows.length };
+  });
 }
 
 export async function getPostgresInboxVersion(

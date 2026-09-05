@@ -2,6 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import postgres, { type Sql } from "postgres";
 
 import { AgentAuthorityConflictError } from "../src/domain/errors.js";
+import { SessionKey } from "../src/domain/lifecycle-values.js";
 import type { RegisterAgentCommand, RegisterAgentResult } from "../src/domain/models.js";
 import { AgentId, DisplayName, Instant, Sequence, TenantId } from "../src/domain/value-objects.js";
 import { callDataTool, type DataToolContext } from "../src/mcp/murmur-data-tools.js";
@@ -37,6 +38,8 @@ class RegistrationFixture {
   public changes: number = 0;
   public divergences: number = 0;
   public countResult: unknown = null;
+  public insertedGenerationRows: { readonly value: unknown } | null = null;
+  public readonly sessionWrites: { readonly values: readonly unknown[] }[] = [];
   public returned: AgentRow = ACTIVE;
   private mutated: boolean = false;
 
@@ -57,6 +60,9 @@ class RegistrationFixture {
               const sql: string = strings.join("?");
               this.statements.push(sql);
               expect(values).toContain(this.tenant.value);
+              if (sql.includes("INSERT INTO murmur.agent_sessions")) {
+                this.sessionWrites.push({ values });
+              }
               return this.rows(sql);
             },
           );
@@ -107,7 +113,13 @@ class RegistrationFixture {
     if (sql.includes("session.live_session_count")) {
       return this.mutated ? [this.returned] : this.previous === null ? [] : [this.previous];
     }
-    if (sql.includes("INSERT INTO murmur.agents(") || sql.includes("UPDATE murmur.agents SET")) {
+    if (sql.includes("INSERT INTO murmur.agents(")) {
+      this.mutated = true;
+      return this.insertedGenerationRows === null
+        ? [{ generation: this.returned.generation }]
+        : this.insertedGenerationRows.value;
+    }
+    if (sql.includes("UPDATE murmur.agents SET")) {
       this.mutated = true;
       return [];
     }
@@ -150,7 +162,8 @@ class RegistrationFixture {
 }
 
 for (const previous of [null, ACTIVE]) {
-  test(`PostgreSQL ${previous === null ? "new" : "active"} MCP registration uses one 14-statement transaction`, async (): Promise<void> => {
+  const expectedStatements: number = previous === null ? 9 : 14;
+  test(`PostgreSQL ${previous === null ? "new" : "active"} MCP registration uses one ${expectedStatements}-statement transaction`, async (): Promise<void> => {
     const fixture: RegistrationFixture = new RegistrationFixture(previous);
     const lookup: ReturnType<typeof spyOn<PostgresMessageStore, "getAgent">> = spyOn(
       fixture.store,
@@ -164,10 +177,10 @@ for (const previous of [null, ACTIVE]) {
       );
       expect(result).not.toBeNull();
       expect(lookup).not.toHaveBeenCalled();
-      expect(fixture.statements).toHaveLength(14);
+      expect(fixture.statements).toHaveLength(expectedStatements);
       expect(fixture.statements.filter((sql: string): boolean => sql === "BEGIN")).toHaveLength(1);
       expect(fixture.statements[0]).toBe("BEGIN");
-      expect(fixture.statements[13]).toBe("COMMIT");
+      expect(fixture.statements.at(-1)).toBe("COMMIT");
       expect(fixture.statements[1]).toContain("set_config");
       expect(fixture.statements[2]).toContain("pg_advisory_xact_lock");
       expect(fixture.changes).toBe(previous === null ? 1 : 0);
@@ -177,6 +190,120 @@ for (const previous of [null, ACTIVE]) {
     }
   });
 }
+
+for (const sessionKey of [SessionKey.default(), SessionKey.parse("fresh-pane")]) {
+  test(`fresh PostgreSQL registration writes its ${sessionKey.value} session without impossible history scans`, async (): Promise<void> => {
+    const fixture: RegistrationFixture = new RegistrationFixture(null);
+    fixture.returned = {
+      ...ACTIVE,
+      generation: 7,
+      display_name: "Database display",
+      metadata_json: JSON.stringify({ source: "database" }),
+    };
+    try {
+      const result: RegisterAgentResult = await fixture.store.registerAgent({
+        ...COMMAND,
+        sessionKey,
+      });
+      expect(result.agent.generation.value).toBe(7);
+      expect(result.agent.displayName.value).toBe("Database display");
+      expect(result.agent.metadata).toEqual({ source: "database" });
+      expect(result.agent.liveSessionCount).toBe(1);
+      expect(result.agent.state).toBe("active");
+      expect(result.becameActive).toBe(true);
+      expect(result.reopened).toBe(false);
+      expect(result.repositoryDiverged).toBe(false);
+      expect(fixture.sessionWrites).toEqual([
+        {
+          values: [
+            fixture.tenant.value,
+            COMMAND.agentId.value,
+            7,
+            sessionKey.value,
+            NOW.toISOString(),
+            NOW.toISOString(),
+            NOW.addMinutes(60).toISOString(),
+          ],
+        },
+      ]);
+      expect(
+        fixture.statements.filter((sql: string): boolean =>
+          sql.includes("UPDATE murmur.agent_sessions"),
+        ),
+      ).toHaveLength(1);
+      expect(
+        fixture.statements.filter((sql: string): boolean =>
+          sql.includes("SELECT authority, generation"),
+        ),
+      ).toHaveLength(1);
+      expect(
+        fixture.statements.some(
+          (sql: string): boolean =>
+            sql.includes("SELECT 1 AS present") ||
+            sql.includes("SELECT COUNT(*)::int AS count") ||
+            sql.includes("WITH counts AS"),
+        ),
+      ).toBe(false);
+      expect(
+        fixture.statements.filter((sql: string): boolean =>
+          sql.includes("session.live_session_count"),
+        ),
+      ).toHaveLength(1);
+      expect(fixture.statements).toHaveLength(9);
+      expect(fixture.statements.at(-1)).toBe("COMMIT");
+    } finally {
+      await fixture.store.close();
+    }
+  });
+}
+
+const invalidInsertedRows: readonly { readonly label: string; readonly rows: unknown }[] = [
+  { label: "missing", rows: [] },
+  { label: "duplicate", rows: [{ generation: 1 }, { generation: 1 }] },
+  { label: "missing generation", rows: [{}] },
+  { label: "string generation", rows: [{ generation: "1" }] },
+  { label: "null generation", rows: [{ generation: null }] },
+  { label: "zero generation", rows: [{ generation: 0 }] },
+  { label: "negative generation", rows: [{ generation: -1 }] },
+  { label: "fractional generation", rows: [{ generation: 1.5 }] },
+  { label: "unsafe generation", rows: [{ generation: Number.MAX_SAFE_INTEGER + 1 }] },
+  { label: "unexpected field", rows: [{ generation: 1, unexpected: true }] },
+];
+for (const fixtureRow of invalidInsertedRows) {
+  test(`fresh PostgreSQL registration rejects ${fixtureRow.label} INSERT rows before session writes`, async (): Promise<void> => {
+    const fixture: RegistrationFixture = new RegistrationFixture(null);
+    fixture.insertedGenerationRows = { value: fixtureRow.rows };
+    try {
+      await expect(fixture.store.registerAgent(COMMAND)).rejects.toThrow();
+      expect(fixture.sessionWrites).toEqual([]);
+      expect(fixture.statements.at(-1)).toBe("ROLLBACK");
+      expect(fixture.statements).not.toContain("COMMIT");
+    } finally {
+      await fixture.store.close();
+    }
+  });
+}
+
+test("fresh PostgreSQL registration rolls back both writes when its final actual Agent row is malformed", async (): Promise<void> => {
+  const fixture: RegistrationFixture = new RegistrationFixture(null);
+  fixture.returned = { ...ACTIVE, live_session_count: -1 };
+  try {
+    await expect(
+      callDataTool("register_agent", { agent_id: COMMAND.agentId.value }, fixture.context()),
+    ).rejects.toThrow();
+    expect(fixture.sessionWrites).toHaveLength(1);
+    expect(
+      fixture.statements.filter((sql: string): boolean =>
+        sql.includes("session.live_session_count"),
+      ),
+    ).toHaveLength(1);
+    expect(fixture.statements.at(-1)).toBe("ROLLBACK");
+    expect(fixture.statements).not.toContain("COMMIT");
+    expect(fixture.changes).toBe(0);
+  } finally {
+    await fixture.store.close();
+  }
+});
 
 for (const state of ["inactive", "closed"]) {
   test(`PostgreSQL ${state} registration reuses its existing live-session count for activation`, async (): Promise<void> => {

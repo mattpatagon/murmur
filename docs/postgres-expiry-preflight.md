@@ -5,6 +5,14 @@ transaction with the runtime role and transaction-local tenant context. When no 
 exists at the supplied clock, cleanup returns zero without issuing the existing write queries.
 Encrypted pruning performs its candidate query inside its existing tenant transaction.
 
+Plaintext direct sends, inbox reads, paired page/version reads and acknowledgements share this
+fresh check with their operation transaction when no candidate exists. Tenant context is assigned
+once, before the check and all agent or payload work. A positive check commits and releases its
+connection before running the original separately committed pruning, then starts one ordinary
+tenant transaction for the operation. Pruning is never nested under the initial transaction and
+is not rolled back by a later operation failure. Remaining bounded or referenced candidates do
+not trigger a loop. Standalone `pruneExpired` retains its independent preflight transaction.
+
 The check is not a TTL, cache, background timer, or deferred cleanup policy. Each invocation
 uses a fresh database snapshot and the caller's exact timestamp. Equality at an expiration
 boundary is a candidate. A positive result runs the original physical cleanup, including
@@ -25,7 +33,9 @@ zero-delta shortcut was added.
 
 This reduces the common empty plaintext cleanup from two transactions and eleven SQL
 statements (including tenant context) to one transaction and two statements. Including
-BEGIN and COMMIT, that is fifteen versus four protocol query executions. Expired data
+BEGIN and COMMIT, that is fifteen versus four protocol query executions for standalone cleanup.
+The combined no-candidate operation saves another BEGIN, tenant assignment and COMMIT compared
+with separate preflight and operation transactions. Expired data
 adds one read-only preflight transaction to the existing cleanup cost. The encrypted
 empty path retains one transaction but avoids usage-row locks and no-op writes.
 

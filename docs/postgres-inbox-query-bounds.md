@@ -2,18 +2,22 @@
 
 Plaintext `getMessages` and `markMessagesRead` validate the reader inside the same tenant-scoped
 transaction that reads or acknowledges messages. They do not run a separate `getAgent` precheck.
-The operation still reads the clock once and completes expiration pruning first. Standalone
-inbox version lookups and subscription validation are unchanged.
+The operation reads the clock once and checks expiration before reading agent or message data.
+Standalone inbox version lookups and subscription validation are unchanged.
 
 With no expiration candidates and no named session renewal, an inbox read or nonempty
-acknowledgement uses two transactions and nine PostgreSQL protocol statements: four for the
-payload-free prune preflight and five for the inbox operation. An empty acknowledgement uses
-eight statements, including the current reader lookup. Removing the duplicate precheck saves one
-transaction and five statements per call; it does not cache agent existence or remove validation.
+acknowledgement uses one transaction and six PostgreSQL protocol statements. An empty
+acknowledgement uses five, including the current reader lookup. The fresh payload-free expiry
+check shares the operation's tenant context; this removes a separate BEGIN, context assignment
+and COMMIT. It does not cache expiration or agent existence, or remove validation.
 
 MCP page-and-version reads use the [paired inbox transaction](inbox-read-transactions.md), which
 adds the independent version query to the existing inbox transaction. With the same preconditions,
-the pair uses ten protocol statements instead of fourteen across separate reads.
+the pair uses seven protocol statements. Direct sends share the same fresh expiry check with
+their transaction. When candidates exist, the read-only preflight commits before the original
+bounded message and lifecycle cleanup transactions run. The operation then runs exactly once in
+a new tenant transaction. Cleanup remains committed if the operation later fails, and retained
+candidates do not cause a retry loop. See [expiry preflights](postgres-expiry-preflight.md).
 
 Unknown readers still fail, including empty acknowledgements. Current generation, historical
 generation filters, tenant qualification, default-session behavior and existing named-session
@@ -30,16 +34,31 @@ rejection. `test/postgres-inbox-transactions.test.ts` exercises the least-privil
 against disposable PostgreSQL, counts actual protocol statements, and covers tenant isolation,
 generation rollover/history, inbox version, acknowledgements and session renewal. Its generated
 actor identities also work before tenant-contract finalization; cleanup targets only its two
-fixture tenants. The unchanged full hosted load remains the performance acceptance gate.
+fixture tenants. `test/postgres-prune-operation-transactions.test.ts` checks candidate transitions,
+commit and failure ordering, safe preflight errors, no operation replay, and ordinary standalone
+adapter transactions. The unchanged full hosted load remains the performance acceptance gate.
+`test/postgres-send-transactions.test.ts` records real runtime-role protocol statements for a
+named-session send and duplicate retry, preserving the original message and lease on duplicates.
+It also verifies that expired rows and their charged bytes stay reclaimed after idempotency,
+provenance or closed-recipient failures, while an attempted sender renewal rolls back.
 
 ## Registration activity accounting
 
 Registration writes `last_seen_at` in its agent INSERT or UPDATE, under the existing tenant/agent
 transaction lock. Its subsequent session renewal does not write the same timestamp again. Every
 other renewal caller keeps the existing activity update; sending still advances sender activity.
-Session creation, renewal, trimming, agent lookup, authority validation and generation handling
-are unchanged. [Activation notifications](registration-activation.md) also use the registration
+Existing-agent session renewal, trimming, authority validation and generation handling are
+unchanged. [Activation notifications](registration-activation.md) also use the registration
 transaction's existing state. No timestamp or agent-existence result is cached.
+
+A fresh registration uses nine protocol statements rather than fourteen. After the locked absence
+check and agent INSERT, the immediate tenant-qualified foreign key proves that the uncommitted new
+parent has no prior session history. The adapter validates the exact single INSERT-returned
+generation, upserts its first session, and still reads and validates the actual final agent row.
+It omits only the second expiry update, stored-agent reread, session-existence and live-count queries,
+and retained-session trim. Existing-agent paths and both writes' quota/storage triggers remain.
+Missing, duplicate or malformed generation rows stop before session writes; an invalid final agent
+row rolls back both writes. No returned metadata or state is synthesized from request input.
 
 `test/postgres-registration-accounting.test.ts` calls the existing adapter API as `murmur_app`,
 with function-statistics collection enabled by the disposable test owner. It measures before/after

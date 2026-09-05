@@ -4,8 +4,11 @@
 `MessageStore.getMessagesWithVersion` result. No MCP input, output field, count limit,
 pagination behavior, or error contract changes.
 
-After the existing expiry prune, each paired read validates the current agent inside its own
-tenant transaction and resolves the requested generation once. A supplied named session is
+Each paired read validates the current agent inside its tenant transaction and resolves the
+requested generation once. PostgreSQL first checks for expiry candidates in that transaction;
+when candidates exist, it commits the check and completes the existing separate pruning before
+opening the read transaction. SQLite keeps pruning outside its read transaction.
+A supplied named session is
 renewed using that same captured instant. Historical reads use their explicit generation for
 both the page and version. Unknown agents still fail before payload materialization.
 
@@ -21,6 +24,8 @@ statements per paired read. Under READ COMMITTED these remain separate statement
 the version may include a message committed after the page query. Both statements use the same
 resolved generation and expiry instant, so concurrent reopening or passage of wall-clock time
 does not mix two generations or two expiry cutoffs in one response.
+Sharing the fresh no-candidate expiry check also removes a separate BEGIN, tenant assignment and
+COMMIT. With no named-session renewal, the complete paired operation uses seven protocol statements.
 
 SQLite executes the pair synchronously in a transaction. Lifecycle pruning stays outside it
 because that pruning uses an explicit BEGIN. Session renewal has no nested BEGIN, and the existing

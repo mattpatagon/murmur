@@ -40,6 +40,7 @@ import {
   supersedePostgresSessions,
   trimRetainedPostgresSessions,
 } from "./postgres-agent-lifecycle-rows.js";
+import { upsertPostgresAgentSession } from "./postgres-agent-session-write.js";
 import { type AgentRow, AgentRowSchema, mapAgentRow } from "./postgres-message-rows.js";
 import {
   lockPostgresRecipientCommitOrder,
@@ -47,6 +48,9 @@ import {
 } from "./postgres-message-transactions.js";
 
 const AgentRowsSchema: z.ZodType<AgentRow[]> = z.array(AgentRowSchema);
+const InsertedGenerationRowsSchema: z.ZodType<readonly [{ readonly generation: number }]> = z.tuple(
+  [z.strictObject({ generation: z.number().int().positive().safe() })],
+);
 const PresentRowsSchema: z.ZodType<{ readonly present: number }[]> = z.array(
   z.strictObject({ present: z.number().int() }),
 );
@@ -179,22 +183,7 @@ export async function renewPostgresSessionInTransaction(
         AND target.session_key = stale.session_key
     `;
   }
-  await transaction`
-    INSERT INTO murmur.agent_sessions(
-      tenant_id, agent_id, generation, session_key,
-      started_at, last_renewed_at, lease_expires_at
-    ) VALUES (
-      ${tenantId.value}::uuid, ${agentId.value}, ${generation.value}, ${sessionKey.value},
-      ${now.toISOString()}::timestamptz,
-      ${now.toISOString()}::timestamptz,
-      ${now.addMinutes(AGENT_LEASE_MINUTES).toISOString()}::timestamptz
-    )
-    ON CONFLICT(tenant_id, agent_id, generation, session_key) DO UPDATE SET
-      last_renewed_at = excluded.last_renewed_at,
-      lease_expires_at = excluded.lease_expires_at,
-      ended_at = NULL,
-      end_reason = NULL
-  `;
+  await upsertPostgresAgentSession(transaction, tenantId, agentId, generation, sessionKey, now);
   await trimRetainedPostgresSessions(transaction, tenantId, agentId);
   if (activity === "refresh") {
     await transaction`
@@ -237,7 +226,7 @@ export async function registerPostgresAgent(
     let reopened: boolean = false;
     let repositoryDiverged: boolean = false;
     if (existing === null) {
-      await transaction`
+      const inserted: unknown = await transaction`
         INSERT INTO murmur.agents(
           tenant_id, agent_id, authority, display_name, metadata, created_at, last_seen_at
         ) VALUES (
@@ -246,7 +235,11 @@ export async function registerPostgresAgent(
           ${database.json(metadata)}, ${now.toISOString()}::timestamptz,
           ${now.toISOString()}::timestamptz
         )
+        RETURNING generation
       `;
+      generation = AgentGeneration.parse(
+        InsertedGenerationRowsSchema.parse(inserted)[0].generation,
+      );
     } else {
       if (existing.authority !== authority) throw new AgentAuthorityConflictError();
       const currentMetadata: JsonObject = JsonObjectSchema.parse(
@@ -297,15 +290,30 @@ export async function registerPostgresAgent(
         WHERE tenant_id = ${tenantId.value}::uuid AND agent_id = ${command.agentId.value}
       `;
     }
-    const agent: Agent = await renewPostgresSessionInTransaction(
-      transaction,
-      tenantId,
-      command.agentId,
-      command.sessionKey ?? SessionKey.default(),
-      now,
-      true,
-      "already-refreshed",
-    );
+    let agent: Agent;
+    if (existing === null) {
+      // The immediate tenant/agent FK prevents session history for this uncommitted new parent.
+      // Keep the final database read: returned state and metadata are never synthesized from input.
+      await upsertPostgresAgentSession(
+        transaction,
+        tenantId,
+        command.agentId,
+        generation,
+        command.sessionKey ?? SessionKey.default(),
+        now,
+      );
+      agent = await postgresAgentInTransaction(transaction, tenantId, command.agentId, now);
+    } else {
+      agent = await renewPostgresSessionInTransaction(
+        transaction,
+        tenantId,
+        command.agentId,
+        command.sessionKey ?? SessionKey.default(),
+        now,
+        true,
+        "already-refreshed",
+      );
+    }
     return {
       agent,
       becameActive: becameActive && agent.state === "active",

@@ -140,7 +140,7 @@ test.skipIf(!postgresConfigured)(
       for (let index: number = 0; index < 2; index += 1) {
         fixture.statements.length = 0;
         await callDataTool("register_agent", { agent_id: fixture.command.agentId.value }, context);
-        expect(fixture.statements).toHaveLength(14);
+        expect(fixture.statements).toHaveLength(index === 0 ? 9 : 14);
         expect(
           fixture.statements.filter((statement: string): boolean => statement.trim() === "begin"),
         ).toHaveLength(1);

@@ -23,6 +23,10 @@ The removed PostgreSQL preread costs four protocol statements for an absent agen
 an existing agent, including BEGIN and COMMIT. A load journey registers two agents, removing
 eight or ten statements respectively, without adding queries inside registration. These counts
 exclude connection initialization and are not a latency or throughput guarantee.
+Fresh PostgreSQL registration additionally omits impossible prior-session history checks,
+using nine commands while active re-registration retains fourteen. The INSERT-returned generation
+and final actual agent row are validated; [registration accounting](postgres-inbox-query-bounds.md)
+documents the tenant-qualified foreign-key proof and unchanged quota enforcement.
 
 `test/registration-activation.test.ts` covers SQLite lifecycle transitions, exact expiry,
 authority/input rejection, capped sessions, and real in-memory MCP notifications with the

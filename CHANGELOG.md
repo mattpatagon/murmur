@@ -28,6 +28,8 @@ All notable changes to Murmur are documented in this file.
   forged credentials, admission saturation, recovery and explicit latency and memory thresholds.
 - Preserve compatible Cloud Run revisions and retained database rows during deployment, with
   source-provenance checks before migrations and no bypass of writer-drain safety for contraction.
+- Avoid redundant fresh-agent session-history checks while retaining tenant locks, quotas,
+  validated database-returned generation and final agent state, and existing-agent lifecycle behavior.
 
 ### Fixed
 
@@ -40,6 +42,8 @@ All notable changes to Murmur are documented in this file.
   PostgreSQL activity accounting while preserving resource-list notifications.
 - Read inbox pages and their independent versions in one transaction, preserving tenant checks,
   generation filters, and payload-byte reservations through failure or cancellation.
+- Share fresh no-expiry checks with plaintext send, read and acknowledgement transactions;
+  preserve separately committed cleanup when candidates exist and a later operation fails.
 - Require an observed successful load-worker shutdown; premature exits and forced termination fail
   verification instead of reporting successful cleanup, and failed cleanup retains the hard deadline.
 - Skip redundant storage-size calculations for fixed-size usage-counter updates, with a catalog

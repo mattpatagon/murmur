@@ -153,7 +153,7 @@ test.skipIf(adminDatabaseUrl === undefined)(
       expect(result.agent.liveSessionCount).toBe(1);
       // Only the inserted agent and session are measured; fixed-size usage UPDATE is uncharged.
       expect(fixture.counters).toEqual([
-        { accountedRows: 2, accountingCalls: 7, agentInserts: 1, agentUpdates: 0 },
+        { accountedRows: 2, accountingCalls: 5, agentInserts: 1, agentUpdates: 0 },
       ]);
       expect(
         fixture.statements.filter((statement: string): boolean =>
