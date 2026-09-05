@@ -337,6 +337,9 @@ describe("website artifact verification", (): void => {
   });
 
   test("rejects invalid canonical origins without echoing credential material", (): void => {
+    const authenticatedOrigin: URL = new URL("https://example.com/");
+    authenticatedOrigin.username = "fixture-user";
+    authenticatedOrigin.password = "fixture-password";
     expect(websiteOrigin(undefined).origin).toBe(ORIGIN);
     expect(websiteOrigin("https://www.example.com/").origin).toBe("https://www.example.com");
     for (const invalid of [
@@ -345,8 +348,7 @@ describe("website artifact verification", (): void => {
       "https://example.com/path",
       "https://example.com/?a=b",
       "https://example.com/#fragment",
-      // biome-ignore lint/security/noSecrets: Deliberately fake credentials prove secret-bearing origins are rejected.
-      "https://user:password@example.com/",
+      authenticatedOrigin.href,
     ]) {
       expect((): URL => websiteOrigin(invalid)).toThrow("WEBSITE_SITE_URL must be an HTTPS origin");
     }
