@@ -35,6 +35,7 @@ export type BunPinSurfaces = {
   readonly ciWorkflow: string;
   readonly deployWorkflow: string;
   readonly dockerfile: string;
+  readonly productionSmokeWorkflow: string;
 };
 
 type DependencySections = {
@@ -169,6 +170,7 @@ function auditBunPins(
   const workflows: readonly [string, string][] = [
     [".github/workflows/ci.yml", surfaces.ciWorkflow],
     [".github/workflows/deploy.yml", surfaces.deployWorkflow],
+    [".github/workflows/production-smoke.yml", surfaces.productionSmokeWorkflow],
   ];
   workflows.forEach((entry: readonly [string, string]): void => {
     const workflowVersions: readonly string[] = workflowBunVersions(entry[1]);
@@ -239,6 +241,7 @@ function main(): void {
       ciWorkflow: readFileSync(".github/workflows/ci.yml", "utf8"),
       deployWorkflow: readFileSync(".github/workflows/deploy.yml", "utf8"),
       dockerfile: readFileSync("Dockerfile", "utf8"),
+      productionSmokeWorkflow: readFileSync(".github/workflows/production-smoke.yml", "utf8"),
     };
     const errors: readonly string[] = auditDependencyPolicy(
       packageJsonText,

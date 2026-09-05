@@ -3,8 +3,10 @@
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import process from "node:process";
+import { runAdminCli } from "./admin/terminal-client.js";
 
 import { runE2eeCli } from "./e2ee/cli.js";
+import { runSignupCli } from "./setup/signup.js";
 
 import {
   DEFAULT_MURMUR_URL,
@@ -29,7 +31,9 @@ const HELP: string = `Murmur user-level setup
 
 Usage:
   murmur setup --user [--codex] [--claude] [--e2ee] [--replace] [--url URL]
+  murmur signup --slug ORGANIZATION --name NAME [--credentials-directory ABSOLUTE_DIRECTORY] [--url URL]
   murmur e2ee <command> [options]
+  murmur admin TOOL [--arguments-file PATH] [--url URL]
 
 The default is to configure both Codex and Claude. The command adds the remote
 Murmur MCP server and passive SessionStart, UserPromptSubmit, PostToolUse, and
@@ -219,6 +223,8 @@ export async function runCliAsync(
   token: string | undefined = process.env[MURMUR_TOKEN_ENV],
 ): Promise<string> {
   if (arguments_[0] === "e2ee") return await runE2eeCli(arguments_.slice(1));
+  if (arguments_[0] === "signup") return await runSignupCli(arguments_.slice(1));
+  if (arguments_[0] === "admin") return await runAdminCli(arguments_.slice(1));
   return runCli(arguments_, setupAction, token);
 }
 

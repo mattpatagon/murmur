@@ -300,6 +300,7 @@ test("local E2E MCP proxy preserves familiar data tools and verified plaintext o
       "get_messages",
       "wait_for_messages",
       "mark_messages_read",
+      "get_setup_guide",
       "check_for_upgrades",
     ]);
     expect(

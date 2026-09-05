@@ -11,6 +11,8 @@ import {
 } from "../src/hosted/contracts.js";
 import { DatabaseCredentialPattern } from "../src/hosted/token-secret.js";
 import { logSafeError } from "../src/safe-errors.js";
+import type { ElicitResult } from "@modelcontextprotocol/sdk/types.js";
+import { readApprovedMcpResponse } from "./lib/approved-mcp-response.js";
 
 const JsonRpcEnvelopeSchema: z.ZodObject<{ result: z.ZodType<unknown> }> = z.object({
   result: z.unknown(),
@@ -71,6 +73,8 @@ async function post(
     body: JSON.stringify(body),
     headers: headers(token, sessionId),
     method: "POST",
+    redirect: "error",
+    signal: AbortSignal.timeout(180_000),
   });
 }
 
@@ -80,7 +84,7 @@ async function initialize(url: string, token: string, name: string): Promise<str
     jsonrpc: "2.0",
     method: "initialize",
     params: {
-      capabilities: {},
+      capabilities: { elicitation: { form: {} } },
       clientInfo: { name, version: "1.0.0" },
       protocolVersion: LATEST_PROTOCOL_VERSION,
     },
@@ -108,13 +112,18 @@ async function callTool(
   argumentsValue: Record<string, unknown>,
 ): Promise<unknown> {
   const envelope: z.infer<typeof JsonRpcEnvelopeSchema> = JsonRpcEnvelopeSchema.parse(
-    await payload(
+    await readApprovedMcpResponse(
       await post(url, token, sessionId, {
         id,
         jsonrpc: "2.0",
         method: "tools/call",
         params: { arguments: argumentsValue, name },
       }),
+      id,
+      name,
+      argumentsValue,
+      async (requestId: string | number, result: ElicitResult): Promise<Response> =>
+        await post(url, token, sessionId, { id: requestId, jsonrpc: "2.0", result }),
     ),
   );
   const result: z.infer<typeof CallToolResultSchema> = CallToolResultSchema.parse(envelope.result);

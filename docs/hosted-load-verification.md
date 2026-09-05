@@ -7,7 +7,7 @@ connections or reproduce Cloud Run, Supabase network latency, or their billing b
 
 ## Disposable database prerequisites
 
-Reserve this host's database/load resources through Murmur before running. Use Bun 1.3.11 and an
+Reserve this host's database/load resources through Murmur before running. Use Bun 1.3.14 and an
 otherwise idle PostgreSQL 17 instance. Provision a disposable database named
 `murmur_load_<suffix>`, apply every committed migration, provision `murmur_app`, and complete the
 strict operator/bootstrap and tenant-contract-v2 setup using the existing hosted verification

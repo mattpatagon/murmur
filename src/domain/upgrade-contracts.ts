@@ -112,8 +112,9 @@ export function createUpgradeCheckOutput(
     update_available: status === "update_available",
     upgrade_steps: [
       {
-        command: `bun install --global 'git+https://github.com/mattpatagon/murmur.git#${revision}'`,
-        description: "Install the exact latest Murmur revision globally.",
+        command: `bun install --global 'https://api.usemurmur.dev/downloads/murmur-${latest}-${revision}.tgz'`,
+        description:
+          "Install the exact latest public Murmur client package without repository access.",
       },
       {
         command: "murmur setup --user",

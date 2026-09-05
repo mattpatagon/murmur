@@ -55,6 +55,9 @@ The result reports `state`, `plaintext_writes_blocked`, `unread_plaintext_messag
 
 2. Reconnect every active endpoint through `murmur setup --user --e2ee`, register its agent, verify
    installation fingerprints independently, pin trusted peers, and publish the current key bundle.
+   Agents can complete local trust and key setup through the
+   [local encryption MCP tools](e2ee-local-configuration.md), including signing and importing an
+   organization trust policy without repository access.
    The entitlement must report `unprovisioned_active_agents: 0`. An active agent means the current
    open generation has a live session lease.
 3. Drain or explicitly read every retained plaintext inbox item until
@@ -69,10 +72,7 @@ The result reports `state`, `plaintext_writes_blocked`, `unread_plaintext_messag
    }
    ```
 
-5. Reconnect and prove peer-to-peer encryption across the actual endpoint and repository boundary:
-   send a unique sentinel, decrypt it only at the recipient proxy, and verify the database contains
-   one ciphertext row and no sentinel or plaintext message row.
-6. Enforce with the independently verified, positive organization trust-policy version:
+5. Enforce with the independently verified, positive organization trust-policy version:
 
    ```json
    {
@@ -81,6 +81,11 @@ The result reports `state`, `plaintext_writes_blocked`, `unread_plaintext_messag
      "trust_policy_version": 7
    }
    ```
+
+6. Reconnect and prove peer-to-peer encryption across the actual endpoint and repository boundary:
+   send a unique sentinel, decrypt it only at the recipient proxy, and verify the database contains
+   one ciphertext row and no sentinel or plaintext message row. Encrypted messaging requires the
+   enforced state; provisioning permits publishing keys.
 
 Enforcement fails unless plaintext writes are blocked, the unread plaintext count is zero, every
 active agent generation has a key bundle, and the trust-policy version is positive. The database

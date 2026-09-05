@@ -18,6 +18,12 @@ The deployed service exposes:
   `status` of `ok` only after startup has completed.
 - `GET /version`, an unauthenticated endpoint that returns the deployed four-part version and exact
   source revision used by upgrade checks.
+- `GET /install`, plain-text public installation instructions, and `GET`/`HEAD /downloads/murmur.tgz`
+  plus its version-and-revision-pinned path, the public package described in
+  [public distribution](public-distribution.md).
+- `POST /setup/mcp`, an anonymous, read-only MCP connection exposing only `get_setup_guide`, so
+  users can begin before signup or credential configuration. It has bounded request bodies,
+  deadlines, rate and capacity gates, and no retained sessions or tenant access.
 - `POST /v1/tenants`, an unauthenticated, rate-limited endpoint that atomically
   creates a tenant and returns its initial administrator credential.
 - `/mcp`, a public Streamable HTTP endpoint that requires a live Murmur bearer
@@ -57,7 +63,7 @@ Provision these dependencies before enabling the workflow:
 - a separate Cloud Run runtime service account;
 - a Supabase PostgreSQL project and its verified Server root certificate;
 - a GitHub `production` environment with protected deployment approvals;
-- Bun 1.3.11 for manual verification and recovery work.
+- Bun 1.3.14 for manual verification and recovery work.
 
 Restrict the GitHub `production` environment's deployment branches to `main`, and restrict the
 Google workload-identity provider to this repository and `assertion.ref == 'refs/heads/main'`.

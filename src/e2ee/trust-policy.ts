@@ -75,12 +75,13 @@ export type OrganizationTrustPolicy = OrganizationTrustPolicyFields & {
   readonly signature: Uint8Array;
 };
 
-const OrganizationTrustBindingDtoSchema: z.ZodType<OrganizationTrustBindingDto> = z.strictObject({
-  agent_id: AgentIdSchema,
-  root_key_id: RootKeyIdSchema,
-  root_public_key: Base64UrlSchema.length(43),
-});
-const OrganizationTrustRevocationDtoSchema: z.ZodType<OrganizationTrustRevocationDto> =
+export const OrganizationTrustBindingDtoSchema: z.ZodType<OrganizationTrustBindingDto> =
+  z.strictObject({
+    agent_id: AgentIdSchema,
+    root_key_id: RootKeyIdSchema,
+    root_public_key: Base64UrlSchema.length(43),
+  });
+export const OrganizationTrustRevocationDtoSchema: z.ZodType<OrganizationTrustRevocationDto> =
   z.strictObject({
     reason: z.string().min(1).max(500),
     revoked_at: InstantSchema,

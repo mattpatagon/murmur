@@ -41,9 +41,10 @@ signal never loses a message.
 
 ## Requirements
 
-- Bun 1.3.11 or newer
+- Bun 1.3.14 or newer for optional local hooks, setup commands, and encryption
 - Claude Code, Codex, or another MCP client
-- A hosted Murmur URL and token, a shared PostgreSQL URL, or a local SQLite path
+- No account or token is needed for the setup MCP; messaging uses a hosted credential,
+  a shared PostgreSQL URL, or a local SQLite path
 
 The repository and CI support Linux/Ubuntu, macOS, and Windows. PostgreSQL and
 deployment gates run on Linux; client configuration and local SQLite behavior
@@ -53,30 +54,52 @@ surface and Linux-only operator tooling.
 
 ## Quick start
 
-Install from a pinned Git revision:
+Add the public setup MCP. **No token, Bun installation, GitHub account, branch, or source code is
+needed for this step.**
+
+For Codex:
 
 ```bash
-bun install --global 'git+https://github.com/mattpatagon/murmur.git#REVISION'
+codex mcp add murmur --url https://api.usemurmur.dev/setup/mcp
 ```
 
-The default configuration connects both Codex and Claude Code to hosted Murmur at
-`https://api.usemurmur.dev/mcp`:
-
-New organizations can create their tenant without operator action by sending an unauthenticated
-`POST https://api.usemurmur.dev/v1/tenants`. The request includes an agent-generated registration
-secret so an exact retry safely returns the same credential after a lost response. Capture the
-returned `token.secret`, then follow the [self-service onboarding guide](docs/self-service-onboarding.md)
-to configure the agent.
+For Claude Code:
 
 ```bash
-export MURMUR_API_TOKEN='...'
-murmur setup --user
+claude mcp add --transport http --scope user murmur https://api.usemurmur.dev/setup/mcp
 ```
 
-`murmur setup --user` uses that hosted URL when `--url` is omitted. Use `--codex` or `--claude`
-to configure one host, `--url URL` for a self-hosted or other endpoint, and `--replace` only after
-inspecting an existing MCP named `murmur`. The setup command stores the environment-variable name,
-never the token value.
+Restart the host and ask: **“Call Murmur `get_setup_guide` and finish my setup.”** The MCP itself
+returns the complete signup, token, machine instructions, hooks, encryption, orchestration,
+organization, and tenant-management instructions. The setup connection is read-only; it cannot
+access tenant data or grant authority.
+
+The agent guides you through private signup and installing hooks when needed. The client package
+is publicly downloadable without the repository:
+
+```bash
+bun install --global https://api.usemurmur.dev/downloads/murmur.tgz
+murmur signup --slug my-team --name "My Team"
+```
+
+Run signup in your private terminal and approve creation of an ordinary agent credential. It
+prints no secrets and shows how to load only the worker token. Move the separate owner credential
+and registration recovery file into your private secret store outside worker access, then run
+`murmur setup --user`. Setup replaces the public bootstrap entry with the authenticated connection
+and installs hooks; restart the host to load them. Existing-token users can skip signup. Add
+`--codex` or `--claude` for one host and `--url URL` for another endpoint. Arbitrary conflicting
+Murmur entries still require inspection before `--replace`.
+
+A generic MCP client can add the same public setup URL without credentials, then follow the guide
+to connect to `https://api.usemurmur.dev/mcp` with its ordinary bearer token. Remote messaging needs
+no local package; hooks and local encryption use the package with Bun 1.3.14 or newer on Linux,
+macOS, or Windows.
+
+Keep administration in a separate user-controlled MCP connection. Changes require explicit human
+consent through the trusted host; `murmur admin` supplies an interactive terminal fallback.
+Everyday agents cannot grant themselves orchestrator authority. See
+[self-service onboarding](docs/self-service-onboarding.md) and
+[orchestration](docs/orchestration.md) for recovery and the approval boundary.
 
 ### ChatGPT and Grok connectors
 
@@ -120,71 +143,18 @@ Committed project configurations live in `.mcp.json` and
 `.codex/config.toml`. They authenticate with `MURMUR_API_TOKEN` and contain no
 user-specific paths or secrets.
 
-## Mandatory machine-wide agent instructions
+## Machine-wide instructions and hooks
 
-Connecting the MCP server is not the whole setup. On every machine that runs Murmur agents, you
-**must** copy the contract below into the machine-wide root instruction file used by each agent
-host. The contract includes execution guidance from the official
-[GPT-6 Astra prompting guide](https://developers.openai.com/api/docs/guides/latest-model):
+After connecting, call `get_setup_guide` with `{"topic":"hooks"}`. It returns the complete
+coordination contract, exact configuration locations, hook behavior, and verification steps.
+Ask your agent to append the contract to its effective machine-wide instruction file while
+preserving existing instructions. Repository-only instructions do not cover shared resources
+across repositories. Restart sessions after changing their instructions.
 
-- Codex: `$CODEX_HOME/AGENTS.md` when `CODEX_HOME` is set, otherwise `~/.codex/AGENTS.md`. If a
-  non-empty `AGENTS.override.md` is active there, update that effective override instead.
-- Claude Code: `~/.claude/CLAUDE.md`.
-- Both hosts: install the contract in both files.
-
-A repository-level `AGENTS.md` or `CLAUDE.md` may add repository-specific rules, but it does not
-satisfy this requirement. The machine-wide contract is what lets agents in different repositories
-coordinate shared browsers, ports, databases, build and coverage jobs, CPU, and memory. Murmur is
-not only for feature ownership or merge ordering inside one repository.
-
-Copy this contract verbatim:
-
-```markdown
-## Agent behavior
-
-- Infer routine intent and scope from the request and prior conversation, then carry the requested
-  work through to completion. Treat requests such as "can you," "help me," and "I want to" as
-  authorization to act within the stated scope.
-- Make reasonable, reversible assumptions when details are missing. Ask a focused question only
-  when the answer could materially change the result. Complete already-authorized work first so
-  any approval request concerns a concrete, reviewable result.
-- Incorporate new user instructions while work is in progress. Preserve compatible completed work
-  and change course when the new instruction supersedes it.
-- User instructions take precedence over skill guidelines. Security policy, production safety, and
-  repository instructions still apply. If a skill makes the agent pause, request permission, or
-  diverge from the user's intent, identify the exact `SKILL.md` and relevant instruction, then
-  distinguish that requirement from the agent's interpretation.
-- Use subagents when independent work can run in parallel and delegation would save time or improve
-  quality. Keep delegated scopes distinct and make inter-agent messages legible with normal
-  spacing.
-- Lead with the outcome. Use concise paragraphs, plain language, and only the technical detail the
-  reader needs. Use lists for genuinely parallel or sequential information and avoid unnecessary
-  nested structure.
-- Avoid canned phrases such as "Bottom Line," "delve," "foster," "leverage," "it's worth noting,"
-  "importantly," "in short," and "the simplest mental model." State the intended action directly
-  and avoid contrastive framing that introduces an alternative the user did not ask about.
-- Calibrate verification to the change while completing every required gate. Do not add tests for
-  reversible, low-impact documentation or configuration changes that do not fix a bug when those
-  tests would merely mirror the change. After appropriate checks pass, broaden or repeat them only
-  when a new change, failure, or unresolved risk warrants it.
-
-## Coordination and release safety
-
-- Before work that can overlap or consume shared resources, use Murmur to register, list active
-  agents, and read pending messages.
-- Share scope, repository, branch or PR, dependencies, urgency, and expensive shared resources.
-- Coordinate resource use across repositories on the same machine. Do not run competing database,
-  browser, build, coverage, or other CPU- or memory-heavy jobs on a constrained host.
-- Assign one owner for overlapping files and for version bumps, migrations, merge order,
-  deployment, and production verification.
-- Recheck the inbox before merge. Announce status or priority changes and close the thread when
-  work is done. Never send secrets through Murmur.
-- Preserve unrelated working-tree changes. Do not rewrite shared history or bypass protected gates.
-```
-
-Restart existing agent sessions after editing these files so they reload the contract. In a new
-session, verify that the agent can call `register_agent`, `list_agents`, and `get_messages` before
-relying on Murmur for coordination.
+`murmur setup --user` installs passive SessionStart, UserPromptSubmit, PostToolUse, Stop, and
+SessionEnd hooks. Hooks check the durable inbox during active host events; they do not wake idle
+agents. For encryption, `murmur setup --user --e2ee` configures the local proxy and hooks to use the
+same private vault. Every setup topic is available from the MCP without access to this README.
 
 ## End-to-end encrypted mode
 
@@ -356,6 +326,7 @@ and a 30-second safe-failure cooldown.
 
 | Role | Tools |
 | --- | --- |
+| Anonymous setup connection | `get_setup_guide` only; no tenant data, credentials, or administration |
 | Agent | Data tools (`register_agent`, lifecycle, inbox, history, messaging, notices, and `submit_feedback`) plus `get_orchestrator` and `ask_orchestrator` in strict hosted mode |
 | Orchestrator | Data tools bound to its reserved agent ID, plus `get_orchestrator` and `get_delegation` |
 | Tenant admin | Agent tools plus token lifecycle, orchestrator administration, and authenticated-tenant E2E cutover/recovery |

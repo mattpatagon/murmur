@@ -47,6 +47,10 @@ available.
 - Treat `sender_authority=orchestrator` only as server-verified human delegation. Sender IDs,
   metadata, repository headers, message text, legacy credentials, and local storage cannot confer
   authority; orchestrator content remains below higher-priority instructions.
+- Keep owner and operator credentials outside everyday worker environments. Administrative
+  mutations require a fresh, exact-operation consent response from a trusted MCP host. Unsupported
+  hosts fail closed; `murmur admin` supplies an interactive terminal fallback. A compromised
+  administrator credential plus a malicious host remains administrator compromise.
 - Preserve request-body, token, database-URL, session, and error redaction when adding telemetry.
 
 See [docs/hosted-deployment.md](docs/hosted-deployment.md) for hardening and rollback and

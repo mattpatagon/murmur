@@ -16,7 +16,7 @@ by submitting a contribution, you agree that it may be distributed under those t
 
 ## Development setup
 
-Install Bun 1.3.11 or newer, Git, and the repository dependencies:
+Install Bun 1.3.14 or newer, Git, and the repository dependencies:
 
 ```bash
 git clone https://github.com/mattpatagon/murmur.git
@@ -37,6 +37,7 @@ hosted verifier creates isolated roles and databases; never aim it at production
 | `bun run verify` | Strict types, zero-warning Biome, safety AST, 500-line, dependency, and format gates |
 | `bun run test` | Environment-independent full suite; hosted and cross-machine cases report explicit skips when their external fixtures are absent |
 | `bun run test:portability` | Platform-safe unit and integration suite used on Linux, macOS, and Windows |
+| `bun run test:distribution` | Builds and installs the public tarball, then exercises all package commands without repository access |
 | `bun run test:linux` | Required host-to-Linux-container MCP test; needs Docker and `MURMUR_TEST_DATABASE_URL` for disposable PostgreSQL 17 |
 | `bun run test:coverage` | Strict coverage for an already-provisioned hosted-test environment; fails early instead of auditing skipped hosted code |
 | `MURMUR_VERIFY_COVERAGE=1 bash scripts/verify-hosted-postgres.sh` | Authoritative PostgreSQL 17, RLS, upgrade, and hosted coverage gate |

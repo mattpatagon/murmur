@@ -51,7 +51,10 @@ import {
   streamCapacityResponse,
   unauthorizedResponse,
 } from "./http/http-request.js";
+import { runHttpProcess } from "./http/http-process.js";
 import { createHttpRequestHandler } from "./http/http-router.js";
+import { createPublicSetupHandler } from "./http/public-setup.js";
+import { configuredPublicDownloads } from "./http/public-distribution.js";
 import type { HttpServerDependencies, MurmurHttpServer } from "./http/http-server-contracts.js";
 import {
   cleanupObservabilityStartup,
@@ -80,9 +83,7 @@ import {
 import { logSafeError } from "./safe-errors.js";
 import { createStore } from "./storage/create-store.js";
 import type { MessageStore } from "./storage/message-store.js";
-
 export type { HttpServerDependencies, MurmurHttpServer } from "./http/http-server-contracts.js";
-
 export async function startHttpServer(
   environment: NodeJS.ProcessEnv = process.env,
   dependencies: HttpServerDependencies = {},
@@ -431,6 +432,8 @@ export async function startHttpServer(
         handleTenantRegistration,
         config.releaseMetadata,
         handleConnectorOAuth,
+        configuredPublicDownloads(environment, config.releaseMetadata, timeSource),
+        createPublicSetupHandler({ allowedOrigins, capacity, time: timeSource }),
       ),
       hostname,
       port: requestedPort,
@@ -474,24 +477,4 @@ export async function startHttpServer(
     },
   };
 }
-if (import.meta.main) {
-  void startHttpServer().then(
-    (server: MurmurHttpServer): void => {
-      let stopped: boolean = false;
-      const stop: () => void = (): void => {
-        if (stopped) return;
-        stopped = true;
-        void server.stop().catch((error: unknown): void => {
-          logSafeError("Murmur HTTP shutdown failed", error);
-          process.exitCode = 1;
-        });
-      };
-      process.once("SIGINT", stop);
-      process.once("SIGTERM", stop);
-    },
-    (error: unknown): void => {
-      logSafeError("Murmur HTTP startup failed", error);
-      process.exitCode = 1;
-    },
-  );
-}
+if (import.meta.main) runHttpProcess(startHttpServer);

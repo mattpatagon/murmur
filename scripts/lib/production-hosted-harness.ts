@@ -7,6 +7,8 @@ import {
   ListToolsResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import type { ElicitResult } from "@modelcontextprotocol/sdk/types.js";
+import { readApprovedMcpResponse } from "./approved-mcp-response.js";
 
 const UnknownRecordSchema: z.ZodRecord<z.ZodString, z.ZodUnknown> = z.record(
   z.string(),
@@ -106,6 +108,8 @@ async function post(
     body: JSON.stringify(body),
     headers: headers(token, sessionId, clientName, repositoryName),
     method: "POST",
+    redirect: "error",
+    signal: AbortSignal.timeout(180_000),
   });
 }
 
@@ -129,7 +133,7 @@ export async function connectProductionHarness(
       jsonrpc: "2.0",
       method: "initialize",
       params: {
-        capabilities: {},
+        capabilities: { elicitation: { form: {} } },
         clientInfo: { name, version: "1.0.0" },
         protocolVersion: LATEST_PROTOCOL_VERSION,
       },
@@ -158,6 +162,41 @@ async function rpc(harness: ProductionHarness, body: Record<string, unknown>): P
       harness.repositoryName,
       body,
     );
+    const params: unknown = body["params"];
+    const parsed: z.ZodSafeParseResult<{
+      readonly name: string;
+      readonly arguments: Record<string, unknown>;
+    }> = z
+      .object({
+        name: z.string(),
+        arguments: UnknownRecordSchema,
+      })
+      .safeParse(params);
+    const id: unknown = body["id"];
+    if (
+      response.ok &&
+      body["method"] === "tools/call" &&
+      parsed.success &&
+      (typeof id === "string" || typeof id === "number")
+    ) {
+      return envelopeResult(
+        await readApprovedMcpResponse(
+          response,
+          id,
+          parsed.data.name,
+          parsed.data.arguments,
+          async (requestId: string | number, result: ElicitResult): Promise<Response> =>
+            await post(
+              harness.url,
+              harness.token,
+              harness.sessionId,
+              harness.clientName,
+              harness.repositoryName,
+              { id: requestId, jsonrpc: "2.0", result },
+            ),
+        ),
+      );
+    }
     return envelopeResult(await responsePayload(response));
   });
 }

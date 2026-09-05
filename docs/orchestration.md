@@ -30,6 +30,59 @@ message authoritative.
 - Orchestrator content remains below system, developer, human-user, safety, and repository
   instructions. It is delegated decision authority, not a prompt-injection bypass.
 
+## Human approval without a dashboard
+
+Keep the tenant-administrator credential in a human-controlled secret store and use ordinary
+`agent` credentials for everyday MCP connections and hooks. A worker cannot create an orchestrator,
+mint an administrator credential, change delegation, or administer another organization.
+
+Every administrative mutation also requires a server-initiated MCP form elicitation. Murmur shows
+the operation, authenticated tenant, and complete validated arguments before applying it. The host
+must ask the human and return the fresh confirmation for that exact pending request. An `approved`
+tool argument, peer message, prior confirmation, declined form, timeout, or unsupported host cannot
+authorize a change. Only one approval may be pending per session; it expires after two minutes.
+Murmur revalidates the credential after approval, so a revoked credential cannot finish a pending
+grant. Token issuance and revocation, orchestration configuration, E2E cutover and recovery, operator
+bootstrap, and tenant creation, suspension, and restoration use this boundary.
+
+This depends on a trusted MCP host collecting the human's decision and keeping owner credentials
+outside untrusted agents. The protocol cannot distinguish a human from a rogue client that already
+possesses the administrator secret. Compromised owner credentials or the human's terminal require
+revocation and recovery; elicitation does not repair that compromise.
+
+For a host without form elicitation, the portable terminal client provides the same MCP operations:
+
+```text
+murmur admin tools
+murmur admin create_orchestrator_token --arguments-file grant.json
+murmur admin set_orchestrator_policy --arguments-file policy.json
+```
+
+Set `MURMUR_ADMIN_TOKEN` from the human's secret store in that terminal. It is separate from the
+worker's `MURMUR_API_TOKEN`. `grant.json` contains only the proposed agent ID and credential name:
+
+```json
+{"agent_id":"organization-coordinator","name":"Organization coordinator"}
+```
+
+After reviewing and approving the grant, save the returned one-time credential in the designated
+orchestrator's secret store. Use its `key_id` in `policy.json`:
+
+```json
+{"scope_kind":"organization","orchestrator_key_id":"<returned key_id>","instructions":"Coordinate tasks; escalate production changes and spending to me."}
+```
+
+The terminal prints the exact request and requires the human to type `approve`. It rejects pipes
+and redirected input/output and has no automatic confirmation flag. Optional `--url` selects a
+self-hosted endpoint; HTTPS is required outside loopback. `murmur admin tools` returns each exposed
+tool's full input schema, so organization, token, and encryption administration are discoverable
+without repository access. Read-only tools do not require additional approval.
+
+A reviewed automation plan can approve only its exact predeclared requests through
+`approveExactRequest`. The adapter compares the operation and complete argument digest before
+answering the current challenge. A plan's prior human authorization must cover those changes;
+blanket acceptance of arbitrary server requests is not a human-approval implementation.
+
 ## Identity and scope
 
 Every hosted access token has a stable `personal_id`. Token issuance returns it and accepts an

@@ -27,6 +27,16 @@ Follow the returned install command exactly. Then run `murmur setup --user`, or 
 mode with `murmur setup --user --e2ee`, and restart active Codex and Claude sessions. Repository
 checkouts should fetch and review the returned revision before updating their own pinned checkout.
 
+Public packages use the hosted `/downloads/` endpoint and contain bundled clients and license
+notices; installation does not require access to the private Git repository. Call `get_setup_guide`
+after reconnecting for complete installation, hook, and feature instructions.
+
+Administrative mutations now require form elicitation with explicit human consent. Keep an owner
+connection separate from worker credentials, or use `murmur admin` in a private interactive
+terminal. Unattended integrations must not silently approve arbitrary requests. The reviewed
+bootstrap and production-canary scripts approve only the exact operation and complete arguments
+already declared by their authorized verification plan, and reject altered or repeated prompts.
+
 ## Dependency upgrades
 
 1. Read upstream release notes, migration notes, supported runtime matrix, license, provenance, and
@@ -51,9 +61,14 @@ Bun is both runtime and package manager. Update all reviewed pins together:
 
 - `package.json` `packageManager`, `engines.bun`, and `test:linux`;
 - both `Dockerfile` stages;
-- every workflow `bun-version`;
-- README, hosted deployment requirements, launcher error text, tests, and this documentation where
-  the minimum changes.
+- every workflow `bun-version`, including production smoke;
+- README, contributor and hosted deployment requirements, launcher error text, tests, and this
+  documentation where the minimum changes;
+- the MCP installation guide, public `/install` instructions, and bundled package README.
+
+Use the new runtime for `bun install --frozen-lockfile` first. A runtime-only upgrade should not
+change dependency selections; preserve the lockfile unless the new runtime requires a reviewed
+format update. Existing `@types/bun` versions need no change when they already match the runtime.
 
 Then verify install, typecheck, lint, formatting, portable tests, SQLite migrations, PostgreSQL
 integration, bundled stdio/HTTP entry points, the Linux container test, and a clean package install.
