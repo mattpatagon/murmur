@@ -37,7 +37,7 @@ const DATA_TOOLS: readonly string[] = [
   "wait_for_messages",
   "withdraw_notice",
 ];
-const UTILITY_TOOLS: readonly string[] = ["check_for_upgrades"];
+const UTILITY_TOOLS: readonly string[] = ["check_for_upgrades", "get_setup_guide"];
 const TENANT_ADMIN_TOOLS: readonly string[] = [
   "create_access_token",
   "get_e2ee_entitlement",

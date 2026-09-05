@@ -113,13 +113,20 @@ export function localE2eeFingerprint(vault: LocalE2eeVault): string {
   return root.rootKeyId;
 }
 
-export function exportLocalPublicIdentity(vault: LocalE2eeVault): LocalPublicIdentityExport {
+export function exportLocalPublicIdentity(
+  vault: LocalE2eeVault,
+  agentId?: string | undefined,
+): LocalPublicIdentityExport {
   const root: StoredRootKey | null = vault.keys.getRoot();
   if (root === null) {
     throw new Error("The local E2E identity is not initialized; there is no public key to export");
   }
   const agents: readonly LocalPublicAgentIdentity[] = vault.keys
     .listAgents()
+    .filter(
+      (agent: StoredAgentKey): boolean =>
+        agentId === undefined || agent.certificate.agentId === agentId,
+    )
     .map((agent: StoredAgentKey): LocalPublicAgentIdentity => {
       const prekeys: readonly StoredPrekey[] = [
         ...vault.keys.listPrekeys(agent.certificate.agentId, "fallback"),

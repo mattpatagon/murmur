@@ -41,6 +41,19 @@ database clients, HTTP types, or vendor errors into the application.
 
 ## Request flow
 
+The anonymous `/setup/mcp` connection lets a new agent discover `get_setup_guide` before signup.
+It constructs a separate read-only MCP application with no tenant or storage dependency. Requests
+follow the configured origin policy, share bounded HTTP capacity while reserving one slot for
+authenticated MCP, and have independent body, rate, and response deadline limits. Its MCP server
+closes after each request; no anonymous session or subscription persists.
+
+Public installation instructions and executable package downloads use a separate read-only route.
+The Docker build bundles all client entry points and dependencies into a bounded tarball. Startup
+validates its SHA-256, byte size, version, and source revision against the deployed release before
+serving a fixed allowlisted filename. No request path selects a filesystem path. Downloads use
+independent rate, concurrency, and response deadline bounds and do not enter tenant authentication
+or storage. See [public distribution](public-distribution.md).
+
 Hosted requests pass through ordered, independently observable gates:
 
 1. Normalize the route and allocate a server request ID.
@@ -81,6 +94,18 @@ credential-bound repository, and optional orchestrator agent binding. Those auth
 select an orchestrator policy; request headers and MCP arguments cannot select another policy.
 Local, legacy, and hybrid modes omit the orchestration surface because they have no equivalent
 human-grant boundary.
+
+Administrative writes now require server-initiated MCP form elicitation. The consent prompt binds
+a fresh challenge to the exact validated operation and authenticated scope, has a deadline and a
+pending-request limit, and rejects unsupported clients, refusal, cancellation, forged or replayed
+responses. Authentication is revalidated after consent before the mutation. A trusted client must
+collect real human input; possession of an administrator credential plus a malicious client remains
+administrator compromise. Signup separates the human-held owner credential from the worker token.
+The interactive terminal administration client supplies the same consent flow without a dashboard.
+
+The MCP's `get_setup_guide` returns bundled, bounded instructions and the actual connection's tool
+list without fetching repository content. Public client packages are built from the reviewed
+revision and served by the hosted deployment; the source repository need not be public.
 
 Local stdio skips hosted authentication and HTTP admission but uses the same MCP application and
 MessageStore contract. Context is detected from Git or explicit environment values. Context a

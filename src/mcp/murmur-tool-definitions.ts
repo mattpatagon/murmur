@@ -71,6 +71,7 @@ import { tenantAdminTools } from "./murmur-tenant-admin-tool-definitions.js";
 import type { E2eeEntitlementRecord, ToolExposure } from "./murmur-tool-exposure.js";
 import { upgradeToolDefinition } from "./murmur-upgrade-tool.js";
 import { toolDefinition } from "./tool-definition.js";
+import { setupGuideToolDefinition } from "./murmur-setup-guide.js";
 
 function dataTools(): Tool[] {
   return [
@@ -458,6 +459,6 @@ function principalToolsForExposure(exposure: ToolExposure): Tool[] {
 
 export function toolsForPrincipal(exposure: ToolExposure): Tool[] {
   const tools: Tool[] = principalToolsForExposure(exposure);
-  tools.push(upgradeToolDefinition());
+  tools.push(upgradeToolDefinition(), setupGuideToolDefinition());
   return tools;
 }

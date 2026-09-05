@@ -8,6 +8,7 @@ import {
 
 export const HEALTH_PATH: string = "/health";
 export const MCP_PATH: string = "/mcp";
+export const PUBLIC_SETUP_PATH: string = "/setup/mcp";
 export const OAUTH_AUTHORIZATION_PATH: string = "/oauth/authorize";
 export const OAUTH_PROTECTED_RESOURCE_PATH: string = `/.well-known/oauth-protected-resource${MCP_PATH}`;
 export const OAUTH_PROTECTED_RESOURCE_ROOT_PATH: string = "/.well-known/oauth-protected-resource";

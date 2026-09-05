@@ -5,8 +5,19 @@ import type {
 } from "../observability/request-observation.js";
 import { logSafeError } from "../safe-errors.js";
 import { isConnectorOAuthPath } from "./connector-oauth.js";
-import { HEALTH_PATH, MCP_PATH, RELEASE_PATH, TENANT_REGISTRATION_PATH } from "./http-config.js";
+import {
+  HEALTH_PATH,
+  MCP_PATH,
+  PUBLIC_SETUP_PATH,
+  RELEASE_PATH,
+  TENANT_REGISTRATION_PATH,
+} from "./http-config.js";
 import { jsonResponse } from "./http-request.js";
+import {
+  createPublicDownloadHandler,
+  isPublicDistributionPath,
+  type PublicDownloadHandler,
+} from "./public-distribution.js";
 
 export type McpRequestHandler = (
   request: Request,
@@ -19,6 +30,8 @@ export function createHttpRequestHandler(
   handleTenantRegistration: McpRequestHandler | null = null,
   releaseMetadata: MurmurReleaseMetadata | null = null,
   handleConnectorOAuth: McpRequestHandler | null = null,
+  handlePublicDownload: PublicDownloadHandler = createPublicDownloadHandler(null),
+  handlePublicSetup: McpRequestHandler | null = null,
 ): (request: Request) => Promise<Response> {
   return async (request: Request): Promise<Response> => {
     const observation: RequestObservation = observability.observe(request);
@@ -46,6 +59,13 @@ export function createHttpRequestHandler(
                   version: releaseMetadata.version,
                 });
         }
+      } else if (url.pathname === PUBLIC_SETUP_PATH) {
+        response =
+          handlePublicSetup === null
+            ? jsonResponse(404, { error: "Not found" })
+            : await handlePublicSetup(request, observation);
+      } else if (isPublicDistributionPath(url.pathname)) {
+        response = handlePublicDownload(request);
       } else if (url.pathname === TENANT_REGISTRATION_PATH) {
         response =
           handleTenantRegistration === null

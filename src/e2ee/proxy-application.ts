@@ -1,12 +1,17 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type {
   CallToolRequest,
   CallToolResult,
   ListToolsResult,
+  ServerNotification,
+  ServerRequest,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import packageMetadata from "../../package.json" with { type: "json" };
+import { MurmurHumanApproval } from "../mcp/human-approval.js";
+import { callSetupGuideTool, setupGuideToolDefinition } from "../mcp/murmur-setup-guide.js";
 import { toolError } from "../mcp/murmur-tool-results.js";
 import {
   defaultMurmurUpgradeChecker,
@@ -14,6 +19,7 @@ import {
 } from "../mcp/murmur-upgrade-checker.js";
 import { callUpgradeTool, upgradeToolDefinition } from "../mcp/murmur-upgrade-tool.js";
 import { logSafeError } from "../safe-errors.js";
+import { callLocalEncryptionTool, localEncryptionTools } from "./local-configuration-tools.js";
 import { E2eeProxyResources } from "./proxy-resources.js";
 import type { E2eeProxyOperations } from "./proxy-service.js";
 import { callE2eeProxyTool, e2eeProxyTools } from "./proxy-tools.js";
@@ -23,6 +29,7 @@ export class E2eeProxyApplication {
   readonly #resources: E2eeProxyResources;
   readonly #tools: readonly Tool[];
   readonly #upgradeChecker: MurmurUpgradeChecker;
+  readonly #humanApproval: MurmurHumanApproval;
   #closePromise: Promise<void> | null = null;
   #localClosePromise: Promise<void> | null = null;
   #onCloseCleanupStarted: boolean = false;
@@ -33,7 +40,12 @@ export class E2eeProxyApplication {
     upgradeChecker: MurmurUpgradeChecker = defaultMurmurUpgradeChecker,
   ) {
     this.#operations = operations;
-    this.#tools = [...e2eeProxyTools(), upgradeToolDefinition()];
+    this.#tools = [
+      ...e2eeProxyTools(),
+      ...(operations.localEncryption === undefined ? [] : localEncryptionTools()),
+      setupGuideToolDefinition(),
+      upgradeToolDefinition(),
+    ];
     this.#upgradeChecker = upgradeChecker;
     this.server = new Server(
       { name: "murmur-e2ee-proxy", version: packageMetadata.version },
@@ -43,16 +55,20 @@ export class E2eeProxyApplication {
           tools: {},
         },
         instructions:
-          "Murmur end-to-end encryption runs at this local endpoint. Familiar agent lifecycle and message tools remain available. Message plaintext and private keys never leave this proxy; hosted Murmur receives ciphertext and bounded routing metadata only. Feedback is an explicit exception: submit_feedback stores maintainer-readable plaintext, so never include credentials, secrets, private message content, vulnerability details, or sensitive production data. Report suspected vulnerabilities privately at https://github.com/mattpatagon/murmur/security/advisories/new. Call check_for_upgrades for revision-pinned upgrade steps. Verify peer root fingerprints before exchanging sensitive content.",
+          "Murmur end-to-end encryption runs at this local endpoint. Call get_setup_guide for installation, hook configuration and the available feature workflows. Familiar agent lifecycle and message tools remain available. Message plaintext and private keys never leave this proxy; hosted Murmur receives ciphertext and bounded routing metadata only. Feedback is an explicit exception: submit_feedback stores maintainer-readable plaintext, so never include credentials, secrets, private message content, vulnerability details, or sensitive production data. Report suspected vulnerabilities privately at https://github.com/mattpatagon/murmur/security/advisories/new. Call check_for_upgrades for revision-pinned upgrade steps. Local e2ee_local_* tools manage fingerprints, verified peer trust, signed organization policies and keys. Security changes require direct human approval through the MCP host. Verify peer root fingerprints before exchanging sensitive content.",
       },
     );
+    this.#humanApproval = new MurmurHumanApproval(this.server);
     this.server.setRequestHandler(
       ListToolsRequestSchema,
       async (): Promise<ListToolsResult> => ({ tools: [...this.#tools] }),
     );
     this.server.setRequestHandler(
       CallToolRequestSchema,
-      async (request: CallToolRequest): Promise<CallToolResult> => await this.callTool(request),
+      async (
+        request: CallToolRequest,
+        extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
+      ): Promise<CallToolResult> => await this.callTool(request, extra),
     );
     this.#resources = new E2eeProxyResources(this.server, operations);
     this.#resources.registerHandlers();
@@ -65,8 +81,32 @@ export class E2eeProxyApplication {
     };
   }
 
-  private async callTool(request: CallToolRequest): Promise<CallToolResult> {
+  private async callTool(
+    request: CallToolRequest,
+    extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
+  ): Promise<CallToolResult> {
     try {
+      const setupResult: CallToolResult | null = callSetupGuideTool(
+        request.params.name,
+        request.params.arguments,
+        this.#tools,
+      );
+      if (setupResult !== null) return setupResult;
+      const localResult: CallToolResult | null = await callLocalEncryptionTool(
+        request.params.name,
+        request.params.arguments,
+        this.#operations.localEncryption,
+        async (name: string, input: unknown): Promise<unknown> =>
+          await this.#humanApproval.approveChange(
+            name,
+            input,
+            "this local endpoint vault",
+            { relatedRequestId: extra.requestId, signal: extra.signal },
+            async (): Promise<boolean> =>
+              this.#closePromise === null && this.#localClosePromise === null,
+          ),
+      );
+      if (localResult !== null) return localResult;
       const upgradeResult: CallToolResult | null = await callUpgradeTool(
         request.params.name,
         request.params.arguments,

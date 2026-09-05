@@ -102,7 +102,7 @@ jobs:
         run: |
           set -euo pipefail
           image="$REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REPOSITORY/$SERVICE:$GITHUB_SHA"
-          docker build --tag "$image" .
+          docker build --build-arg MURMUR_RELEASE_REVISION="$GITHUB_SHA" --tag "$image" .
           echo "IMAGE=$image" >> "$GITHUB_ENV"
 
       - name: Refresh authentication for image push

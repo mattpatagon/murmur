@@ -7,7 +7,10 @@ configuration for Codex and Claude, stdio package entry points, HTTP logic, and 
 ## CI contract
 
 Every pull request runs `bun install --frozen-lockfile`, `bun run verify`,
-`bun run test:portability`, `bun run build`, and `bun run build:http` on Ubuntu, macOS, and Windows.
+`bun run test:portability`, `bun run test:distribution`, `bun run build`, and `bun run build:http`
+on Ubuntu, macOS, and Windows. The distribution gate builds the public tarball, installs it in an
+isolated global package directory, and exercises setup, hooks, encrypted key generation, and the
+local MCP setup guide without access to the checkout or installed development dependencies.
 Ubuntu additionally runs PostgreSQL 17, TLS, RLS, populated upgrades, hosted integration, and the
 authoritative coverage gate. It also starts Murmur once on the runner and once in a clean Linux Bun
 container, then proves bidirectional MCP delivery through the shared PostgreSQL service. Linux-only
@@ -18,9 +21,10 @@ operator convenience script is portable.
 
 ## Entry points
 
-The package exposes `murmur`, `murmur-hook`, and `murmur-mcp` directly as Bun TypeScript executables;
-these are the portable entry points. Use them from any operating system after global installation or
-through an absolute Bun command configured by the MCP host.
+The public package exposes `murmur`, `murmur-hook`, `murmur-e2ee-proxy`, and `murmur-mcp` as bundled
+Bun JavaScript executables. Install from the public hosted tarball on every supported operating
+system; no source checkout or GitHub account is required. Repository entry points remain TypeScript.
+See [public distribution](public-distribution.md) for artifact contents and release verification.
 
 `scripts/murmur-mcp` is a POSIX repository convenience launcher. It adds macOS Keychain and common
 Bun-path discovery before starting the same stdio server. It is not the Windows entry point. Shell

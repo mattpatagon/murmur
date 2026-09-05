@@ -41,6 +41,7 @@ export async function verifyHostedOrchestrationRollback(
     );
     expect(await toolNames(server.mcpUrl, options.bossSecret, session)).toEqual([
       "check_for_upgrades",
+      "get_setup_guide",
     ]);
     expect(
       await callToolExpectingError(

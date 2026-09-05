@@ -13,7 +13,11 @@ import {
   type SetOrchestratorPolicyOutput,
   SetOrchestratorPolicyOutputSchema,
 } from "../../src/hosted/orchestration-contracts.js";
-import { callTool, callToolExpectingError } from "../support/hosted-mcp-harness.js";
+import {
+  callTool,
+  callToolExpectingError,
+  withHostedMcpSession,
+} from "../support/hosted-mcp-harness.js";
 import { runConcurrentPolicyUpdates } from "../support/orchestration-race-harness.js";
 import type { Worker } from "./hosted-orchestration-helpers.js";
 import type { HostedTenantScenario } from "./hosted-tenant-provisioning.js";
@@ -78,41 +82,60 @@ export async function verifyConcurrentSameScopePolicies(options: {
   const firstInstructions: string = "Concurrent policy writer one";
   const secondInstructions: string = "Concurrent policy writer two";
   const writes: readonly [SetOrchestratorPolicyOutput, SetOrchestratorPolicyOutput] =
-    await runConcurrentPolicyUpdates({
-      databaseUrl: scenario.configuredAdminDatabaseUrl,
-      first: async (): Promise<SetOrchestratorPolicyOutput> =>
-        await callTool(
+    await withHostedMcpSession(
+      scenario.server.mcpUrl,
+      scenario.tenantA.token.secret,
+      "policy-race-admin-one",
+      async (
+        firstSession: string,
+      ): Promise<readonly [SetOrchestratorPolicyOutput, SetOrchestratorPolicyOutput]> =>
+        await withHostedMcpSession(
           scenario.server.mcpUrl,
           scenario.tenantA.token.secret,
-          scenario.adminASession,
-          704,
-          "set_orchestrator_policy",
-          {
-            instructions: firstInstructions,
-            orchestrator_key_id: options.bossKeyId,
-            scope_kind: "organization",
+          "policy-race-admin-two",
+          async (
+            secondSession: string,
+          ): Promise<readonly [SetOrchestratorPolicyOutput, SetOrchestratorPolicyOutput]> => {
+            // Each writer has its own human approval; the database race must remain concurrent.
+            expect(firstSession).not.toBe(secondSession);
+            return await runConcurrentPolicyUpdates({
+              databaseUrl: scenario.configuredAdminDatabaseUrl,
+              first: async (): Promise<SetOrchestratorPolicyOutput> =>
+                await callTool(
+                  scenario.server.mcpUrl,
+                  scenario.tenantA.token.secret,
+                  firstSession,
+                  704,
+                  "set_orchestrator_policy",
+                  {
+                    instructions: firstInstructions,
+                    orchestrator_key_id: options.bossKeyId,
+                    scope_kind: "organization",
+                  },
+                  SetOrchestratorPolicyOutputSchema,
+                ),
+              repositoryName: "",
+              scopeKind: "organization",
+              scopeOwnerId: scenario.tenantA.tenant.tenant_id,
+              second: async (): Promise<SetOrchestratorPolicyOutput> =>
+                await callTool(
+                  scenario.server.mcpUrl,
+                  scenario.tenantA.token.secret,
+                  secondSession,
+                  705,
+                  "set_orchestrator_policy",
+                  {
+                    instructions: secondInstructions,
+                    orchestrator_key_id: raceBoss.token.key_id,
+                    scope_kind: "organization",
+                  },
+                  SetOrchestratorPolicyOutputSchema,
+                ),
+              tenantId: scenario.tenantA.tenant.tenant_id,
+            });
           },
-          SetOrchestratorPolicyOutputSchema,
         ),
-      repositoryName: "",
-      scopeKind: "organization",
-      scopeOwnerId: scenario.tenantA.tenant.tenant_id,
-      second: async (): Promise<SetOrchestratorPolicyOutput> =>
-        await callTool(
-          scenario.server.mcpUrl,
-          scenario.tenantA.token.secret,
-          scenario.adminASession,
-          705,
-          "set_orchestrator_policy",
-          {
-            instructions: secondInstructions,
-            orchestrator_key_id: raceBoss.token.key_id,
-            scope_kind: "organization",
-          },
-          SetOrchestratorPolicyOutputSchema,
-        ),
-      tenantId: scenario.tenantA.tenant.tenant_id,
-    });
+    );
   expect(writes[0].policy.agent_id).toBe(options.bossAgentId);
   expect(writes[0].policy.instructions).toBe(firstInstructions);
   expect(writes[1].policy.agent_id).toBe(raceBossAgentId);

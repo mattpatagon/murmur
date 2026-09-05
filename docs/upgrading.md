@@ -27,6 +27,16 @@ Follow the returned install command exactly. Then run `murmur setup --user`, or 
 mode with `murmur setup --user --e2ee`, and restart active Codex and Claude sessions. Repository
 checkouts should fetch and review the returned revision before updating their own pinned checkout.
 
+Public packages use the hosted `/downloads/` endpoint and contain bundled clients and license
+notices; installation does not require access to the private Git repository. Call `get_setup_guide`
+after reconnecting for complete installation, hook, and feature instructions.
+
+Administrative mutations now require form elicitation with explicit human consent. Keep an owner
+connection separate from worker credentials, or use `murmur admin` in a private interactive
+terminal. Unattended integrations must not silently approve arbitrary requests. The reviewed
+bootstrap and production-canary scripts approve only the exact operation and complete arguments
+already declared by their authorized verification plan, and reject altered or repeated prompts.
+
 ## Dependency upgrades
 
 1. Read upstream release notes, migration notes, supported runtime matrix, license, provenance, and
