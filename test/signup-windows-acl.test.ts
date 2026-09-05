@@ -80,6 +80,47 @@ test("Windows signup ACL verification rejects process failures and unverified ou
   }
 });
 
+test("Windows signup exposes only allowlisted failed ACL stages for native diagnosis", (): void => {
+  for (const stage of [
+    "inspect_path",
+    "create_descriptor",
+    "create_rule",
+    "apply_acl",
+    "read_acl",
+    "verify_rule_count",
+    "verify_rights",
+  ]) {
+    const execute: SignupAclExecutor = (
+      _command: string,
+      _arguments: readonly string[],
+      _options: SpawnSyncOptionsWithStringEncoding,
+    ): SpawnSyncReturns<string> => result(JSON.stringify({ owner_only: false, stage }), 1);
+    expect((): void =>
+      runSignupWindowsAcl(
+        { directory: true, operation: "protect", path: "C:\\private\\credentials" },
+        execute,
+      ),
+    ).toThrow(`stage: ${stage}`);
+  }
+  for (const stdout of [
+    "invalid JSON",
+    JSON.stringify({ owner_only: false, stage: "private path or secret" }),
+    JSON.stringify({ owner_only: false, stage: "apply_acl", detail: "private path or secret" }),
+  ]) {
+    const execute: SignupAclExecutor = (
+      _command: string,
+      _arguments: readonly string[],
+      _options: SpawnSyncOptionsWithStringEncoding,
+    ): SpawnSyncReturns<string> => result(stdout, 1);
+    expect((): void =>
+      runSignupWindowsAcl(
+        { directory: true, operation: "protect", path: "C:\\private\\credentials" },
+        execute,
+      ),
+    ).toThrow(/^Windows could not establish owner-only signup credential permissions$/u);
+  }
+});
+
 test.skipIf(process.platform !== "win32")(
   "native Windows signup removes preexisting explicit Everyone grants from directories and files",
   (): void => {

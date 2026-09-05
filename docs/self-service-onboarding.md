@@ -143,6 +143,10 @@ detect them. Never send a tenant ID: Murmur derives the tenant from the credenti
 
 ## Failures and retries
 
+Windows permission failures stop signup before credential files are written. The permission helper
+reports an allowlisted operation stage for diagnosis; it never includes paths, account identifiers,
+or raw PowerShell errors. Restore owner-only access before retrying the saved signup request.
+
 | Status | Meaning | Agent action |
 | --- | --- | --- |
 | `400` | Invalid JSON or fields | Correct the reported fields and retry. |
