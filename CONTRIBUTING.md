@@ -22,6 +22,7 @@ Install Bun 1.3.14 or newer, Git, and the repository dependencies:
 git clone https://github.com/mattpatagon/murmur.git
 cd murmur
 bun install --frozen-lockfile
+bun run website:install
 bun run verify
 bun run test
 bun run test:portability
@@ -44,6 +45,14 @@ hosted verifier creates isolated roles and databases; never aim it at production
 | `bun run build` | Bundles the stdio MCP entry point |
 | `bun run build:http` | Bundles the hosted HTTP entry point |
 | `bun run format` | Applies deterministic Biome formatting |
+| `bun run website:dev` | Starts the institutional website locally |
+| `bun run website:check` | Astro types and frontend source policy with the isolated website toolchain |
+| `bun run website:build` | Generates static pages for Cloudflare Pages |
+| `bun run website:test` | Audits built pages, links, metadata, headers, and asset budgets |
+
+The website uses a separate frozen lockfile because Astro's checker requires TypeScript 6 while
+the backend uses TypeScript 7. Install both dependency sets before verification. Read [DESIGN.md](DESIGN.md)
+for the visual contract and [website operations](docs/website.md) for development and deployment.
 
 The full hosted test needs an isolated database administrator URL as documented by the script. CI
 supplies it through a disposable PostgreSQL service, then runs the Linux-container test against the

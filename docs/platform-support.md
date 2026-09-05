@@ -6,7 +6,7 @@ configuration for Codex and Claude, stdio package entry points, HTTP logic, and 
 
 ## CI contract
 
-Every pull request runs `bun install --frozen-lockfile`, `bun run verify`,
+Every pull request runs `bun install --frozen-lockfile`, `bun run website:install`, `bun run verify`,
 `bun run test:portability`, `bun run test:distribution`, `bun run build`, and `bun run build:http`
 on Ubuntu, macOS, and Windows. The distribution gate builds the public tarball, installs it in an
 isolated global package directory, and exercises setup, hooks, encrypted key generation, and the
@@ -61,6 +61,7 @@ The commands are identical in Bash, zsh, and PowerShell:
 
 ```text
 bun install --frozen-lockfile
+bun run website:install
 bun run verify
 bun run test:portability
 bun run build
@@ -85,6 +86,15 @@ PostgreSQL client tools on Linux. Cloud Run deployment requires the tools listed
 The host-to-container gate rewrites only loopback database hostnames to Docker's runner gateway and
 adds that gateway explicitly when the container launches. Remote PostgreSQL hostnames are preserved
 unchanged.
+
+## Institutional website
+
+The Astro, React, TypeScript, and Tailwind site in `website/` has its own exact dependency pins
+and frozen lockfile. Its check/build commands use Bun and portable platform APIs on all three
+operating systems. The repository verification gate includes Astro and frontend source checks.
+The dedicated Ubuntu website workflow builds static pages, validates links and assets, and deploys
+verified pushes to `main` automatically to Cloudflare Pages. The MCP service remains on Cloud Run.
+See [website operations](website.md) for required Cloudflare configuration and smoke checks.
 
 ## Reporting a platform defect
 

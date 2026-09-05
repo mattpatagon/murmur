@@ -38,6 +38,9 @@ jobs:
       - name: Install dependencies from the reviewed lockfile
         run: bun install --frozen-lockfile
 
+      - name: Install the isolated website verification toolchain
+        run: bun install --cwd website --frozen-lockfile
+
       - name: Run static and dependency policy gates
         run: bun run verify
 
@@ -80,6 +83,9 @@ jobs:
 
       - name: Install dependencies from the reviewed lockfile
         run: bun install --frozen-lockfile
+
+      - name: Install the isolated website verification toolchain
+        run: bun install --cwd website --frozen-lockfile
 
       - name: Run static verification
         run: bun run verify

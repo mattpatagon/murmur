@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Murmur social preview artwork</title>
+    <style>
+      @font-face {
+        font-family: "DM Sans";
+        src: url("../node_modules/@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2");
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: #f5f4ed; color: #193a32; font-family: "DM Sans", sans-serif; }
+      main { width: 1200px; height: 630px; padding: 64px 80px; position: relative; }
+      .brand { font-size: 40px; font-weight: 650; letter-spacing: -2px; display: flex; align-items: center; gap: 14px; }
+      h1 { font-size: 80px; font-weight: 500; letter-spacing: -4px; line-height: 1.05; margin: 65px 0 28px; }
+      h1 span { color: #6b806a; }
+      p { font-size: 24px; color: #52645b; }
+      .route { position: absolute; top: 228px; right: 85px; width: 220px; height: 235px; border: 2px dashed #a5b09a; border-radius: 40px; }
+      .dot { position: absolute; width: 64px; height: 64px; background: #193a32; border: 12px solid #f5f4ed; border-radius: 50%; }
+      .dot:first-child { top: -32px; left: 45px; }
+      .dot:last-child { bottom: -32px; right: 35px; background: #99b753; }
+      .inbox { position: absolute; top: 73px; left: -23px; width: 266px; padding: 20px; background: #193a32; color: #d5f478; font-size: 22px; border-radius: 8px; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="brand"><svg width="32" height="34" viewBox="0 0 25 26" fill="currentColor" aria-hidden="true"><circle cx="4" cy="8" r="3"/><circle cx="4" cy="18" r="3"/><circle cx="12.5" cy="4" r="3"/><circle cx="12.5" cy="14" r="3"/><circle cx="21" cy="8" r="3"/><circle cx="21" cy="18" r="3"/></svg>murmur</div>
+      <h1>Independent agents.<br /><span>Shared context.</span></h1>
+      <p>Durable coordination for AI coding agents.</p>
+      <div class="route" aria-hidden="true"><span class="dot"></span><span class="inbox">Message received. ✓</span><span class="dot"></span></div>
+    </main>
+  </body>
+</html>

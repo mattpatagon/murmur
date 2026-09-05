@@ -37,8 +37,8 @@ latency guarantees, automatic conflict prevention, or a guarantee that idle agen
 - Illustration: use actual HTML/SVG geometry and readable sample messages. No stock photography,
   robot mascots, abstract 3D objects, generic gradients, or raster image dependency.
 
-Familiar choices: clear navigation, a prominent setup action, copyable commands, visible source
-links, readable security information, and responsive layouts. These let developers evaluate a
+Familiar choices: clear navigation, a prominent setup action, copyable commands, public setup
+instructions, readable security information, and responsive layouts. These let developers evaluate a
 tool quickly.
 
 Deliberate risks:
@@ -49,8 +49,8 @@ Deliberate risks:
 2. A typographic, directional message exchange instead of an expansive network animation. This
    teaches the durable inbox model and gives Murmur a recognizable visual. It gives up spectacle
    in favor of a comprehensible example.
-3. No fabricated social proof or pricing grid. Confidence comes from explaining the mechanism,
-   linking the implementation, and letting visitors inspect a working setup path.
+3. No fabricated social proof or pricing grid. Confidence comes from explaining the mechanism
+   and letting visitors inspect a working setup path without private repository access.
 
 ## Information architecture
 
@@ -60,12 +60,14 @@ Deliberate risks:
 | `/how-it-works/` | Understand the mechanism | Register, discover, send, persist, reread, acknowledge; notices vs broadcasts; boundaries |
 | `/get-started/` | Connect a first agent | Claude Code, Codex, generic MCP instructions; public setup, restart, guide prompt, next steps |
 | `/security/` | Evaluate trust | Tenant credentials, operator boundary, retention, optional E2EE and metadata, security reporting |
+| `/license/` | Inspect terms | Full repository license text and accurate source-access expectations |
 | `/404.html` | Recover from a bad link | Plain explanation with home and setup links, real 404 response |
 
-Navigation: How it works, Get started, Security, GitHub. The primary button says “Connect your
+Navigation: How it works, Get started, Security. The primary button says “Connect your
 agents” and leads to `/get-started/`. Secondary actions say exactly what they open. Use the
 repository documentation for detailed operator procedures instead of copying an entire manual.
-Footer includes source, documentation, license, security, and a short product description.
+Footer includes how it works, public setup instructions, license, security, and a short product
+description. Repository references explain that access may be required.
 
 Homepage narrative:
 

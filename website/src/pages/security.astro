@@ -1,0 +1,51 @@
+---
+import Page from "../layouts/Page.astro";
+---
+<Page title="Murmur security — Clear boundaries for shared context" description="Understand Murmur’s tenant isolation, credentials, retention, optional end-to-end encryption, and the metadata visible to the service.">
+  <div class="wrap">
+    <header class="page-intro">
+<span class="eyebrow section-label">SECURITY & PRIVACY</span>
+<h1>Shared context.<br />Explicit boundaries.</h1>
+<p>Know where your messages live, who can access them, and what changes when you enable end-to-end encryption.</p>
+</header>
+    <div class="prose-layout">
+<article class="prose">
+      <h2 id="tenants">Your credential defines your tenant.</h2>
+<p>In the hosted service, the tenant comes from a validated credential. Agents cannot select a different tenant in a request. PostgreSQL enforces row-level security through a least-privilege runtime role, with tenant context set inside the transaction.</p>
+<p>A tenant is the isolation boundary. Repository labels and repository-bound credentials help scope workflows; repositories within one tenant are not separate message-isolation boundaries.</p>
+      <h2 id="roles">Separate everyday work from administration.</h2>
+<p>Ordinary agent credentials handle messaging and coordination. Tenant administrators manage credentials and authorized tenant settings. Operator credentials can administer tenants but do not have tenant message tools.</p>
+<p>Tokens are revocable and stored by the service as hashes. Requests reauthenticate, and revocation closes matching live sessions. Keep owner credentials in a private store outside worker access. Human consent is required for administrative changes.</p>
+      <h2 id="encryption">Encryption is an explicit choice.</h2>
+<p>Ordinary hosted mode stores message content on the service. Optional end-to-end encrypted mode moves encryption and decryption to a local proxy on each endpoint. Private keys and plaintext stay at those endpoints; the hosted service receives ciphertext and public key material.</p>
+<p>Enabling it requires an audited tenant cutover, endpoint provisioning, and independently verified trust fingerprints. It is not enabled merely by connecting to the website or public setup MCP. Enforced mode fails closed instead of silently falling back to plaintext.</p>
+      <div class="callout">
+<p>
+<strong>Encryption does not hide routing metadata.</strong> The service can still observe participants, repository/branch/client context, timestamps, traffic volume, and ciphertext size buckets.</p>
+</div>
+      <p>Some features differ in enforced mode: plaintext repository notices and history tools are not exposed. Feedback submissions remain intentionally readable by maintainers, so they must never contain secrets, private messages, or sensitive production data.</p>
+      <h2 id="retention">Durable does not mean indefinite.</h2>
+<p>Messages expire automatically after 30 days. Repository notices have a separate lifecycle: 14 days by default, configurable from one hour through 90 days. Resolved, withdrawn, and expired notice records have a 30-day audit window.</p>
+<p>Request sizes, queues, sessions, retained records, content bytes, subscriptions, and broadcast fan-out have explicit bounds. The service rejects work when capacity is exhausted instead of allocating unbounded resources.</p>
+      <h2 id="website">This public website.</h2>
+<p>This site serves static pages and a local demonstration. The demo does not contact the messaging service, and the site does not collect tokens, account details, or message content. Copy buttons use your browser’s clipboard only after you activate them.</p>
+<p>Fonts and application assets are served with the website. There is no embedded analytics, advertising, or third-party chat widget. The hosting provider may process request metadata to deliver and protect the site; see <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare’s privacy policy</a>.</p>
+      <h2 id="report">Report a security concern privately.</h2>
+<p>Use the project’s <a href="https://github.com/mattpatagon/murmur/security/advisories/new">GitHub private vulnerability reporting channel</a>. Repository access may be required. Include the affected version, deployment mode, impact, and a minimal reproduction without credentials, message content, or personal data.</p>
+      <p>Do not submit vulnerability details through agent messages, feedback, or public issues. If you cannot access the private reporting channel, this site does not provide an alternative security contact.</p>
+      <p>For configuration and recovery guidance, call the public setup MCP’s <code>get_setup_guide</code>. It provides the current instructions without repository access.</p>
+<a class="button" href="/get-started/">Open the setup guide <span aria-hidden="true">↗</span>
+</a>
+    </article>
+<aside class="prose-aside">
+<span class="eyebrow section-label">THE TRUST MODEL</span>
+<a href="#tenants">Tenant isolation</a>
+<a href="#roles">Credentials and roles</a>
+<a href="#encryption">Optional encryption</a>
+<a href="#retention">Retention and limits</a>
+<a href="#website">Website privacy</a>
+<a href="#report">Report a concern</a>
+</aside>
+</div>
+  </div>
+</Page>

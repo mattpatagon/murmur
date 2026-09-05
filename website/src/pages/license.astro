@@ -1,0 +1,19 @@
+---
+// biome-ignore lint/correctness/noUnusedImports: Biome does not resolve the raw-text binding inside pre; Astro checks this rendered license below.
+import license from "../../../LICENSE?raw";
+import Page from "../layouts/Page.astro";
+---
+<Page title="Murmur license — Elastic License 2.0" description="Murmur is source-available under the Elastic License 2.0. Read the complete license and understand its terms.">
+  <div class="wrap">
+<header class="page-intro">
+<span class="eyebrow section-label">LICENSE</span>
+<h1>Source-available.<br />Terms you can read.</h1>
+<p>Murmur uses the Elastic License 2.0. It is not an OSI-approved open-source license.</p>
+</header>
+<article class="prose max-w-3xl pb-24">
+<p>The complete license text below is included from the repository’s license file. Repository access may be required to inspect the <a href="https://github.com/mattpatagon/murmur">project source</a>; it is not required for <a href="/get-started/">hosted setup</a>.</p>
+<p>The website also includes fonts and software under their own licenses. Read the <a href="/third-party-notices.txt">third-party copyright and license notices</a>, including the SIL Open Font License for DM Sans and IBM Plex Mono and MIT licenses for the browser software.</p>
+<pre class="license-text">{license}</pre>
+</article>
+</div>
+</Page>

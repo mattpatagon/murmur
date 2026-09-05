@@ -2,6 +2,26 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.14.1.0] - 2026-09-05
+
+### Added
+
+- Introduce Murmur's institutional website with product, audience, architecture, onboarding,
+  security, and license pages. An interactive handoff explains durable delivery, and a client
+  selector provides copyable Claude Code, Codex, and generic MCP setup instructions.
+- Define the visual, content, accessibility, and performance contract in `DESIGN.md` before
+  implementation. Serve static Astro pages with React islands, TypeScript, Tailwind CSS, and
+  self-hosted fonts from an isolated website package.
+- Automate Cloudflare Pages publication from `main`, with source and artifact checks, bounded
+  deployment jobs, revision verification, security headers, and real 404 smoke checks.
+
+### For contributors
+
+- Install the website's frozen dependencies with `bun run website:install` before verification.
+  The frontend keeps Astro's TypeScript 6 checker separate from the backend's TypeScript 7 gate.
+- Extend exact dependency and file-size policies to the website, enforce safe frontend source,
+  and test metadata, link, asset, clipboard, and deployment artifact failure paths.
+
 ## [0.13.0.0] - 2026-09-05
 
 ### Added
