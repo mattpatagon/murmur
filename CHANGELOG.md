@@ -16,6 +16,7 @@ All notable changes to Murmur are documented in this file.
   whose cancelled requests would otherwise retain SDK correlation state.
 - Reserve part of the existing audit allowance for suspension and operator-token revocation without
   deleting audit history or increasing the absolute storage limits.
+- Keep agent and token quota functions private to their existing database-owned triggers.
 
 ### Changed
 
@@ -39,6 +40,8 @@ All notable changes to Murmur are documented in this file.
   generation filters, and payload-byte reservations through failure or cancellation.
 - Require an observed successful load-worker shutdown; premature exits and forced termination fail
   verification instead of reporting successful cleanup, and failed cleanup retains the hard deadline.
+- Skip redundant storage-size calculations for fixed-size usage-counter updates, with a catalog
+  guard that falls back for schema changes and preserves existing quota admission ordering.
 
 ## [0.13.0.0] - 2026-09-05
 

@@ -130,7 +130,8 @@ MURMUR_TEST_APP_DATABASE_URL="$app_url" \
   MURMUR_TEST_STORAGE_BUDGET=1 \
   bun test test/hosted-storage-budget.postgres.test.ts \
     test/hosted-storage-budget-e2ee.postgres.test.ts test/hosted-audit-headroom.postgres.test.ts \
-    test/hosted-auth-query-plan.postgres.test.ts
+    test/hosted-auth-query-plan.postgres.test.ts test/hosted-usage-accounting.postgres.test.ts \
+    test/hosted-quota-admission.postgres.test.ts
 
 MURMUR_TEST_APP_DATABASE_URL="$app_url" \
   MURMUR_TEST_ADMIN_DATABASE_URL="$admin_url" \

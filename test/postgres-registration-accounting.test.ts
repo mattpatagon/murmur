@@ -151,8 +151,9 @@ test.skipIf(adminDatabaseUrl === undefined)(
       const result: RegisterAgentResult = await fixture.store.registerAgent(fixture.command);
       expect(result.agent.lastSeenAt.toISOString()).toBe(fixture.clock.now().toISOString());
       expect(result.agent.liveSessionCount).toBe(1);
+      // Only the inserted agent and session are measured; fixed-size usage UPDATE is uncharged.
       expect(fixture.counters).toEqual([
-        { accountedRows: 4, accountingCalls: 7, agentInserts: 1, agentUpdates: 0 },
+        { accountedRows: 2, accountingCalls: 7, agentInserts: 1, agentUpdates: 0 },
       ]);
       expect(
         fixture.statements.filter((statement: string): boolean =>

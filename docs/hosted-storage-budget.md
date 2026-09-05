@@ -45,6 +45,16 @@ and exact retries that insert nothing do not consume capacity. Owner TRUNCATE op
 the measured removed rows; runtime credentials have no TRUNCATE permission. Negative accounting
 or missing state fails closed instead of silently clamping counters.
 
+Counter-only updates to `tenant_resource_usage` avoid recalculating an unchanged storage charge.
+The accounting trigger checks the actual catalog on each call: `tenant_id` must remain a non-null
+UUID, and every other live column must have a built-in smallint, integer or bigint type. Each row
+then costs exactly 559 accounted bytes, including its UUID; UPDATE preserves the number of rows.
+Nullable integer counters are safe because both numbers and null use the fixed allowance. Any
+other column type or a nullable tenant ID falls back to the complete old/new accounting path.
+INSERT and DELETE accounting, quota admission, and mixed-statement trigger ordering are unchanged.
+The agent/token quota functions remain database-trigger-only: callers cannot execute or attach
+them to their own tables, but normal runtime writes still invoke the existing triggers.
+
 The singleton lock lasts until its transaction ends. Long transactions can delay another tenant's
 write, and rejected transactions can still generate temporary data and WAL. Runtime statement,
 lock and idle-transaction deadlines limit waiting. Load verification must measure this contention
