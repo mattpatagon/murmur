@@ -8,7 +8,7 @@ import { z } from "zod";
 import { compareText } from "./lib/deterministic-order.js";
 import { auditWebsiteSitemaps, type SitemapAudit } from "./lib/website-sitemaps.js";
 
-const DEFAULT_ORIGIN: string = "https://murmur-site.pages.dev";
+const DEFAULT_ORIGIN: string = "https://usemurmur.dev";
 const REQUIRED_PAGES: readonly string[] = [
   "index.html",
   "how-it-works/index.html",

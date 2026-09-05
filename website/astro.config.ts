@@ -2,7 +2,7 @@ import react from "@astrojs/react";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "astro/config";
 
-const site: string = process.env["WEBSITE_SITE_URL"] ?? "https://murmur-site.pages.dev";
+const site: string = process.env["WEBSITE_SITE_URL"] ?? "https://usemurmur.dev";
 if (!URL.canParse(site)) throw new Error("WEBSITE_SITE_URL must be a valid HTTPS origin");
 const siteUrl: URL = new URL(site);
 if (

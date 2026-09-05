@@ -5,8 +5,8 @@ and security boundaries. Its design contract is [DESIGN.md](../DESIGN.md). It li
 and uses Astro for static HTML, React for the setup selector and handoff demonstration,
 TypeScript, and Tailwind CSS. It has no tenant session, credential form, or database access.
 
-Cloudflare Pages serves the website. The hosted messaging API remains on Cloud Run at
-`https://api.usemurmur.dev`; website publication does not replace API deployment. The source
+The website targets `https://usemurmur.dev` on Cloudflare Pages. The hosted messaging API remains
+on Cloud Run at `https://api.usemurmur.dev`; website publication does not replace API deployment. The source
 repository is private. Public onboarding must work without a GitHub account or repository access.
 Murmur is source-available under the Elastic License 2.0, not an open-source license.
 
@@ -30,8 +30,11 @@ TypeScript 6.0.3 while the MCP runtime retains TypeScript 7.0.2. Both packages p
 release, exact dependency versions, ELv2 metadata, and the 72-hour minimum release age. The root
 dependency gate validates both packages and their workflow pins. Website tooling is not included
 in the API image or public MCP executable distribution.
-The website scripts explicitly run Astro and Wrangler with `bun --bun`, so they do not require
-a separate Node.js installation. Use the package scripts to preserve that runtime selection.
+The website scripts run Astro with `bun --bun`; development, checking, building, and previewing
+need no separate Node.js installation. Wrangler authentication, project creation, and deployment
+require Node.js 22.22.1, which the publication workflow pins separately. The deploy script invokes
+Wrangler's JavaScript entry point with Node because authenticated Wrangler commands under Bun were
+observed to exit successfully without returning the expected identity output.
 Run the repository's required [quality gates](../CONTRIBUTING.md) before requesting review.
 
 The website supports `/`, `/how-it-works/`, `/get-started/`, `/security/`, `/license/`, and `/404.html`.
@@ -43,39 +46,47 @@ required to read the site.
 
 | Variable | Location | Meaning |
 | --- | --- | --- |
-| `WEBSITE_SITE_URL` | Optional local environment or GitHub repository variable | Canonical HTTPS origin, default `https://murmur-site.pages.dev`; no path, query, fragment, or credentials |
+| `WEBSITE_SITE_URL` | Optional local environment or GitHub repository variable | Canonical HTTPS origin, default `https://usemurmur.dev`; no path, query, fragment, or credentials |
 | `WEBSITE_REVISION` | CI environment; optional local environment | Set from the GitHub commit SHA in CI; full lowercase Git commit hash published in `/version.json`, or `development` for local builds |
-| `CLOUDFLARE_ACCOUNT_ID` | GitHub repository variable | Cloudflare account that owns the `murmur-site` Pages project |
+| `CLOUDFLARE_ACCOUNT_ID` | Optional GitHub repository variable | Defaults to reviewed account `e357ed8d64611204842123ade5ea838f`, which owns the created `murmur-site` Pages project; override for an intentional account migration |
 | `CLOUDFLARE_API_TOKEN` | GitHub repository secret | Account-scoped API token with Cloudflare Pages Edit permission |
 
 The canonical origin controls metadata, social links, the sitemap, and production smoke checks.
 Set the same origin and revision for build and artifact verification. A custom domain must already
 be attached to the Pages project and publicly reachable before switching `WEBSITE_SITE_URL` to it.
 
-Only the deployment and credential-presence steps receive the Cloudflare credential. Never use an
-Astro `PUBLIC_` variable for tokens, put a token in a command argument, or commit credentials.
+Only the deployment, authentication, and credential-presence steps receive the Cloudflare
+credential. Never use an Astro `PUBLIC_` variable for tokens, put a token in a command argument,
+or commit credentials.
 Local development and pull request validation need no Cloudflare access.
 
 ## One-time Cloudflare setup
 
-An account administrator creates a Pages project named `murmur-site` with production branch
-`main`, using Direct Upload. The GitHub Actions workflow performs the build and upload, so a
-separate Cloudflare Git build is unnecessary. With account-scoped credentials supplied through
-the local environment, the pinned CLI can create the project:
+The existing Direct Upload Pages project is named `murmur-site`, has production branch `main`,
+and has the assigned hostname `murmur-site-eip.pages.dev`. The GitHub Actions workflow performs
+the build and upload, so a separate Cloudflare Git build is unnecessary. For first project
+creation in a new account, use Node.js 22.22.1 and account-scoped credentials supplied through
+the local environment:
 
 ```text
 cd website
-bun --bun wrangler pages project create murmur-site --production-branch main
+node node_modules/wrangler/bin/wrangler.js pages project create murmur-site --production-branch main --force
 cd ..
 ```
 
+Use `--force` only for first Pages project creation; it prevents this Wrangler version from
+delegating creation to Workers. It is not required for Pages uploads. A new account may receive a
+different Pages hostname; retain the actual assigned hostname in the deployment record.
+
 Create a narrowly scoped API token granting Cloudflare Pages Edit on that account. Add its value
-to repository secret `CLOUDFLARE_API_TOKEN`, and add the account ID as repository variable
-`CLOUDFLARE_ACCOUNT_ID`. Do not grant DNS-edit permission unless an operator separately needs it
+to repository secret `CLOUDFLARE_API_TOKEN`. The workflow already defaults to the reviewed account;
+set repository variable `CLOUDFLARE_ACCOUNT_ID` only when intentionally changing that account.
+Do not grant DNS-edit permission unless an operator separately needs it
 to configure a custom domain. Keep token ownership and rotation in the account's normal access
 process.
 
-Creating the workflow does not prove these account settings exist. A successful production
+Attach `usemurmur.dev` to the Pages project and verify DNS/TLS before production smoke checks.
+The project record does not prove publication or domain activation. A successful production
 workflow and a live response from the configured origin establish that setup is complete.
 
 ## Automatic publication
@@ -99,14 +110,22 @@ verification, then pass that same hash with `--commit-hash`; a default local bui
 itself as `development`.
 
 Each Pages deployment identifies its revision and has a unique deployment URL in the command
-output; `murmur-site.pages.dev`
-points to the current production deployment. Missing credentials fail the production job with
-an actionable message. They do not silently skip publication.
+output. The project's assigned production hostname is `murmur-site-eip.pages.dev`, and the
+canonical production target is `https://usemurmur.dev`. Missing credentials fail the production
+job with an actionable message. They do not silently skip publication.
 
 Production runs are serialized and are not canceled midway through publication. A newer pull
 request revision can cancel an obsolete validation run. Jobs have a 15-minute deadline; live
 checks have bounded request timeouts and retries. Workflow permissions grant read-only repository
-access, while Cloudflare credentials are limited to the upload step and its presence check.
+access, while Cloudflare credentials are limited to upload, authentication, and presence checks.
+
+Before upload, Node runs `wrangler whoami --json` with a 45-second deadline and a 64 KiB response
+limit. A typed Zod validator has its own ten-second deadline and requires `loggedIn: true` and the
+configured account in `accounts`; empty, malformed, oversized, unauthenticated, or wrong-account
+output fails even with exit status zero. CI does not print identity output or raw errors, and the
+private temporary response is removed.
+CI passes that response path through `WEBSITE_IDENTITY_FILE` to
+`bun run scripts/verify-website-identity.ts`; `CLOUDFLARE_ACCOUNT_ID` identifies the required account.
 
 After deployment the job verifies that `/version.json` serves the exact deployed Git revision,
 then checks the public pages, `robots.txt`, the `nosniff` response header,

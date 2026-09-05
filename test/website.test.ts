@@ -13,7 +13,7 @@ import {
   websiteRevision,
 } from "../scripts/verify-website.js";
 
-const ORIGIN: string = "https://murmur-site.pages.dev";
+const ORIGIN: string = "https://usemurmur.dev";
 const PAGE_ROUTES: ReadonlyMap<string, string> = new Map<string, string>([
   ["index.html", "/"],
   ["how-it-works/index.html", "/how-it-works/"],

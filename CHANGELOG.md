@@ -13,7 +13,8 @@ All notable changes to Murmur are documented in this file.
   implementation. Serve static Astro pages with React islands, TypeScript, Tailwind CSS, and
   self-hosted fonts from an isolated website package.
 - Automate Cloudflare Pages publication from `main`, with source and artifact checks, bounded
-  deployment jobs, revision verification, security headers, and real 404 smoke checks.
+  deployment jobs, authenticated account verification, security headers, and revision and 404
+  smoke checks for `usemurmur.dev`. Run Wrangler with the pinned Node runtime.
 
 ### For contributors
 

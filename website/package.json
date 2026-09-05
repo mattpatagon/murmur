@@ -13,7 +13,7 @@
     "check": "bun --bun astro check --minimumFailingSeverity warning && bun run scripts/check-source.ts",
     "build": "bun --bun astro build",
     "preview": "bun --bun astro preview --host 127.0.0.1",
-    "deploy": "bun --bun wrangler pages deploy dist --project-name=murmur-site",
+    "deploy": "node node_modules/wrangler/bin/wrangler.js pages deploy dist --project-name=murmur-site",
     "test": "bun test test"
   },
   "dependencies": {},

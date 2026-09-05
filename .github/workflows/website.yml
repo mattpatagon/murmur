@@ -17,8 +17,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  WEBSITE_SITE_URL: ${{ vars.WEBSITE_SITE_URL || 'https://murmur-site.pages.dev' }}
+  WEBSITE_SITE_URL: ${{ vars.WEBSITE_SITE_URL || 'https://usemurmur.dev' }}
   WEBSITE_REVISION: ${{ github.sha }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || 'e357ed8d64611204842123ade5ea838f' }}
 
 jobs:
   website:
@@ -45,7 +46,7 @@ jobs:
         run: bun run website:check
 
       - name: Exercise the artifact validation contract
-        run: bun test test/website.test.ts website/test
+        run: bun test test/website.test.ts test/website-identity.test.ts website/test
 
       - name: Build the static website
         run: bun run website:build
@@ -56,7 +57,6 @@ jobs:
       - name: Require production Pages credentials
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         shell: bash
         run: |
@@ -70,10 +70,33 @@ jobs:
             exit 1
           fi
 
+      - name: Install Node for Cloudflare publication
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.22.1
+
+      - name: Verify authenticated Wrangler identity
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          WRANGLER_SEND_METRICS: "false"
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          website_identity="$(mktemp "$RUNNER_TEMP/murmur-website-identity.XXXXXX")"
+          trap 'rm -f "$website_identity"' EXIT
+          if ! timeout 45s node website/node_modules/wrangler/bin/wrangler.js whoami --json \
+            2>/dev/null | head --bytes=65537 > "$website_identity"; then
+            echo 'Wrangler authentication failed before the Pages upload.' >&2
+            exit 1
+          fi
+          WEBSITE_IDENTITY_FILE="$website_identity" timeout 10s bun run scripts/verify-website-identity.ts
+
       - name: Deploy the verified revision to Cloudflare Pages
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           WRANGLER_SEND_METRICS: "false"
         run: >-

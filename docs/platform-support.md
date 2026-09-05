@@ -94,6 +94,10 @@ and frozen lockfile. Its check/build commands use Bun and portable platform APIs
 operating systems. The repository verification gate includes Astro and frontend source checks.
 The dedicated Ubuntu website workflow builds static pages, validates links and assets, and deploys
 verified pushes to `main` automatically to Cloudflare Pages. The MCP service remains on Cloud Run.
+Only Wrangler authentication, project creation, and deployment require Node.js 22.22.1; the
+publication workflow installs that exact version before checking the authenticated account and
+uploading. Astro development and verification remain Bun-only. The canonical website target is
+`https://usemurmur.dev`; the existing Pages project hostname is `murmur-site-eip.pages.dev`.
 See [website operations](website.md) for required Cloudflare configuration and smoke checks.
 
 ## Reporting a platform defect
