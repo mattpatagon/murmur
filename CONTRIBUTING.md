@@ -16,7 +16,7 @@ by submitting a contribution, you agree that it may be distributed under those t
 
 ## Development setup
 
-Install Bun 1.3.11 or newer, Git, and the repository dependencies:
+Install Bun 1.3.14 or newer, Git, and the repository dependencies:
 
 ```bash
 git clone https://github.com/mattpatagon/murmur.git

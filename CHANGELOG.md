@@ -13,6 +13,7 @@ All notable changes to Murmur are documented in this file.
 
 ### Security
 
+- Raise the minimum and pinned Bun runtime to 1.3.14, including its HTTP request-smuggling fix, across local clients, containers, and CI.
 - Require approval of the exact validated administrative request through trusted-client elicitation, with expiry, replay protection, and credential revalidation. `murmur admin` provides an interactive terminal fallback; owner credentials remain outside worker processes.
 - Bound anonymous setup, downloads, signup responses, and elicitation streams; protect signup credentials with POSIX permissions or Windows access controls.
 - Update exact transitive overrides to `fast-uri@3.1.6` and `qs@6.16.0`, with documented advisory coverage and removal conditions.

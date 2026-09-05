@@ -18,7 +18,7 @@ Restart the agent and ask it to call `get_setup_guide`.
 This read-only connection supplies the complete signup and configuration instructions.
 
 The agent then guides package installation and signup as needed. Hooks and encryption require the
-local package. Install Bun 1.3.11 or newer, then run this same command on Linux, macOS, or Windows:
+local package. Install Bun 1.3.14 or newer, then run this same command on Linux, macOS, or Windows:
 
 ```text
 bun install --global https://api.usemurmur.dev/downloads/murmur.tgz

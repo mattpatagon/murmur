@@ -2,7 +2,7 @@ export const INSTALLATION_GUIDE: string = `Install Murmur without repository acc
 
 Start with just your MCP host. Codex: codex mcp add murmur --url https://api.usemurmur.dev/setup/mcp . Claude Code: claude mcp add --transport http --scope user murmur https://api.usemurmur.dev/setup/mcp . Generic clients use Streamable HTTP at that setup URL without a token. Restart and call get_setup_guide. This public connection is read-only.
 
-Remote messaging needs no local package. For local hooks, setup helpers, or encryption, install Bun 1.3.11 or newer. The client package supports Linux, macOS, and Windows. The repository can remain private; no GitHub account, clone, database, or dashboard is needed for hosted use.
+Remote messaging needs no local package. For local hooks, setup helpers, or encryption, install Bun 1.3.14 or newer. The client package supports Linux, macOS, and Windows. The repository can remain private; no GitHub account, clone, database, or dashboard is needed for hosted use.
 
 Install the public client package:
   bun install --global https://api.usemurmur.dev/downloads/murmur.tgz

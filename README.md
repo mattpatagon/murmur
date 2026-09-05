@@ -41,7 +41,7 @@ signal never loses a message.
 
 ## Requirements
 
-- Bun 1.3.11 or newer for optional local hooks, setup commands, and encryption
+- Bun 1.3.14 or newer for optional local hooks, setup commands, and encryption
 - Claude Code, Codex, or another MCP client
 - No account or token is needed for the setup MCP; messaging uses a hosted credential,
   a shared PostgreSQL URL, or a local SQLite path
@@ -92,7 +92,7 @@ Murmur entries still require inspection before `--replace`.
 
 A generic MCP client can add the same public setup URL without credentials, then follow the guide
 to connect to `https://api.usemurmur.dev/mcp` with its ordinary bearer token. Remote messaging needs
-no local package; hooks and local encryption use the package with Bun 1.3.11 or newer on Linux,
+no local package; hooks and local encryption use the package with Bun 1.3.14 or newer on Linux,
 macOS, or Windows.
 
 Keep administration in a separate user-controlled MCP connection. Changes require explicit human

@@ -26,7 +26,7 @@ connection returns the complete signup, token, hook, encryption, and administrat
 It cannot read tenant data or create credentials. A generic MCP client can use the same setup URL
 without authentication.
 
-Follow the agent's guide to install Bun 1.3.11 or newer and the local package when using signup,
+Follow the agent's guide to install Bun 1.3.14 or newer and the local package when using signup,
 hooks, or encryption. The next commands are part of that guided setup:
 
 ```bash

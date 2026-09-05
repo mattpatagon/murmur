@@ -51,7 +51,7 @@ Provision these dependencies before enabling the workflow:
 - a separate Cloud Run runtime service account;
 - a Supabase PostgreSQL project and its verified Server root certificate;
 - a GitHub `production` environment with protected deployment approvals;
-- Bun 1.3.11 for manual verification and recovery work.
+- Bun 1.3.14 for manual verification and recovery work.
 
 Do not create or download a long-lived Google service-account key. GitHub
 authenticates with short-lived workload identity credentials.

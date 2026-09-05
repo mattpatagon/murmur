@@ -98,7 +98,7 @@ export function createPublicDownloadHandler(
               "Restart the agent and ask it to call get_setup_guide.",
               "",
               "The guide walks through organization signup, token setup, hooks, and encryption.",
-              "For hooks and encryption, install Bun 1.3.11 or newer and the public package:",
+              "For hooks and encryption, install Bun 1.3.14 or newer and the public package:",
               "bun install --global https://api.usemurmur.dev/downloads/murmur.tgz",
               "",
               "murmur signup --slug YOUR_ORGANIZATION --name 'Your Organization'",

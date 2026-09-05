@@ -61,9 +61,14 @@ Bun is both runtime and package manager. Update all reviewed pins together:
 
 - `package.json` `packageManager`, `engines.bun`, and `test:linux`;
 - both `Dockerfile` stages;
-- every workflow `bun-version`;
-- README, hosted deployment requirements, launcher error text, tests, and this documentation where
-  the minimum changes.
+- every workflow `bun-version`, including production smoke;
+- README, contributor and hosted deployment requirements, launcher error text, tests, and this
+  documentation where the minimum changes;
+- the MCP installation guide, public `/install` instructions, and bundled package README.
+
+Use the new runtime for `bun install --frozen-lockfile` first. A runtime-only upgrade should not
+change dependency selections; preserve the lockfile unless the new runtime requires a reviewed
+format update. Existing `@types/bun` versions need no change when they already match the runtime.
 
 Then verify install, typecheck, lint, formatting, portable tests, SQLite migrations, PostgreSQL
 integration, bundled stdio/HTTP entry points, the Linux container test, and a clean package install.
