@@ -45,9 +45,11 @@ hosted verifier creates isolated roles and databases; never aim it at production
 | `bun run build` | Bundles the stdio MCP entry point |
 | `bun run build:http` | Bundles the hosted HTTP entry point |
 | `bun run format` | Applies deterministic Biome formatting |
+| `bun run website:install` | Installs the isolated website dependencies from its frozen lockfile |
 | `bun run website:dev` | Starts the institutional website locally |
 | `bun run website:check` | Astro types and frontend source policy with the isolated website toolchain |
 | `bun run website:build` | Generates static pages for Cloudflare Pages |
+| `bun run website:preview` | Serves the existing static build locally; run `website:build` first |
 | `bun run website:test` | Audits built pages, links, metadata, headers, and asset budgets |
 
 The website uses a separate frozen lockfile because Astro's checker requires TypeScript 6 while

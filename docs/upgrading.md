@@ -54,21 +54,31 @@ already declared by their authorized verification plan, and reject altered or re
 
 The dependency policy script rejects `^`, `~`, inequality ranges, tags, aliases, workspace links,
 Git URLs, and other mutable direct references. CI installs only with `bun install --frozen-lockfile`.
+The [hosted launch dependency record](hosted-launch-dependencies.md) documents the runtime's
+current transitive overrides and their removal conditions.
+
+Website dependency upgrades use `website/package.json`, `website/bun.lock`, and
+`website/bunfig.toml` under the same exact-version and release-age policy. Install the website's
+frozen dependencies before root verification, and run `website:check`, `website:build`, and
+`website:test`. Refresh the third-party notices and browser evidence as described in
+[website maintenance](website.md#verification-and-maintenance).
 
 ## Bun upgrades
 
 Bun is both runtime and package manager. Update all reviewed pins together:
 
 - `package.json` `packageManager`, `engines.bun`, and `test:linux`;
+- `website/package.json` `packageManager` and `engines.bun`, matching the root pin;
 - both `Dockerfile` stages;
 - every workflow `bun-version`, including production smoke;
 - README, contributor and hosted deployment requirements, launcher error text, tests, and this
   documentation where the minimum changes;
 - the MCP installation guide, public `/install` instructions, and bundled package README.
 
-Use the new runtime for `bun install --frozen-lockfile` first. A runtime-only upgrade should not
-change dependency selections; preserve the lockfile unless the new runtime requires a reviewed
-format update. Existing `@types/bun` versions need no change when they already match the runtime.
+Use the new runtime for `bun install --frozen-lockfile` and `bun run website:install` first.
+A runtime-only upgrade should not change dependency selections; preserve both lockfiles unless
+the new runtime requires a reviewed format update. Existing `@types/bun` versions need no change
+when they already match the runtime.
 
 Then verify install, typecheck, lint, formatting, portable tests, SQLite migrations, PostgreSQL
 integration, bundled stdio/HTTP entry points, the Linux container test, and a clean package install.
@@ -138,6 +148,9 @@ A release owner updates `VERSION`, `package.json`, and `CHANGELOG.md` in one com
 merges. The clean revision must pass CI before it reaches `main`. Production deployment follows
 [hosted-deployment.md](hosted-deployment.md), including preflight, migrations, traffic cutover,
 health, and authenticated smoke verification.
+
+Website publication and rollback follow [website operations](website.md); its separate Pages
+workflow verifies the public Git revision, response headers, routes, and 404 after upload.
 
 Application rollback is allowed only to a revision compatible with the current database contract
 and enabled secret versions. Database contract migrations are forward-only; recovery uses a fixed

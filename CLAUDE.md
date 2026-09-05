@@ -25,6 +25,14 @@ tree and use Murmur to coordinate overlapping work. Do not weaken the strict typ
 - Deploy status: poll the `Deploy production` GitHub Actions workflow
 - Health check: https://api.usemurmur.dev/health
 
+### Institutional website deployment
+
+- Platform: Cloudflare Pages through `.github/workflows/website.yml` (`Website`).
+- Publication: pushes and manual runs on `main`; pull requests and other manual runs validate.
+- Deploy status command: `gh run list --workflow "Website" --limit 1`.
+- Setup, canonical origin, credentials, revision checks, and rollback: [website operations](docs/website.md).
+- Account setup and successful public smoke checks are required before declaring publication complete.
+
 ## Design System
 
 Read `DESIGN.md` before making visual or UI decisions. It defines the institutional website's

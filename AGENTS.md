@@ -88,6 +88,7 @@ an owner, and a deterministic removal condition.
 - `src/observability/`: structured logs, request correlation, deadlines, and OpenTelemetry.
 - `scripts/`: deterministic validation, deployment, migration, recovery, and smoke gates.
 - `test/`: unit, contract, integration, upgrade, security, and portability tests.
+- `website/`: static Astro pages, React interactions, styles, and isolated website tooling.
 - `supabase/migrations/`: immutable, ordered PostgreSQL migrations.
 - `docs/`: architecture, operations, observability, platform, and upgrade contracts.
 
