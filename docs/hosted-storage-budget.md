@@ -9,7 +9,7 @@ remain available. This is an admission policy, not a promise that every offered 
 | --- | --- | --- |
 | Retained data | 2,000,000 rows and 4 GiB accounted bytes | Shared across tenants |
 | Feedback | 50,000 rows and 128 MiB accounted bytes | Also consumes retained-data allowance |
-| Administrative audit | 100,000 rows and 64 MiB accounted bytes | Independent reserve |
+| Administrative audit | 100,000 rows and 64 MiB accounted bytes | Independent hard cap; final quarter reserved for restrictions |
 
 Per-tenant quotas still apply. The global budget can reject a tenant before its individual quota is
 full. The defaults provide about 168 KiB of accounted retained data per account across 25,000
@@ -90,12 +90,26 @@ increase the affected resource remain rejected until usage falls below the confi
 Non-growing operations and deletes remain admitted. Never manually zero or decrement counters to
 recover capacity; they must continue to describe the retained rows.
 
-The separate audit reserve lets suspension and revocation record their required audit events when
-ordinary retained data is full. It does **not** guarantee those operations when the audit reserve
-itself is full: their transactions fail atomically until the owner restores audit headroom.
-No audit history is automatically deleted. Monitor the reserve and arrange owner-authorized export
-and bounded deletion before it fills. Feedback remains append-only for runtime callers; any owner
-export or deletion needs its own explicit retention decision.
+Audit admission reserves the final quarter of both absolute audit limits for the trusted restrictive
+actions `tenant.suspend` and `operator_token.revoke`. At the defaults, ordinary audit writers stop at
+75,000 rows or 48 MiB; the remaining 25,000 rows and 16 MiB are protected headroom, not extra capacity.
+An owner-configured limit reserves `max(1, floor(limit / 4))` units, so even a limit of one is never
+raised. Existing usage above the ordinary watermark is preserved and blocks ordinary growth.
+
+Only INSERT statements containing exclusively those two fixed actions may use the headroom.
+Mixed statements and audit UPDATE growth remain ordinary. Runtime credentials cannot write audit
+rows directly or call the private accounting helper; the existing security-definer control-plane
+functions choose the action, never caller input. The singleton lock makes classification and
+admission atomic with each required audit write. Ordinary signup and administration cannot consume
+the protected quarter, including when unrelated retained data is already full.
+
+The absolute audit limits still apply to restrictions. At a full hard cap, suspension and operator
+revocation fail atomically; neither the action nor its mandatory audit event is committed. Repeated
+restrictions can exhaust the reserve, so this is bounded emergency capacity, not guaranteed unlimited
+administration. Tenant-admin access-token revocation has no audit insertion and remains non-growing.
+No audit history is skipped or automatically deleted. Monitor both watermarks and arrange explicit
+owner-authorized export and bounded deletion before capacity fills. Feedback remains append-only
+for runtime callers; any owner export or deletion needs its own explicit retention decision.
 
 Expiry alone does not release budget. Existing bounded pruning must actually delete expired rows,
 including those belonging to inactive tenants. Aggregate admission prevents unbounded retained
@@ -109,6 +123,10 @@ actual retained data before enabling enforcement. The backfill takes write-block
 accounted tables in a stable order within the same transaction as trigger installation. A five-second
 lock deadline and five-minute statement deadline make failure explicit; a failed enforcement
 migration rolls back and must be retried in a drained maintenance window.
+
+`20260905053627_hosted_audit_restrictive_headroom.sql` adds the protected audit watermark without
+rewriting data, changing counters or limits, replacing triggers, or broadening runtime privileges.
+Existing accounting function identities remain stable, including the startup readiness contract.
 
 Backfill preserves existing data even when its measured usage exceeds the configured limits. It
 does not silently expand limits, evict data or reinterpret live-only E2E counters as retained rows.
@@ -133,13 +151,18 @@ With the disposable hosted PostgreSQL environment provisioned, the serial gate i
 ```sh
 MURMUR_TEST_STORAGE_BUDGET=1 bun test \
   test/hosted-storage-budget.postgres.test.ts \
-  test/hosted-storage-budget-e2ee.postgres.test.ts
+  test/hosted-storage-budget-e2ee.postgres.test.ts \
+  test/hosted-audit-headroom.postgres.test.ts
 ```
 
 It changes global limits temporarily and must not overlap other database tests or run against a
 shared or production database. Tests cover competing tenants, exact boundaries, rollback, UTF-8,
 full-capacity acknowledgement/suspension, audit exhaustion, feedback retries, E2E retained states
 and duplicate ciphertext copies, cascades, owner backfill, corruption rejection and direct privileges.
+Headroom tests fill the ordinary row and byte watermarks, require real ordinary control-plane calls
+to fail, then verify audited suspension and operator revocation succeed within unchanged hard caps.
+They also reject mixed-action batches, forged runtime audit writes/private-helper calls, and
+restrictions at the absolute cap, with rollback and counter reconciliation throughout.
 `scripts/verify-hosted-postgres.sh` runs this serial suite after hosted bootstrap in both ordinary
 and coverage modes. During the broad coverage run the global-mutation tests stay disabled; the
 following dedicated invocation explicitly enables every budget test. Requesting the budget gate
