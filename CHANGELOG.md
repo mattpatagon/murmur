@@ -2,6 +2,35 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.14.0.0] - 2026-09-05
+
+### Security
+
+- Keep hosted storage, credential admission, sessions, notifications and unfinished requests within
+  shared limits that do not grow with account count. Capacity failures remain explicit and retryable.
+- Bound large inboxes, directories, notices, policies, token lists, feedback and encrypted broadcasts
+  before loading or serializing their contents; retain byte reservations until actual work settles.
+- Preserve output backpressure for slow HTTP readers and bound incoming bytes before authentication
+  finishes. Cancelled requests cannot proceed to identity lookup, parsing or application admission.
+- Reject duplicate in-flight request IDs and HTTP batches before SDK dispatch, and retire sessions
+  whose cancelled requests would otherwise retain SDK correlation state.
+- Reserve part of the existing audit allowance for suspension and operator-token revocation without
+  deleting audit history or increasing the absolute storage limits.
+
+### Changed
+
+- Return bounded pages with stable continuation cursors; oversized inbox requests explain how to
+  retry with a smaller limit without losing messages.
+- Use a fixed one-instance, one-CPU, 512 MiB hosted deployment policy. Resource limits intentionally
+  reject excess work; they do not promise unlimited traffic or a fixed cloud bill.
+- Verify hosted workloads with a disposable 25,000-account scenario covering tenant isolation,
+  forged credentials, admission saturation, recovery and explicit latency and memory thresholds.
+
+### Fixed
+
+- Keep hosted credential enrichment on an indexed single-principal lookup instead of scanning the
+  growing token directory on each request; token revocation and suspension remain authoritative.
+
 ## [0.13.0.0] - 2026-09-05
 
 ### Added
