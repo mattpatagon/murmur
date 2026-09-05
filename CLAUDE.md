@@ -24,3 +24,9 @@ tree and use Murmur to coordinate overlapping work. Do not weaken the strict typ
 - Deploy trigger: automatic on push to `main`
 - Deploy status: poll the `Deploy production` GitHub Actions workflow
 - Health check: https://api.usemurmur.dev/health
+
+## Design System
+
+Read `DESIGN.md` before making visual or UI decisions. It defines the institutional website's
+typography, colors, spacing, interaction, content, and accessibility contract. Check the rendered
+site against it during QA. Update the design contract when an authorized product change requires it.
