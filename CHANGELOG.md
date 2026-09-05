@@ -26,6 +26,8 @@ All notable changes to Murmur are documented in this file.
   reject excess work; they do not promise unlimited traffic or a fixed cloud bill.
 - Verify hosted workloads with a disposable 25,000-account scenario covering tenant isolation,
   forged credentials, admission saturation, recovery and explicit latency and memory thresholds.
+- Preserve compatible Cloud Run revisions and retained database rows during deployment, with
+  source-provenance checks before migrations and no bypass of writer-drain safety for contraction.
 
 ### Fixed
 

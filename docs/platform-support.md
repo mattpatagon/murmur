@@ -14,7 +14,9 @@ local MCP setup guide without access to the checkout or installed development de
 Ubuntu additionally runs PostgreSQL 17, TLS, RLS, populated upgrades, hosted integration, and the
 authoritative coverage gate. It also starts Murmur once on the runner and once in a clean Linux Bun
 container, then proves bidirectional MCP delivery through the shared PostgreSQL service. Linux-only
-deployment scripts are separately exercised by CI and the production workflow.
+deployment scripts are separately exercised by CI and the production workflow. The Linux gate
+also runs revision-preservation regressions with Bash and jq against synthetic command responses;
+these tests never contact a cloud account and are not a shell dependency of portable test gates.
 
 Platform support means a change cannot merge when a matrix job fails. It does not mean every
 operator convenience script is portable.
