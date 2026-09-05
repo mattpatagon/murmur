@@ -32,5 +32,10 @@ or authority failures through the real adapter and MCP code. It opens no databas
 the disposable PostgreSQL and unchanged full hosted load gates remain integration and
 performance acceptance requirements. `test/postgres-registration-transactions.test.ts` uses fresh
 generated tenants and the real runtime role to verify concurrent activation, exact expiry,
-reopening, same-ID tenant isolation, forced RLS, direct cross-tenant mutation rejection, and
-actual MCP protocol-statement counts. It closes its pool and cleans only its generated tenants.
+reopening, forced RLS, direct cross-tenant mutation rejection, and actual MCP protocol-statement
+counts. Its distinct agent IDs support both the initial hybrid contract and the finalized
+tenant contract. The same isolation assertions also run with identical tenant-local IDs inside
+`test/hosted.mcp.e2e.test.ts`, after its existing contract-finalization step; test discovery order
+cannot trigger that scenario before the global v1 agent key is replaced. Both paths share
+`test/support/postgres-registration-transactions.ts`, close their pools, and clean only their
+generated tenants. The shared fixture does not finalize or otherwise change the database contract.

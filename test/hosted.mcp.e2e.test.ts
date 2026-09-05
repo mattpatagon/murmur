@@ -53,6 +53,7 @@ import {
   testTlsConfiguration,
   toolNames,
 } from "./support/hosted-mcp-harness.js";
+import { verifyHostedRegistrationTenantIsolation } from "./support/postgres-registration-transactions.js";
 
 test.skipIf(
   databaseUrl === undefined ||
@@ -449,6 +450,8 @@ test.skipIf(
         server,
         unique,
       });
+      // Identical tenant-local IDs require the contract finalized above, not discovery order.
+      if (configuredAdminDatabaseUrl !== undefined) await verifyHostedRegistrationTenantIsolation();
       await verifyHostedTenantQuotas(scenario);
       await verifyHostedFeedback(scenario);
       await verifyHostedTenantMessaging(scenario);
