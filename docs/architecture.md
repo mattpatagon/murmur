@@ -255,6 +255,8 @@ best-effort across multiple failures and preserves the original startup or shutd
 Both runtime PostgreSQL pools set fixed statement, lock, and idle-transaction deadlines on every
 connection. See [postgres-runtime-bounds.md](postgres-runtime-bounds.md) for their values and the
 separate limits of connection-pool waiting and multi-statement operations.
+Hosted [authentication query bounds](hosted-auth-query-bounds.md) preserve indexed credential
+enrichment as the account directory grows, without caching authorization or delaying revocation.
 
 Successful MCP tool text uses compact JSON and carries the same values as `structuredContent`.
 Clients must parse the JSON, not depend on indentation. This avoids whitespace amplification for
