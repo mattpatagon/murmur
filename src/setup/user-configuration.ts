@@ -17,6 +17,7 @@ import {
   userHomeDirectory,
 } from "../platform-paths.js";
 import { configureClaudeE2eeMcp, configureCodexE2eeMcp } from "./e2ee-client-configuration.js";
+import { isBootstrapMurmurEndpoint } from "./bootstrap-configuration.js";
 
 export const DEFAULT_MURMUR_URL: string = "https://api.usemurmur.dev/mcp";
 export const MURMUR_TOKEN_ENV: string = "MURMUR_API_TOKEN";
@@ -219,7 +220,7 @@ export function configureCodexMcp(current: string, url: string, replace: boolean
   const existingUrl: string | null = parseSimpleTomlString(body, "url");
   const tokenEnvironment: string | null = parseSimpleTomlString(body, "bearer_token_env_var");
   if (existingUrl !== url || tokenEnvironment !== MURMUR_TOKEN_ENV) {
-    if (!replace) {
+    if (!replace && !isBootstrapMurmurEndpoint(existingUrl, url)) {
       throw new Error(
         "Codex already has a different mcp_servers.murmur configuration. Inspect it or rerun with --replace.",
       );
@@ -286,7 +287,9 @@ export function configureClaudeMcp(
   if (existing !== undefined && isRecord(existing)) {
     const existingUrl: unknown = existing["url"];
     const existingType: unknown = existing["type"];
-    if ((existingUrl !== url || existingType !== "http") && !replace) {
+    const bootstrap: boolean =
+      existingType === "http" && isBootstrapMurmurEndpoint(existingUrl, url);
+    if ((existingUrl !== url || existingType !== "http") && !replace && !bootstrap) {
       throw new Error(
         "Claude already has a different user-scoped Murmur MCP server. Inspect it or rerun with --replace.",
       );
@@ -294,7 +297,7 @@ export function configureClaudeMcp(
     const headers: JsonRecord = isRecord(existing["headers"])
       ? cloneRecord(existing["headers"])
       : {};
-    servers["murmur"] = claudeMcpServer(url, replace ? {} : headers);
+    servers["murmur"] = claudeMcpServer(url, replace || bootstrap ? {} : headers);
   } else if (existing !== undefined && !replace) {
     throw new Error(
       "Claude already has an invalid user-scoped Murmur MCP server. Inspect it or rerun with --replace.",

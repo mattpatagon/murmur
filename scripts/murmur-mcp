@@ -57,7 +57,7 @@ resolve_bun() {
 BUN_BIN=$(resolve_bun || true)
 
 if [ -z "$BUN_BIN" ]; then
-  echo "Murmur requires Bun 1.3.11 or newer. Install it from https://bun.sh" >&2
+  echo "Murmur requires Bun 1.3.14 or newer. Install it from https://bun.sh" >&2
   exit 1
 fi
 

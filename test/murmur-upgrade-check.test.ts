@@ -106,7 +106,7 @@ test("upgrade output distinguishes available, current, and ahead versions", (): 
   expect(ahead).toMatchObject({ status: "ahead", update_available: false });
   expect(available.upgrade_steps).toHaveLength(3);
   expect(available.upgrade_steps[0]).toMatchObject({
-    command: `bun install --global 'git+https://github.com/mattpatagon/murmur.git#${LATEST_REVISION}'`,
+    command: `bun install --global 'https://api.usemurmur.dev/downloads/murmur-0.10.2.0-${LATEST_REVISION}.tgz'`,
   });
   const setupStep: CheckForUpgradesOutput["upgrade_steps"][number] | undefined =
     available.upgrade_steps[1];

@@ -1,9 +1,10 @@
-import type { JSONRPCMessage, MessageExtraInfo } from "@modelcontextprotocol/sdk/types.js";
-import { JSONRPCMessageSchema } from "@modelcontextprotocol/sdk/types.js";
 import type {
   Transport,
   TransportSendOptions,
 } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { JSONRPCMessage, MessageExtraInfo } from "@modelcontextprotocol/sdk/types.js";
+import { JSONRPCMessageSchema } from "@modelcontextprotocol/sdk/types.js";
+import { deliverHttpEventStream } from "./http-event-stream.js";
 
 const FETCH_TIMEOUT_MS: number = 30_000;
 const MAX_RESPONSE_BYTES: number = 64 * 1024 * 1024;
@@ -66,30 +67,6 @@ function parseJsonResponses(text: string): readonly JSONRPCMessage[] {
   return value.map((item: unknown): JSONRPCMessage => parseJsonRpc(item));
 }
 
-function parseSseResponses(text: string): readonly JSONRPCMessage[] {
-  const normalized: string = text.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
-  const events: readonly string[] = normalized.split("\n\n");
-  const messages: JSONRPCMessage[] = [];
-  events.forEach((event: string): void => {
-    const data: string[] = [];
-    event.split("\n").forEach((line: string): void => {
-      if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
-    });
-    if (data.length === 0) return;
-    let value: unknown;
-    try {
-      value = JSON.parse(data.join("\n"));
-    } catch (_error: unknown) {
-      throw new Error("The encrypted Murmur HTTP event stream is invalid");
-    }
-    messages.push(parseJsonRpc(value));
-  });
-  if (messages.length === 0) {
-    throw new Error("The encrypted Murmur HTTP event stream contained no response");
-  }
-  return messages;
-}
-
 export class BoundedHttpClientTransport implements Transport {
   public onclose: () => void = (): void => undefined;
   public onerror: (error: Error) => void = (_error: Error): void => undefined;
@@ -102,14 +79,23 @@ export class BoundedHttpClientTransport implements Transport {
 
   readonly #endpoint: URL;
   readonly #headers: Headers;
+  readonly #requestTimeoutMs: number;
   #abortController: AbortController | null = null;
   #closed: boolean = false;
   #protocolVersion: string | null = null;
   #sessionId: string | null = null;
 
-  public constructor(endpoint: URL, headers: Headers) {
+  public constructor(endpoint: URL, headers: Headers, requestTimeoutMs: number = FETCH_TIMEOUT_MS) {
+    if (
+      !Number.isSafeInteger(requestTimeoutMs) ||
+      requestTimeoutMs < 1 ||
+      requestTimeoutMs > 150_000
+    ) {
+      throw new Error("The Murmur HTTP request deadline must be between 1 and 150000 milliseconds");
+    }
     this.#endpoint = new URL(endpoint.toString());
     this.#headers = new Headers(headers);
+    this.#requestTimeoutMs = requestTimeoutMs;
   }
 
   public async start(): Promise<void> {
@@ -142,7 +128,7 @@ export class BoundedHttpClientTransport implements Transport {
     if (controller === null || this.#closed) {
       throw new Error("The encrypted Murmur HTTP transport is not open");
     }
-    const deadline: AbortSignal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    const deadline: AbortSignal = AbortSignal.timeout(this.#requestTimeoutMs);
     const signal: AbortSignal = AbortSignal.any([controller.signal, deadline]);
     try {
       const response: Response = await fetch(this.#endpoint, {
@@ -169,15 +155,20 @@ export class BoundedHttpClientTransport implements Transport {
         return;
       }
       const mediaType: string = responseMediaType(response);
-      const text: string = await boundedResponseText(response);
+      if (mediaType === "text/event-stream") {
+        await deliverHttpEventStream(
+          response,
+          MAX_RESPONSE_BYTES,
+          (incoming: JSONRPCMessage): void => this.onmessage(incoming),
+        );
+        return;
+      }
       if (mediaType === "application/json") {
+        const text: string = await boundedResponseText(response);
         this.deliver(parseJsonResponses(text));
         return;
       }
-      if (mediaType === "text/event-stream") {
-        this.deliver(parseSseResponses(text));
-        return;
-      }
+      if (response.body !== null) await response.body.cancel();
       throw new Error("The encrypted Murmur HTTP service returned an unsupported response");
     } catch (error: unknown) {
       const safeError: Error =

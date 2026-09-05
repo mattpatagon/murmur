@@ -1,3 +1,5 @@
+import { isBootstrapMurmurEndpoint } from "./bootstrap-configuration.js";
+
 type JsonRecord = Record<string, unknown>;
 
 type TomlSection = {
@@ -124,7 +126,8 @@ export function configureCodexE2eeMcp(
   }
   const withoutMurmur: string = removeMurmurTomlSections(current);
   const hadMurmurConfiguration: boolean = withoutMurmur.trimEnd() !== current.trimEnd();
-  if (hadMurmurConfiguration && !replace) {
+  const bootstrap: boolean = existing !== null && isBootstrapMurmurEndpoint(existing["url"], url);
+  if (hadMurmurConfiguration && !replace && !bootstrap) {
     throw new Error(
       "Codex already has a different Murmur MCP configuration. Inspect it or rerun with --replace.",
     );
@@ -168,7 +171,11 @@ export function configureClaudeE2eeMcp(
   ) {
     return current;
   }
-  if (existing !== undefined && !replace) {
+  const bootstrap: boolean =
+    isRecord(existing) &&
+    existing["type"] === "http" &&
+    isBootstrapMurmurEndpoint(existing["url"], url);
+  if (existing !== undefined && !replace && !bootstrap) {
     throw new Error(
       "Claude already has a different Murmur MCP configuration. Inspect it or rerun with --replace.",
     );

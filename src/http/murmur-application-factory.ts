@@ -96,6 +96,16 @@ export async function createHostedMurmurApplication(
     onTokenRevoked: request.onTokenRevoked,
     orchestrationEnabled: request.authenticator.orchestrationEnabled,
     principal: request.principal,
+    revalidatePrincipal: async (): Promise<boolean> => {
+      const current: HostedPrincipal | null = await request.authenticator.authenticate(
+        request.token,
+      );
+      return (
+        current !== null &&
+        current.kind === request.principal.kind &&
+        current.tokenId === request.principal.tokenId
+      );
+    },
     repositoryName: request.repositoryName,
     store: tenantStore,
     tenantOnboardingEnabled: request.authenticator.tenantOnboardingEnabled,

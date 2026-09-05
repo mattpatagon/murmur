@@ -114,7 +114,7 @@ test("the package exposes a location-independent MCP executable", (): void => {
   expect(manifest.bin["murmur-e2ee-proxy"]).toBe("./src/e2ee-proxy.ts");
   expect(manifest.bin["murmur-hook"]).toBe("./src/hook.ts");
   expect(manifest.bin["murmur-mcp"]).toBe("./src/server.ts");
-  expect(manifest.engines.bun).toBe(">=1.3.11");
+  expect(manifest.engines.bun).toBe(">=1.3.14");
   expect(manifest.scripts.test).toBe("bun run verify && bun test");
   expect(manifest.scripts["test:coverage"]).toContain("require-hosted-coverage.ts");
 });

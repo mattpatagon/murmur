@@ -14,6 +14,11 @@ import {
   rotateLocalAgentKey,
   trustPeerFingerprint,
 } from "./local-commands.js";
+import {
+  type CreateLocalTrustPolicyInput,
+  CreateLocalTrustPolicyInputSchema,
+  createLocalTrustPolicy,
+} from "./local-trust-authoring.js";
 import { LocalE2eeVault } from "./local-vault.js";
 import type { StoredAgentKey } from "./local-vault-rows.js";
 import type { ActiveTenantBinding } from "./local-vault-settings.js";
@@ -30,6 +35,7 @@ Usage:
   murmur e2ee peers
   murmur e2ee trust --agent ID --fingerprint FULL
   murmur e2ee trust-file --path FILE [--issuer-fingerprint FULL]
+  murmur e2ee create-trust-policy --path FILE
   murmur e2ee rotate-agent-key [--agent ID]
   murmur e2ee revoke-agent-key [--agent ID] --reason REASON
   murmur e2ee replenish [--agent ID]
@@ -38,6 +44,9 @@ Usage:
 The active tenant is bound locally from the last validated hosted capability.
 Private keys are never exportable. First-time organization trust import requires
 an independently verified full issuer fingerprint.
+Policy creation reads verified bindings, revocations, version and validity_days
+from a JSON file, signs with this installation's root and prints public JSON.
+Review the complete input and obtain the user's approval before signing trust.
 `;
 
 export type E2eeCliRuntime = {
@@ -136,6 +145,19 @@ function json(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
+function parseTrustPolicyCreation(serialized: string): CreateLocalTrustPolicyInput {
+  if (Buffer.byteLength(serialized, "utf8") > MAX_TRUST_FILE_BYTES) {
+    throw new Error("The organization trust input exceeds its size limit");
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(serialized);
+  } catch (_error: unknown) {
+    throw new Error("The organization trust input must be valid JSON");
+  }
+  return CreateLocalTrustPolicyInputSchema.parse(value);
+}
+
 async function execute(
   parsed: ParsedArguments,
   vault: LocalE2eeVault,
@@ -195,6 +217,13 @@ async function execute(
         throw new Error("--issuer-fingerprint is required for the first organization trust import");
       }
       return json(await importOrganizationTrustFile(vault, serialized, expectedIssuer, now));
+    }
+    case "create-trust-policy": {
+      exactOptions(parsed.options, ["--path"]);
+      const input: CreateLocalTrustPolicyInput = parseTrustPolicyCreation(
+        runtime.readTrustFile(requiredOption(parsed.options, "--path")),
+      );
+      return json(await createLocalTrustPolicy(vault, input, now));
     }
     case "rotate-agent-key": {
       exactOptions(parsed.options, ["--agent"]);

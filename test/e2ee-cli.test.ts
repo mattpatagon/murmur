@@ -6,8 +6,13 @@ import { join } from "node:path";
 import type { Clock, Instant } from "../src/domain/value-objects.js";
 import { Instant as InstantValue } from "../src/domain/value-objects.js";
 import { type E2eeCliRuntime, runE2eeCli } from "../src/e2ee/cli.js";
+import { CreateLocalTrustPolicyOutputSchema } from "../src/e2ee/local-trust-authoring.js";
 import { LocalE2eeVault } from "../src/e2ee/local-vault.js";
 import type { StoredRootKey } from "../src/e2ee/local-vault-rows.js";
+import {
+  parseSerializedTrustPolicy,
+  verifyOrganizationTrustPolicy,
+} from "../src/e2ee/trust-policy.js";
 
 const TENANT_ID: string = "00000000-0000-4000-8000-000000000010";
 const AGENT_ID: string = "machine-a:codex:repo:1";
@@ -30,6 +35,63 @@ function runtime(path: string): E2eeCliRuntime {
     },
   };
 }
+
+test("terminal policy creation signs only validated public tenant trust input", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-e2ee-create-policy-"));
+  const path: string = join(directory, "vault.sqlite");
+  const initial: LocalE2eeVault = new LocalE2eeVault(path, "linux");
+  try {
+    initial.settings.bindActiveTenant(TENANT_ID, "2026-08-10T19:59:00.000Z");
+  } finally {
+    initial.close();
+  }
+  const input: string = JSON.stringify({
+    bindings: [],
+    revocations: [],
+    validity_days: 30,
+    version: 1,
+  });
+  const configured: E2eeCliRuntime = {
+    ...runtime(path),
+    readTrustFile: (_path: string): string => input,
+  };
+  try {
+    const output: ReturnType<typeof CreateLocalTrustPolicyOutputSchema.parse> =
+      CreateLocalTrustPolicyOutputSchema.parse(
+        JSON.parse(
+          await runE2eeCli(["create-trust-policy", "--path", "approved-policy.json"], configured),
+        ),
+      );
+    await verifyOrganizationTrustPolicy(
+      parseSerializedTrustPolicy(output.policy_json),
+      output.issuer_key_id,
+      new Date("2026-08-10T20:00:00.000Z"),
+    );
+    expect(output.tenant_id).toBe(TENANT_ID);
+    expect(output.policy_json).not.toContain("private_key");
+    await expect(runE2eeCli(["create-trust-policy"], configured)).rejects.toThrow("--path");
+    await expect(
+      runE2eeCli(
+        ["create-trust-policy", "--path", "approved-policy.json", "--tenant", TENANT_ID],
+        configured,
+      ),
+    ).rejects.toThrow("Unknown E2E command option");
+    for (const invalid of [
+      "invalid json",
+      `${" ".repeat(1024 * 1024)}{}`,
+      JSON.stringify({ bindings: [], revocations: [], validity_days: 0, version: 1 }),
+    ]) {
+      await expect(
+        runE2eeCli(["create-trust-policy", "--path", "invalid.json"], {
+          ...configured,
+          readTrustFile: (_path: string): string => invalid,
+        }),
+      ).rejects.toThrow();
+    }
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
 
 test("local E2E CLI binds trust to the authenticated tenant and exports public data only", async (): Promise<void> => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-e2ee-cli-"));

@@ -10,9 +10,10 @@ coverageSkipTestFiles = true
 `;
 
 const VALID_BUN_PIN_SURFACES: BunPinSurfaces = {
-  ciWorkflow: "bun-version: 1.3.11\n",
-  deployWorkflow: "bun-version: 1.3.11\n",
-  dockerfile: "FROM oven/bun:1.3.11\nFROM oven/bun:1.3.11\n",
+  ciWorkflow: "bun-version: 1.3.14\n",
+  deployWorkflow: "bun-version: 1.3.14\n",
+  dockerfile: "FROM oven/bun:1.3.14\nFROM oven/bun:1.3.14\n",
+  productionSmokeWorkflow: "bun-version: 1.3.14\n",
 };
 
 function manifest(overrides: Readonly<Record<string, unknown>> = {}): string {
@@ -21,9 +22,9 @@ function manifest(overrides: Readonly<Record<string, unknown>> = {}): string {
     devDependencies: { typescript: "7.0.2" },
     license: "Elastic-2.0",
     overrides: { zod: "4.4.3" },
-    packageManager: "bun@1.3.11",
-    engines: { bun: ">=1.3.11" },
-    scripts: { "test:linux": "MURMUR_TEST_DOCKER_IMAGE=oven/bun:1.3.11 bun test" },
+    packageManager: "bun@1.3.14",
+    engines: { bun: ">=1.3.14" },
+    scripts: { "test:linux": "MURMUR_TEST_DOCKER_IMAGE=oven/bun:1.3.14 bun test" },
     ...overrides,
   });
 }
@@ -118,7 +119,7 @@ describe("dependency policy", (): void => {
     expect(
       audit(
         manifest({
-          scripts: { "test:linux": "MURMUR_TEST_DOCKER_IMAGE=oven/bun:1.3.110 bun test" },
+          scripts: { "test:linux": "MURMUR_TEST_DOCKER_IMAGE=oven/bun:1.3.140 bun test" },
         }),
         VALID_BUNFIG,
       ),
@@ -126,20 +127,38 @@ describe("dependency policy", (): void => {
     expect(
       audit(manifest(), VALID_BUNFIG, {
         ...VALID_BUN_PIN_SURFACES,
-        dockerfile: "FROM oven/bun:1.3.11-alpine\nFROM oven/bun:1.3.11-alpine\n",
+        dockerfile: "FROM oven/bun:1.3.14-alpine\nFROM oven/bun:1.3.14-alpine\n",
       }),
     ).not.toEqual([]);
     expect(
       audit(manifest(), VALID_BUNFIG, {
         ...VALID_BUN_PIN_SURFACES,
-        ciWorkflow: "bun-version: 1.3.11\nbun-version: 1.3.11-canary\n",
+        ciWorkflow: "bun-version: 1.3.14\nbun-version: 1.3.14-canary\n",
       }),
     ).not.toEqual([]);
     expect(
       audit(manifest(), VALID_BUNFIG, {
         ...VALID_BUN_PIN_SURFACES,
-        deployWorkflow: "bun-version: 1.3.111\n",
+        deployWorkflow: "bun-version: 1.3.141\n",
       }),
     ).not.toEqual([]);
+  });
+
+  test("rejects absent, drifting, and mixed production smoke Bun pins", (): void => {
+    const invalidWorkflows: readonly string[] = [
+      "",
+      "bun-version: 1.3.11\n",
+      "bun-version: 1.3.14\nbun-version: 1.3.14-canary\n",
+    ];
+    for (const productionSmokeWorkflow of invalidWorkflows) {
+      expect(
+        audit(manifest(), VALID_BUNFIG, {
+          ...VALID_BUN_PIN_SURFACES,
+          productionSmokeWorkflow,
+        }),
+      ).toEqual([
+        ".github/workflows/production-smoke.yml must install the pinned Bun release '1.3.14'",
+      ]);
+    }
   });
 });

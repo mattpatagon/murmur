@@ -2,6 +2,22 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.13.0.0] - 2026-09-05
+
+### Added
+
+- Start setup with one Codex or Claude MCP command. The anonymous `/setup/mcp` endpoint exposes only `get_setup_guide`; the agent guides installation, signup, credentials, hooks, encryption, and administration.
+- Install the bundled CLI from public hosted downloads while the source repository remains private. Linux, macOS, and Windows use the same Bun package, with included dependency notices and revision-pinned upgrade URLs.
+- Create an organization with `murmur signup`, recover interrupted registration from private checkpoints, and keep owner and worker credentials separate. Setup upgrades the same-origin anonymous MCP entry automatically.
+- Configure encrypted endpoints through ten local MCP tools, including public trust-policy authoring, verified peer trust, key rotation and revocation, prekey replenishment, and public export.
+
+### Security
+
+- Raise the minimum and pinned Bun runtime to 1.3.14, including its HTTP request-smuggling fix, across local clients, containers, and CI.
+- Require approval of the exact validated administrative request through trusted-client elicitation, with expiry, replay protection, and credential revalidation. `murmur admin` provides an interactive terminal fallback; owner credentials remain outside worker processes.
+- Bound anonymous setup, downloads, signup responses, and elicitation streams; protect signup credentials with POSIX permissions or Windows access controls.
+- Update exact transitive overrides to `fast-uri@3.1.6` and `qs@6.16.0`, with documented advisory coverage and removal conditions.
+
 ## [0.12.2.0] - 2026-09-04
 
 ### Changed

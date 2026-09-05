@@ -1,12 +1,13 @@
 import { expect } from "bun:test";
 import { randomBytes, randomUUID } from "node:crypto";
 import process from "node:process";
+import type { ElicitResult } from "@modelcontextprotocol/sdk/types.js";
 import { CallToolResultSchema, LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import postgres, { type Sql } from "postgres";
 import { z } from "zod";
-
 import type { BootstrapCredential } from "../../src/hosted/bootstrap-secret.js";
 import { type PostgresTlsConfiguration, postgresSslOptions } from "../../src/postgres-tls.js";
+import { readApprovedHostedResponse } from "./hosted-human-approval.js";
 
 export const databaseUrl: string | undefined = process.env["MURMUR_TEST_APP_DATABASE_URL"];
 export const adminDatabaseUrl: string | undefined = process.env["MURMUR_TEST_ADMIN_DATABASE_URL"];
@@ -100,7 +101,7 @@ export async function initializeForRepository(
       jsonrpc: "2.0",
       method: "initialize",
       params: {
-        capabilities: {},
+        capabilities: { elicitation: { form: {} } },
         clientInfo: { name: clientName, version: "1.0.0" },
         protocolVersion: LATEST_PROTOCOL_VERSION,
       },
@@ -128,7 +129,7 @@ export async function initialize(url: URL, token: string, clientName: string): P
     jsonrpc: "2.0",
     method: "initialize",
     params: {
-      capabilities: {},
+      capabilities: { elicitation: { form: {} } },
       clientInfo: { name: clientName, version: "1.0.0" },
       protocolVersion: LATEST_PROTOCOL_VERSION,
     },
@@ -143,6 +144,26 @@ export async function initialize(url: URL, token: string, clientName: string): P
   });
   expect(initialized.status).toBe(202);
   return sessionId;
+}
+
+export async function withHostedMcpSession<T>(
+  url: URL,
+  token: string,
+  clientName: string,
+  operation: (sessionId: string) => Promise<T>,
+): Promise<T> {
+  const sessionId: string = await initialize(url, token, clientName);
+  try {
+    return await operation(sessionId);
+  } finally {
+    const response: Response = await fetch(url, {
+      headers: headers(token, sessionId),
+      method: "DELETE",
+      signal: AbortSignal.timeout(5000),
+    });
+    if (response.body !== null) await response.body.cancel();
+    expect(response.status).toBe(200);
+  }
 }
 
 export async function toolNames(
@@ -179,7 +200,13 @@ export async function callTool<T>(
   });
   expect(response.status).toBe(200);
   const envelope: z.infer<typeof JsonRpcEnvelopeSchema> = JsonRpcEnvelopeSchema.parse(
-    await payload(response),
+    await readApprovedHostedResponse(
+      response,
+      name,
+      argumentsValue,
+      async (id: string | number, result: ElicitResult): Promise<Response> =>
+        await post(url, token, sessionId, { id, jsonrpc: "2.0", result }),
+    ),
   );
   const result: z.infer<typeof CallToolResultSchema> = CallToolResultSchema.parse(envelope.result);
   if (result.isError === true) {
@@ -204,7 +231,13 @@ export async function callToolExpectingError(
   });
   expect(response.status).toBe(200);
   const envelope: z.infer<typeof JsonRpcEnvelopeSchema> = JsonRpcEnvelopeSchema.parse(
-    await payload(response),
+    await readApprovedHostedResponse(
+      response,
+      name,
+      argumentsValue,
+      async (id: string | number, result: ElicitResult): Promise<Response> =>
+        await post(url, token, sessionId, { id, jsonrpc: "2.0", result }),
+    ),
   );
   const result: z.infer<typeof CallToolResultSchema> = CallToolResultSchema.parse(envelope.result);
   expect(result.isError).toBe(true);

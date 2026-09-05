@@ -1,8 +1,11 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type {
   CallToolRequest,
   CallToolResult,
   ListToolsResult,
+  ServerNotification,
+  ServerRequest,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -31,6 +34,7 @@ import { logSafeError } from "../safe-errors.js";
 import type { E2eeMessageStore, E2eeOrchestrationScope } from "../storage/e2ee-message-store.js";
 import type { MessageStore } from "../storage/message-store.js";
 import { normalizePostgresStorageError } from "../storage/postgres-storage-errors.js";
+import { MurmurHumanApproval } from "./human-approval.js";
 import {
   type AdminToolContext,
   callBootstrapTool,
@@ -52,6 +56,7 @@ import {
   type MurmurUpgradeChecker,
 } from "./murmur-upgrade-checker.js";
 import { callUpgradeTool } from "./murmur-upgrade-tool.js";
+import { callSetupGuideTool } from "./murmur-setup-guide.js";
 
 const SERVER_VERSION: string = packageMetadata.version;
 
@@ -72,6 +77,7 @@ export type MurmurApplicationDependencies = {
   readonly onRepositoryDivergence?: (() => void) | undefined;
   readonly orchestrationEnabled?: boolean;
   readonly principal?: HostedPrincipal | null;
+  readonly revalidatePrincipal?: (() => Promise<boolean>) | undefined;
   readonly repositoryName: RepositoryName | null;
   readonly store: MessageStore | null;
   readonly tenantOnboardingEnabled?: boolean;
@@ -90,6 +96,7 @@ export class MurmurApplication {
   private readonly e2eeSleep: (milliseconds: number) => Promise<void>;
   private readonly e2eeStore: E2eeMessageStore | null;
   private readonly exposedToolNames: ReadonlySet<string>;
+  private readonly humanApproval: MurmurHumanApproval;
   private readonly legacyCredentialHash: Buffer | null;
   private readonly onE2eeStateChanged: ((tenantId: TenantId) => Promise<void>) | null;
   private readonly onTenantSuspended: ((tenantId: TenantId) => Promise<void>) | null;
@@ -98,6 +105,7 @@ export class MurmurApplication {
   private readonly orchestrationEnabled: boolean;
   private readonly principal: HostedPrincipal | null;
   private readonly repositoryName: RepositoryName | null;
+  private readonly revalidatePrincipal: () => Promise<boolean>;
   private readonly resources: MurmurInboxResources;
   private readonly store: MessageStore | null;
   private readonly tools: Tool[];
@@ -126,6 +134,8 @@ export class MurmurApplication {
     this.onRepositoryDivergence = dependencies.onRepositoryDivergence ?? ((): void => undefined);
     this.orchestrationEnabled = dependencies.orchestrationEnabled === true;
     this.principal = dependencies.principal ?? null;
+    this.revalidatePrincipal =
+      dependencies.revalidatePrincipal ?? (async (): Promise<boolean> => true);
     this.repositoryName = dependencies.repositoryName;
     this.store = dependencies.store;
     this.tenantOnboardingEnabled = dependencies.tenantOnboardingEnabled === true;
@@ -142,6 +152,7 @@ export class MurmurApplication {
         instructions: this.serverInstructions(),
       },
     );
+    this.humanApproval = new MurmurHumanApproval(this.server);
     const resourceStore: MessageStore | null =
       this.e2eeEntitlement !== null && this.e2eeEntitlement.state === "enforced"
         ? null
@@ -175,12 +186,13 @@ export class MurmurApplication {
 
   private serverInstructions(): string {
     const common: string =
-      "Murmur provides durable agent-to-agent inboxes. Call register_agent first, then send_message, broadcast_message, or get_messages. " +
+      "Murmur provides durable agent-to-agent inboxes. Call get_setup_guide for complete installation, hooks, and feature configuration without repository access. Call register_agent first, then send_message, broadcast_message, or get_messages. " +
       "Outgoing messages include verified sender_authority plus context.repository, context.branch, context.client, and a created_at timestamp. " +
       "Repository, branch, and client are detected from the launching agent when possible; otherwise send_message or broadcast_message must supply them in context. " +
       "Use broadcast_message for per-recipient inbox delivery to the currently active audience. Use post_notice for shared repository state that current and future agents can discover and explicitly resolve or withdraw; notices do not create inbox deliveries. " +
       "Use submit_feedback with type issue or feature_request to send durable feedback to Murmur maintainers. Feedback is intentionally maintainer-readable plaintext, so never include credentials, secrets, private message content, vulnerability details, or sensitive production data. Report suspected vulnerabilities privately at https://github.com/mattpatagon/murmur/security/advisories/new. " +
       "Call check_for_upgrades to compare this endpoint with the official hosted release and get revision-pinned upgrade steps. " +
+      "Administrative changes require human approval through MCP form elicitation or the interactive murmur admin command. Never answer an approval request on the human's behalf or configure a worker with an administrator credential. " +
       "For push signals, subscribe to murmur://inbox/{agent_id}; always read the durable inbox after a notification or reconnect. " +
       `Messages expire automatically after ${RETENTION_DAYS} days. MCP notifications do not themselves guarantee that a host starts a new model turn. `;
     if (
@@ -213,17 +225,35 @@ export class MurmurApplication {
     );
     this.server.setRequestHandler(
       CallToolRequestSchema,
-      async (request: CallToolRequest): Promise<CallToolResult> => await this.callTool(request),
+      async (
+        request: CallToolRequest,
+        extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
+      ): Promise<CallToolResult> => await this.callTool(request, extra),
     );
   }
 
-  private async callTool(request: CallToolRequest): Promise<CallToolResult> {
+  private async callTool(
+    request: CallToolRequest,
+    extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
+  ): Promise<CallToolResult> {
     try {
       const name: string = request.params.name;
-      const argumentsValue: unknown = request.params.arguments;
       if (!this.exposedToolNames.has(name)) {
         return toolError(new Error(`Unknown tool '${name}'`));
       }
+      const guideResult: CallToolResult | null = callSetupGuideTool(
+        name,
+        request.params.arguments,
+        this.tools,
+      );
+      if (guideResult !== null) return guideResult;
+      const argumentsValue: unknown = await this.humanApproval.approve(
+        name,
+        request.params.arguments,
+        this.principal,
+        { relatedRequestId: extra.requestId, signal: extra.signal },
+        this.revalidatePrincipal,
+      );
       const upgradeResult: CallToolResult | null = await callUpgradeTool(
         name,
         argumentsValue,

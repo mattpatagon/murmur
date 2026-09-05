@@ -29,6 +29,7 @@ import type {
   GetOrchestratorInput,
   GetOrchestratorOutput,
 } from "../hosted/orchestration-contracts.js";
+import { LocalEncryptionConfiguration } from "./local-configuration.js";
 import type { LocalE2eeVault } from "./local-vault.js";
 import {
   broadcastEncryptedMessage,
@@ -78,6 +79,7 @@ export type E2eeProxyServiceDependencies = {
 };
 
 export interface E2eeProxyOperations {
+  readonly localEncryption?: LocalEncryptionConfiguration;
   registerAgent(input: RegisterAgentInput): Promise<RegisterAgentOutput>;
   getAgent(input: GetAgentInput): Promise<GetAgentOutput>;
   listAgents(input: ListAgentsInput): Promise<ListAgentsOutput>;
@@ -128,11 +130,18 @@ function sendOptions(trustOnFirstUse: boolean): ProxySendOptions {
 }
 
 export class E2eeProxyService implements E2eeProxyOperations {
+  public readonly localEncryption: LocalEncryptionConfiguration;
   readonly #dependencies: E2eeProxyServiceDependencies;
   #closed: boolean = false;
 
   public constructor(dependencies: E2eeProxyServiceDependencies) {
     this.#dependencies = dependencies;
+    this.localEncryption = new LocalEncryptionConfiguration({
+      clock: dependencies.clock,
+      ensureOpen: (): void => this.#ensureOpen(),
+      remote: dependencies.remote,
+      vault: dependencies.vault,
+    });
   }
 
   #ensureOpen(): void {
