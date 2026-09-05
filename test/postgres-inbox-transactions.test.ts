@@ -15,7 +15,7 @@ import {
 } from "../src/domain/value-objects.js";
 import { POSTGRES_RUNTIME_CONNECTION } from "../src/postgres-runtime.js";
 import { postgresSslOptions } from "../src/postgres-tls.js";
-import type { MessageStore } from "../src/storage/message-store.js";
+import type { InboxReadResult, MessageStore } from "../src/storage/message-store.js";
 import { PostgresInboxDispatcher } from "../src/storage/postgres-inbox-dispatcher.js";
 import { PostgresMessageStore } from "../src/storage/postgres-message-store.js";
 import {
@@ -164,6 +164,81 @@ function expectInboxTransactions(statements: readonly string[], expectedStatemen
     ),
   ).toBe(false);
 }
+
+test.skipIf(!postgresConfigured)(
+  "PostgreSQL paired inbox reads save four statements without losing filters, sessions or tenant isolation",
+  async (): Promise<void> => {
+    await withFixture(async (fixture: Fixture): Promise<void> => {
+      const first: SendMessageResult = await fixture.store.sendMessage({
+        ...baseMessageCommand(),
+        recipientId: fixture.reader,
+        senderId: fixture.sender,
+      });
+      const second: SendMessageResult = await fixture.store.sendMessage({
+        ...baseMessageCommand(),
+        recipientId: fixture.reader,
+        senderId: fixture.sender,
+        idempotencyKey: IdempotencyKey.parse("paired-second-message"),
+      });
+      fixture.statements.length = 0;
+      const page: InboxReadResult = await fixture.store.getMessagesWithVersion({
+        ...query(fixture.reader),
+        limit: 1,
+        threadId: first.message.threadId,
+      });
+      expectInboxTransactions(fixture.statements, 10);
+      expect(page.messages.map((message: Message): string => message.messageId.value)).toEqual([
+        first.message.messageId.value,
+      ]);
+      expect(page.inboxVersion.value).toBe(second.message.sequence.value);
+      await fixture.store.markMessagesRead({
+        agentId: fixture.reader,
+        messageIds: [first.message.messageId],
+      });
+      const filtered: InboxReadResult = await fixture.store.getMessagesWithVersion({
+        ...query(fixture.reader),
+        threadId: first.message.threadId,
+        unreadOnly: true,
+      });
+      expect(filtered.messages).toEqual([]);
+      expect(filtered.inboxVersion.value).toBe(second.message.sequence.value);
+      fixture.clock.set(fixture.now.addMinutes(5));
+      await fixture.store.getMessagesWithVersion({ ...query(fixture.reader), sessionKey: SESSION });
+      await expectLease(fixture, SESSION, fixture.clock.now());
+      await expectLease(fixture, SessionKey.default(), fixture.now);
+      await expect(
+        fixture.other.getMessagesWithVersion(query(fixture.reader)),
+      ).rejects.toBeInstanceOf(UnknownAgentError);
+      const other: InboxReadResult = await fixture.other.getMessagesWithVersion(
+        query(fixture.otherReader),
+      );
+      expect(other.messages).toEqual([]);
+      expect(other.inboxVersion.value).toBe(0);
+      await fixture.store.closeAgent({
+        agentId: fixture.reader,
+        closeReason: "completed",
+        expectedGeneration: AgentGeneration.parse(1),
+      });
+      await fixture.store.registerAgent({
+        agentId: fixture.reader,
+        displayName: DisplayName.parse("Reopened paired reader"),
+        metadata: {},
+      });
+      const current: InboxReadResult = await fixture.store.getMessagesWithVersion(
+        query(fixture.reader),
+      );
+      expect(current.messages).toEqual([]);
+      expect(current.inboxVersion.value).toBe(0);
+      const historical: InboxReadResult = await fixture.store.getMessagesWithVersion({
+        ...query(fixture.reader),
+        generation: AgentGeneration.parse(1),
+      });
+      expect(historical.messages).toHaveLength(2);
+      expect(historical.inboxVersion.value).toBe(second.message.sequence.value);
+    });
+  },
+  20_000,
+);
 
 async function expectLease(fixture: Fixture, session: SessionKey, renewed: Instant): Promise<void> {
   expect(

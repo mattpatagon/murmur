@@ -25,6 +25,7 @@ import {
   PLAINTEXT_PAGE_CONTENT_MULTIPLIER,
   parsePostgresInboxPage,
 } from "./inbox-page-budget.js";
+import type { InboxReadResult } from "./message-store.js";
 import {
   postgresAgentInTransaction,
   renewPostgresSessionInTransaction,
@@ -67,7 +68,26 @@ export async function getPostgresMessages(
   query: GetMessagesQuery,
   now: Instant,
 ): Promise<readonly Message[]> {
-  return await database.begin(async (transaction: TransactionSql): Promise<readonly Message[]> => {
+  return (await readPostgresInbox(database, tenantId, query, now, false)).messages;
+}
+
+export async function getPostgresMessagesWithVersion(
+  database: Sql,
+  tenantId: TenantId,
+  query: GetMessagesQuery,
+  now: Instant,
+): Promise<InboxReadResult> {
+  return await readPostgresInbox(database, tenantId, query, now, true);
+}
+
+async function readPostgresInbox(
+  database: Sql,
+  tenantId: TenantId,
+  query: GetMessagesQuery,
+  now: Instant,
+  includeVersion: boolean,
+): Promise<InboxReadResult> {
+  return await database.begin(async (transaction: TransactionSql): Promise<InboxReadResult> => {
     await setPostgresTenantContext(transaction, tenantId);
     const agent: Agent = await readingAgent(
       transaction,
@@ -134,7 +154,10 @@ export async function getPostgresMessages(
       );
       const messages: Message[] = rows.map((row: MessageRow): Message => mapMessageRow(row));
       reservation.settle(estimatedBytes);
-      return messages;
+      const inboxVersion: Sequence = includeVersion
+        ? await inboxVersionInTransaction(transaction, tenantId, query.agentId, now, generation)
+        : Sequence.zero();
+      return { messages, inboxVersion };
     } catch (error: unknown) {
       reservation.fail();
       throw error;
@@ -192,25 +215,41 @@ export async function getPostgresInboxVersion(
   return await database.begin(async (transaction: TransactionSql): Promise<Sequence> => {
     await setPostgresTenantContext(transaction, tenantId);
     const agent: Agent = await postgresAgentInTransaction(transaction, tenantId, agentId, now);
-    const raw: unknown = await transaction`
+    return await inboxVersionInTransaction(
+      transaction,
+      tenantId,
+      agentId,
+      now,
+      generation === null ? agent.generation.value : generation.value,
+    );
+  });
+}
+
+async function inboxVersionInTransaction(
+  transaction: TransactionSql,
+  tenantId: TenantId,
+  agentId: AgentId,
+  now: Instant,
+  generation: number,
+): Promise<Sequence> {
+  const raw: unknown = await transaction`
       SELECT COALESCE(MAX(active.tenant_sequence), 0)::bigint AS version
       FROM (
         SELECT tenant_sequence FROM murmur.messages
         WHERE tenant_id = ${tenantId.value}::uuid
           AND recipient_id = ${agentId.value}
-          AND recipient_generation = ${generation === null ? agent.generation.value : generation.value}
+          AND recipient_generation = ${generation}
           AND expires_at > ${now.toISOString()}::timestamptz
         UNION ALL
         SELECT tenant_sequence FROM murmur.e2ee_messages
         WHERE tenant_id = ${tenantId.value}::uuid
           AND recipient_id = ${agentId.value}
-          AND recipient_generation = ${generation === null ? agent.generation.value : generation.value}
+          AND recipient_generation = ${generation}
           AND expires_at > ${now.toISOString()}::timestamptz
       ) AS active
     `;
-    const rows: { readonly version: number }[] = z.array(InboxVersionRowSchema).parse(raw);
-    return Sequence.parse(firstRow(rows, "inbox version").version);
-  });
+  const rows: { readonly version: number }[] = z.array(InboxVersionRowSchema).parse(raw);
+  return Sequence.parse(firstRow(rows, "inbox version").version);
 }
 
 export async function pruneExpiredPostgresMessages(

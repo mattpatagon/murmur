@@ -19,7 +19,7 @@ import {
 } from "../src/http/murmur-application-factory.js";
 import { type MurmurHttpServer, startHttpServer } from "../src/http-server.js";
 import { MurmurApplication } from "../src/mcp/murmur-application.js";
-import type { MessageStore } from "../src/storage/message-store.js";
+import type { InboxReadResult, MessageStore } from "../src/storage/message-store.js";
 import {
   initializeRequest,
   postJson,
@@ -58,6 +58,12 @@ class BlockedWork {
           return async (_query: GetMessagesQuery): Promise<readonly Message[]> => {
             await this.run();
             return [];
+          };
+        }
+        if (key === "getMessagesWithVersion") {
+          return async (_query: GetMessagesQuery): Promise<InboxReadResult> => {
+            await this.run();
+            return { messages: [], inboxVersion: Sequence.zero() };
           };
         }
         if (key === "getAgent") {

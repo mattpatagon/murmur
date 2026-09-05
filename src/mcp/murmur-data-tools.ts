@@ -73,6 +73,7 @@ import {
   type Sequence,
 } from "../domain/value-objects.js";
 import type {
+  InboxReadResult,
   InboxSubscription,
   InboxUpdateHandler,
   MessageStore,
@@ -81,8 +82,8 @@ import {
   agentDtoForClient,
   authorizedActorId,
   messageDtoForClient,
-  requiredDataContext,
   type RequiredDataContext,
+  requiredDataContext,
 } from "./murmur-data-tool-helpers.js";
 import { callFeedbackTool } from "./murmur-feedback-tools.js";
 import { callHistoryTool } from "./murmur-history-tools.js";
@@ -270,10 +271,9 @@ export async function callDataTool(
         authority: context.senderAuthority,
         metadata,
       };
-      const previous: Agent | null = await store.getAgent(command.agentId);
       const result: RegisterAgentResult = await store.registerAgent(command);
       if (result.repositoryDiverged) context.recordRepositoryDivergence();
-      if ((previous === null || previous.state !== "active") && result.agent.state === "active") {
+      if (result.becameActive) {
         await context.notifyResourceListChanged();
       }
       const rawOutput: Record<string, unknown> = {
@@ -378,10 +378,10 @@ export async function callDataTool(
     case "get_messages": {
       const input: GetMessagesInput = GetMessagesInputSchema.parse(argumentsValue);
       const query: GetMessagesQuery = messagesQuery(input, context);
-      const messages: readonly Message[] = await store.getMessages(query);
+      const { messages, inboxVersion }: InboxReadResult = await store.getMessagesWithVersion(query);
       const rawOutput: Record<string, unknown> = {
         agent_id: query.agentId.value,
-        inbox_version: (await store.getInboxVersion(query.agentId)).value,
+        inbox_version: inboxVersion.value,
         messages: messages.map(
           (message: Message): Record<string, unknown> =>
             messageDtoForClient(message, context.legacyMessageShape),

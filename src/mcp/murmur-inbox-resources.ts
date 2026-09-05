@@ -29,10 +29,11 @@ import {
   listAgentsQuery,
   toMessageDto,
 } from "../domain/contracts.js";
-import type { Agent, GetMessagesQuery, ListAgentsResult, Message } from "../domain/models.js";
+import type { Agent, GetMessagesQuery, ListAgentsResult } from "../domain/models.js";
 import { AgentId, Sequence } from "../domain/value-objects.js";
 import { logSafeError, safeErrorMessage } from "../safe-errors.js";
 import type {
+  InboxReadResult,
   InboxSubscription,
   InboxUpdateHandler,
   MessageStore,
@@ -128,8 +129,7 @@ export class MurmurInboxResources {
       threadId: null,
       unreadOnly: false,
     };
-    const messages: readonly Message[] = await store.getMessages(query);
-    const inboxVersion: Sequence = await store.getInboxVersion(agentId);
+    const { messages, inboxVersion }: InboxReadResult = await store.getMessagesWithVersion(query);
     const output: InboxOutput = InboxOutputSchema.parse({
       agent_id: agentId.value,
       inbox_version: inboxVersion.value,

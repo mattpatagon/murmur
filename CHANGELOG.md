@@ -33,6 +33,12 @@ All notable changes to Murmur are documented in this file.
 - Reuse static tool and row schemas and remove duplicate inbox prechecks while preserving
   per-request validation, tenant isolation and independently mutable tool catalogs.
 - Let the native HTTP transport finish early-response delivery before closing incomplete inputs.
+- Derive registration activation inside its transaction, avoiding a redundant lookup and duplicate
+  PostgreSQL activity accounting while preserving resource-list notifications.
+- Read inbox pages and their independent versions in one transaction, preserving tenant checks,
+  generation filters, and payload-byte reservations through failure or cancellation.
+- Require an observed successful load-worker shutdown; premature exits and forced termination fail
+  verification instead of reporting successful cleanup, and failed cleanup retains the hard deadline.
 
 ## [0.13.0.0] - 2026-09-05
 

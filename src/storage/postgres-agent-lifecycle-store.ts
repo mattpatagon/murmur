@@ -118,6 +118,7 @@ export async function renewPostgresSessionInTransaction(
   sessionKey: SessionKey,
   now: Instant,
   createIfMissing: boolean,
+  activity: "refresh" | "already-refreshed" = "refresh",
 ): Promise<Agent> {
   await endExpiredPostgresSessions(transaction, tenantId, now, agentId);
   const row: StoredAgentRow | null = await storedPostgresAgent(transaction, tenantId, agentId);
@@ -195,10 +196,12 @@ export async function renewPostgresSessionInTransaction(
       end_reason = NULL
   `;
   await trimRetainedPostgresSessions(transaction, tenantId, agentId);
-  await transaction`
-    UPDATE murmur.agents SET last_seen_at = ${now.toISOString()}::timestamptz
-    WHERE tenant_id = ${tenantId.value}::uuid AND agent_id = ${agentId.value}
-  `;
+  if (activity === "refresh") {
+    await transaction`
+      UPDATE murmur.agents SET last_seen_at = ${now.toISOString()}::timestamptz
+      WHERE tenant_id = ${tenantId.value}::uuid AND agent_id = ${agentId.value}
+    `;
+  }
   return await postgresAgentInTransaction(transaction, tenantId, agentId, now);
 }
 
@@ -229,6 +232,7 @@ export async function registerPostgresAgent(
       existing === null ? 1 : existing.generation,
     );
     let metadata: JsonObject = command.metadata;
+    let becameActive: boolean = existing === null;
     const authority: SenderAuthority = command.authority ?? "peer";
     let reopened: boolean = false;
     let repositoryDiverged: boolean = false;
@@ -261,6 +265,7 @@ export async function registerPostgresAgent(
         generation,
         now,
       );
+      becameActive = existing.closed_at !== null || currentLive === 0;
       if (existing.closed_at !== null) {
         const dormantSameRepository: boolean =
           existing.close_reason === "dormant" && !repositoryChanged;
@@ -299,8 +304,14 @@ export async function registerPostgresAgent(
       command.sessionKey ?? SessionKey.default(),
       now,
       true,
+      "already-refreshed",
     );
-    return { agent, reopened, repositoryDiverged };
+    return {
+      agent,
+      becameActive: becameActive && agent.state === "active",
+      reopened,
+      repositoryDiverged,
+    };
   });
 }
 

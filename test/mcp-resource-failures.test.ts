@@ -9,7 +9,6 @@ import type {
   GetMessagesQuery,
   ListAgentsQuery,
   ListAgentsResult,
-  Message,
 } from "../src/domain/models.js";
 import {
   AgentClient,
@@ -19,7 +18,11 @@ import {
   type Sequence,
 } from "../src/domain/value-objects.js";
 import { MurmurApplication } from "../src/mcp/murmur-application.js";
-import type { InboxSubscription, InboxUpdateHandler } from "../src/storage/message-store.js";
+import type {
+  InboxReadResult,
+  InboxSubscription,
+  InboxUpdateHandler,
+} from "../src/storage/message-store.js";
 import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
 import { callValidated } from "./support/mcp-client-harness.js";
 
@@ -43,9 +46,10 @@ class ResourceFaultStore extends SqliteMessageStore {
     return super.listAgents(query);
   }
 
-  public override getMessages(query: GetMessagesQuery): readonly Message[] {
+  public override getMessagesWithVersion(query: GetMessagesQuery): InboxReadResult {
     this.fail("read");
-    return super.getMessages(query);
+    this.fail("version");
+    return super.getMessagesWithVersion(query);
   }
 
   public override getAgent(agentId: AgentId): Agent | null {

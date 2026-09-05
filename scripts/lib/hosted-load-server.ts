@@ -3,7 +3,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
-
+import { closeHostedLoadChild } from "./hosted-load-child-shutdown.js";
 import { type HostedLoadConfig, requireLoad } from "./hosted-load-config.js";
 
 const WorkerMessageSchema: z.ZodType<{
@@ -25,6 +25,7 @@ export class HostedLoadServer {
   private failure: boolean = false;
   private readonly child: ChildProcess;
   private readonly ready: Promise<URL>;
+  private closePromise: Promise<void> | null = null;
 
   public constructor(config: HostedLoadConfig) {
     this.child = fork(fileURLToPath(new URL("./hosted-load-worker.ts", import.meta.url)), [], {
@@ -97,26 +98,28 @@ export class HostedLoadServer {
 
   public verifyHealthy(): void {
     requireLoad(
-      !this.failure && this.child.exitCode === null,
+      !this.stopped &&
+        !this.failure &&
+        this.child.exitCode === null &&
+        this.child.signalCode === null,
       "Hosted child exited or exceeded its RSS budget",
     );
   }
 
-  public async close(): Promise<void> {
-    if (this.stopped) return;
+  public close(): Promise<void> {
+    if (this.closePromise !== null) return this.closePromise;
     this.stopped = true;
-    if (this.child.exitCode !== null || this.child.signalCode !== null) return;
-    await new Promise<void>((resolve: () => void): void => {
-      const timer: ReturnType<typeof setTimeout> = setTimeout((): void => {
-        this.child.kill("SIGKILL");
-        resolve();
-      }, 6_000);
-      this.child.once("exit", (): void => {
-        clearTimeout(timer);
-        resolve();
-      });
-      if (this.child.connected) this.child.send("stop");
-      else this.child.kill("SIGTERM");
-    });
+    this.closePromise = this.closeChild();
+    return this.closePromise;
+  }
+
+  private async closeChild(): Promise<void> {
+    try {
+      await closeHostedLoadChild(this.child);
+      requireLoad(!this.failure, "Hosted load child shutdown failed");
+    } catch (error: unknown) {
+      this.failure = true;
+      throw error;
+    }
   }
 }

@@ -47,7 +47,12 @@ import {
 } from "../postgres-tls.js";
 import { logSafeError } from "../safe-errors.js";
 import type { E2eeMessageStore, E2eeMessageStoreProvider } from "./e2ee-message-store.js";
-import type { InboxSubscription, InboxUpdateHandler, MessageStore } from "./message-store.js";
+import type {
+  InboxReadResult,
+  InboxSubscription,
+  InboxUpdateHandler,
+  MessageStore,
+} from "./message-store.js";
 import {
   closePostgresAgent,
   endPostgresSession,
@@ -73,6 +78,7 @@ import {
 import {
   getPostgresInboxVersion,
   getPostgresMessages,
+  getPostgresMessagesWithVersion,
   markPostgresMessagesRead,
   pruneExpiredPostgresMessages,
 } from "./postgres-inbox-store.js";
@@ -300,6 +306,13 @@ export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvi
     const now: Instant = this.clock.now();
     await this.pruneExpired(now);
     return await getPostgresMessages(this.database, this.tenantId, query, now);
+  }
+
+  public async getMessagesWithVersion(query: GetMessagesQuery): Promise<InboxReadResult> {
+    this.ensureOpen();
+    const now: Instant = this.clock.now();
+    await this.pruneExpired(now);
+    return await getPostgresMessagesWithVersion(this.database, this.tenantId, query, now);
   }
 
   public async markMessagesRead(command: MarkMessagesReadCommand): Promise<MarkMessagesReadResult> {

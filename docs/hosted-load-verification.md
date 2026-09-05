@@ -83,7 +83,10 @@ capacity response remains an actual HTTP 200 attempt and increments `mcpCapacity
 the phase report, even when retries are disabled or exhausted. Each attempt has a 10-second maximum;
 the overall workload deadline aborts active HTTP. Database statements and lock acquisition also have deadlines.
 Cleanup starts no new batch after 60 seconds; a hard process backstop at the configured workload
-duration plus 120 seconds exits nonzero if shutdown cannot finish.
+duration plus 120 seconds exits nonzero if shutdown cannot finish. Cleanup failures retain that
+backstop so a lingering child, IPC channel, or database handle cannot keep the runner alive forever.
+The timer is unreferenced: it does not delay ordinary failure exit after all other handles close.
+Successful cleanup clears it, even when the workload itself failed.
 
 The child reports its own RSS every 250 ms. Crossing the configured limit kills it and fails the
 run. This samples process RSS; it is not a kernel cgroup limit and excludes PostgreSQL and the load
@@ -104,7 +107,14 @@ allowlisted error name/code (`ConnectionClosed`, `ECONNRESET`, `EPIPE`, `ETIMEDO
 `AbortError`, `TimeoutError`, `TypeError`, `SyntaxError`); all other labels become `unclassified`.
 Raw exception messages, stacks and response content are never included.
 
-The child stops before cleanup. The runner deletes only its generated tenant IDs and dependent
+Child cleanup succeeds only after an observed exit code zero following the stop request; earlier
+exits, signals, IPC errors, and forced termination fail the run. Concurrent or repeated close calls
+share the same success or failure. IPC acknowledgement has a one-second deadline within the existing
+six-second graceful-exit budget. Forced termination waits up to two additional seconds for an
+observed exit; an unconfirmed exit remains a cleanup failure rather than successful shutdown.
+Fixture cleanup is still attempted after any child shutdown failure.
+
+The runner deletes only its generated tenant IDs and dependent
 fixture rows, then verifies they are gone. PostgreSQL may retain allocated files after deletion;
 drop the explicitly provisioned disposable database afterward through the provisioning workflow.
 An externally killed runner may leave fixture rows in that disposable database. Database bytes

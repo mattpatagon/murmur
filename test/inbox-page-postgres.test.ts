@@ -234,6 +234,11 @@ test.skipIf(applicationDatabaseUrl === undefined || adminDatabaseUrl === undefin
       const inbox: Awaited<ReturnType<E2eeMessageStore["getEncryptedMessages"]>> =
         await encrypted.getEncryptedMessages({ ...input, limit: 1 });
       expect(inbox.messages).toHaveLength(1);
+      const paired: Awaited<ReturnType<MessageStore["getMessagesWithVersion"]>> =
+        await store.getMessagesWithVersion(pageQuery(1));
+      expect(paired.messages).toHaveLength(1);
+      expect(paired.inboxVersion.value).toBe(inbox.inbox_version);
+      expect(paired.inboxVersion.value).toBeGreaterThan(first.sequence.value);
       const encryptedFirst: (typeof inbox.messages)[number] | undefined = inbox.messages[0];
       if (encryptedFirst === undefined) throw new Error("Encrypted first page is missing");
       expect(encryptedFirst.envelope.ciphertext.length).toBe(699_072);

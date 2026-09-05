@@ -31,6 +31,7 @@ async function main(): Promise<void> {
     },
     (config.durationSeconds + 120) * 1_000,
   );
+  hardDeadline.unref();
   const fixture: HostedLoadFixture = new HostedLoadFixture(config);
   let server: HostedLoadServer | null = null;
   let scenarios: HostedLoadScenarios | null = null;
@@ -109,7 +110,7 @@ async function main(): Promise<void> {
     } catch (_error: unknown) {
       cleanupPassed = false;
     }
-    clearTimeout(hardDeadline);
+    if (cleanupPassed) clearTimeout(hardDeadline);
     process.stdout.write(
       `${JSON.stringify({
         event: "hosted-load-result",

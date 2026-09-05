@@ -247,6 +247,7 @@ export function registerSqliteAgent(
       existing === null ? 1 : existing.generation,
     );
     let metadata: JsonObject = command.metadata;
+    let becameActive: boolean = existing === null;
     let reopened: boolean = false;
     let repositoryDiverged: boolean = false;
     if (existing === null) {
@@ -285,6 +286,7 @@ export function registerSqliteAgent(
         generation,
         now,
       );
+      becameActive = existing.closed_at !== null || currentLive === 0;
       if (existing.closed_at !== null) {
         ensureOpenCapacity(database);
         const dormantSameRepository: boolean =
@@ -327,7 +329,12 @@ export function registerSqliteAgent(
       now,
       true,
     );
-    const result: RegisterAgentResult = { agent, reopened, repositoryDiverged };
+    const result: RegisterAgentResult = {
+      agent,
+      becameActive: becameActive && agent.state === "active",
+      reopened,
+      repositoryDiverged,
+    };
     database.exec("COMMIT");
     return result;
   } catch (error: unknown) {

@@ -1,4 +1,13 @@
 import type {
+  AgentCloseReason,
+  AgentGeneration,
+  AgentListState,
+  AgentState,
+  ExplicitAgentCloseReason,
+  SessionEndReason,
+  SessionKey,
+} from "./lifecycle-values.js";
+import type {
   MessageKind,
   MessageProvenance,
   OrchestratorPolicyId,
@@ -20,15 +29,6 @@ import type {
   Sequence,
   ThreadId,
 } from "./value-objects.js";
-import type {
-  AgentCloseReason,
-  AgentGeneration,
-  AgentListState,
-  AgentState,
-  ExplicitAgentCloseReason,
-  SessionEndReason,
-  SessionKey,
-} from "./lifecycle-values.js";
 
 export type Agent = {
   readonly authority: SenderAuthority;
@@ -81,6 +81,7 @@ export type RegisterAgentCommand = {
 
 export type RegisterAgentResult = {
   readonly agent: Agent;
+  readonly becameActive: boolean;
   readonly reopened: boolean;
   readonly repositoryDiverged: boolean;
 };

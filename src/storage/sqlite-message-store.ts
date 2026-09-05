@@ -49,7 +49,12 @@ import {
 } from "../domain/value-objects.js";
 import { logSafeError } from "../safe-errors.js";
 import type { E2eeMessageStore } from "./e2ee-message-store.js";
-import type { InboxSubscription, InboxUpdateHandler, MessageStore } from "./message-store.js";
+import type {
+  InboxReadResult,
+  InboxSubscription,
+  InboxUpdateHandler,
+  MessageStore,
+} from "./message-store.js";
 import {
   closeSqliteAgent,
   endSqliteSession,
@@ -289,6 +294,32 @@ export class SqliteMessageStore implements MessageStore {
     }
     const generation: number =
       query.generation == null ? agent.generation.value : query.generation.value;
+    return this.messagesAt(query, generation, now);
+  }
+
+  public getMessagesWithVersion(query: GetMessagesQuery): InboxReadResult {
+    this.ensureOpen();
+    const now: Instant = this.clock.now();
+    // Lifecycle pruning uses BEGIN IMMEDIATE and must precede the paired read transaction.
+    this.pruneExpired(now);
+    return this.database.transaction((): InboxReadResult => {
+      const agent: Agent =
+        query.sessionKey == null
+          ? sqliteAgent(this.database, query.agentId, now)
+          : renewSqliteSession(this.database, query.agentId, query.sessionKey, now, false);
+      const generation: number =
+        query.generation == null ? agent.generation.value : query.generation.value;
+      const messages: readonly Message[] = this.messagesAt(query, generation, now);
+      const inboxVersion: Sequence = this.inboxVersionAt(query.agentId, generation, now);
+      return { messages, inboxVersion };
+    })();
+  }
+
+  private messagesAt(
+    query: GetMessagesQuery,
+    generation: number,
+    now: Instant,
+  ): readonly Message[] {
     const rows: unknown[] = readSqliteInboxPage(this.database, "plaintext", {
       afterSequence: query.afterSequence.value,
       agentId: query.agentId.value,
@@ -369,17 +400,21 @@ export class SqliteMessageStore implements MessageStore {
   ): Sequence {
     this.ensureOpen();
     const agent: Agent = this.requireAgent(agentId);
+    return this.inboxVersionAt(
+      agentId,
+      generation === null ? agent.generation.value : generation.value,
+      this.clock.now(),
+    );
+  }
+
+  private inboxVersionAt(agentId: AgentId, generation: number, now: Instant): Sequence {
     const statement: Statement<unknown, [string, number, string]> = this.database.query(`
       SELECT COALESCE(MAX(sequence), 0) AS version
       FROM messages
       WHERE recipient_id = ? AND recipient_generation = ? AND expires_at > ?
     `);
     const row: InboxVersionRow = InboxVersionRowSchema.parse(
-      statement.get(
-        agentId.value,
-        generation === null ? agent.generation.value : generation.value,
-        this.clock.now().toISOString(),
-      ),
+      statement.get(agentId.value, generation, now.toISOString()),
     );
     return Sequence.parse(row.version);
   }

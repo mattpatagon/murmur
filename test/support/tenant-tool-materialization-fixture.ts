@@ -145,6 +145,7 @@ export class TenantToolFixture {
       getAgent: unexpected,
       getInboxVersion: unexpected,
       getMessages: unexpected,
+      getMessagesWithVersion: unexpected,
       listAgents: unexpected,
       listNotices: unexpected,
       markMessagesRead: unexpected,
