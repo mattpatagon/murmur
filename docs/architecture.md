@@ -52,6 +52,20 @@ Hosted requests pass through ordered, independently observable gates:
 7. Parse the MCP envelope and dispatch through the role-specific application.
 8. Stream the response, release all capacity, and emit one completion event when the body closes.
 
+Session initialization reserves global and tenant capacity before asynchronous application
+construction. Failed initialization releases that reservation. Revocation tracking retains only
+in-flight initialization snapshots, released on success and failure; old tenant or token revocations
+do not accumulate process-wide history. Request bodies share an absolute
+10-second read deadline across MCP, registration, and connector token routes; incomplete bodies
+are canceled and receive HTTP 408. Buffered body memory is bounded by the route's byte limit,
+including when a sender fragments the body into many small chunks.
+
+Hosted retained storage has a fixed service-wide [admission budget](hosted-storage-budget.md),
+in addition to tenant quotas. Runtime startup requires its accounting triggers to be enabled.
+PostgreSQL [expiry preflights](postgres-expiry-preflight.md) avoid no-op cleanup writes without
+delaying expiry or quota recovery. Inbox hints use a [bounded dispatcher](postgres-notification-bounds.md);
+durable tenant inboxes remain the source of truth after overload, cancellation and reconnect.
+
 `POST /v1/tenants` is the one unauthenticated hosted mutation. It branches after route and origin
 validation, before credential extraction, and accepts only the strict tenant-registration schema.
 The handler shares global request capacity, has a dedicated application rate window, and delegates
@@ -64,6 +78,10 @@ so an exact retry after a lost response returns the same credential without stor
 The client cannot supply a tenant ID, principal role, server request ID, trace parent, or raw session
 identifier for audit correlation. Each request reauthenticates so revocation and suspension apply
 immediately; matching live sessions are also closed proactively.
+
+Credential admission retains at most 32,768 recent hashed credentials for five minutes and never
+polls the complete credential directory. Admission hints prioritize previously authenticated
+clients; they never replace database authorization. See [credential-admission.md](credential-admission.md).
 
 Connector OAuth compatibility branches at public discovery and authorization routes. A bounded,
 in-memory authorization code carries no Murmur credential and is bound to the exact client,
@@ -200,6 +218,10 @@ garbage collection cannot make a later identity reuse ambiguous.
 Queues are finite and waits have deadlines. Shutdown stops new admission, closes the HTTP server,
 closes applications and stores, then flushes telemetry within a bounded timeout. Cleanup remains
 best-effort across multiple failures and preserves the original startup or shutdown error safely.
+
+Both runtime PostgreSQL pools set fixed statement, lock, and idle-transaction deadlines on every
+connection. See [postgres-runtime-bounds.md](postgres-runtime-bounds.md) for their values and the
+separate limits of connection-pool waiting and multi-statement operations.
 
 ## Failure model
 

@@ -108,14 +108,24 @@ if [ "$coverage_mode" = '1' ]; then
     MURMUR_TEST_ADMIN_DATABASE_URL="$admin_url" \
     MURMUR_TEST_BOOTSTRAP_LEGACY_TOKEN='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
     MURMUR_TEST_DATABASE_TLS_INSECURE=1 \
+    MURMUR_TEST_STORAGE_BUDGET=0 \
     bun run scripts/run-coverage.ts --defer-audit
 else
   MURMUR_TEST_APP_DATABASE_URL="$app_url" \
     MURMUR_TEST_ADMIN_DATABASE_URL="$admin_url" \
     MURMUR_TEST_BOOTSTRAP_LEGACY_TOKEN='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
     MURMUR_TEST_DATABASE_TLS_INSECURE=1 \
-    bun test test/hosted.mcp.e2e.test.ts
+    bun test test/hosted.mcp.e2e.test.ts test/postgres-runtime-locks.test.ts \
+      test/postgres-expiry-preflight.test.ts
 fi
+
+# Global-budget mutations must follow bootstrap and finish before other database suites.
+MURMUR_TEST_APP_DATABASE_URL="$app_url" \
+  MURMUR_TEST_ADMIN_DATABASE_URL="$admin_url" \
+  MURMUR_TEST_DATABASE_TLS_INSECURE=1 \
+  MURMUR_TEST_STORAGE_BUDGET=1 \
+  bun test test/hosted-storage-budget.postgres.test.ts \
+    test/hosted-storage-budget-e2ee.postgres.test.ts
 
 MURMUR_TEST_APP_DATABASE_URL="$app_url" \
   MURMUR_TEST_ADMIN_DATABASE_URL="$admin_url" \

@@ -136,6 +136,7 @@ test.skipIf(!limitsEnabled || databaseUrl === undefined || adminDatabaseUrl === 
           FROM pg_catalog.generate_series(1, ${capacityRows}::integer) AS series
         `;
         await transaction`ALTER TABLE murmur.tenants ENABLE TRIGGER USER`;
+        await transaction`SELECT murmur.reconcile_hosted_storage_budget()`;
       });
       await resetRegistrationState(admin);
       await expect(

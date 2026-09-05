@@ -51,6 +51,9 @@ function translateRegistrationError(error: unknown): never {
   }
   if (error.code === "P4290") throw new TenantRegistrationRateLimitError();
   if (error.code === "P5030") throw new TenantRegistrationCapacityError();
+  if (error.code === "54000" && error.message === "hosted retained-storage capacity reached") {
+    throw new TenantRegistrationCapacityError();
+  }
   if (error.code === "55P03") throw new TenantRegistrationBusyError();
   throw error;
 }

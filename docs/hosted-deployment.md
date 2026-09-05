@@ -6,6 +6,10 @@ committed workflow is the source of truth for sequencing:
 `.github/workflows/deploy.yml` runs on every push to `main` and can also be
 started manually.
 
+Both production deployment and production-isolation verification execute only for
+`refs/heads/main`. Manual dispatches against a branch or tag skip the privileged job before
+checkout, workload-identity authentication, or production secret access.
+
 ## Service contract
 
 The deployed service exposes:
@@ -29,6 +33,14 @@ because MCP sessions and connector authorization codes are in memory. Messages, 
 credentials, and authorization policy remain durable in PostgreSQL across restarts; a connector
 restarts authorization when an ephemeral five-minute code is lost.
 
+Every deployment explicitly sets one vCPU, 512 MiB, service-wide `--max 1`, and revision-level
+`--max-instances 1`. The service-wide limit also constrains traffic split across revisions;
+revision limits alone do not express that aggregate intent. Do not leave independently reachable
+tagged revisions running as additional free capacity. These controls constrain autoscaling, not
+the entire provider bill: Cloud Run can briefly exceed its instance maximum during traffic spikes,
+and request, network, logging and database charges remain separate. See
+[Cloud Run maximum-instance behavior](https://cloud.google.com/run/docs/configuring/max-instances).
+
 Production PostgreSQL connections must use certificate verification. The
 runtime mounts the Supabase Server root certificate and connects as the
 non-owner, non-superuser, non-`BYPASSRLS` `murmur_app` role. Tenant-qualified
@@ -46,6 +58,12 @@ Provision these dependencies before enabling the workflow:
 - a Supabase PostgreSQL project and its verified Server root certificate;
 - a GitHub `production` environment with protected deployment approvals;
 - Bun 1.3.11 for manual verification and recovery work.
+
+Restrict the GitHub `production` environment's deployment branches to `main`, and restrict the
+Google workload-identity provider to this repository and `assertion.ref == 'refs/heads/main'`.
+The committed job condition prevents accidental dispatches; environment and identity-provider
+policies independently prevent a modified workflow on another branch from obtaining production
+credentials. Verify these settings in the live control planes before enabling deployment.
 
 Do not create or download a long-lived Google service-account key. GitHub
 authenticates with short-lived workload identity credentials.

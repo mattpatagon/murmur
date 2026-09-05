@@ -14,6 +14,7 @@ permissions:
 jobs:
   verify:
     name: Exercise live tenant boundaries
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:

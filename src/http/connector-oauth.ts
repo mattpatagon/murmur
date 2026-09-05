@@ -31,7 +31,12 @@ import {
   OAUTH_SERVER_METADATA_PATH,
   OAUTH_TOKEN_PATH,
 } from "./http-config.js";
-import { jsonResponse, RequestBodyTooLargeError, requestBodyBytes } from "./http-request.js";
+import {
+  jsonResponse,
+  RequestBodyTimeoutError,
+  RequestBodyTooLargeError,
+  requestBodyBytes,
+} from "./http-request.js";
 
 export { connectorProtectedResourceMetadataUrl } from "./connector-oauth-protocol.js";
 const MAXIMUM_FORM_BYTES: number = 8_192;
@@ -360,6 +365,9 @@ async function handleToken(
       token_type: "Bearer",
     });
   } catch (error: unknown) {
+    if (error instanceof RequestBodyTimeoutError) {
+      return oauthError(408, "invalid_request", "Request body deadline exceeded");
+    }
     if (
       error instanceof InvalidConnectorOAuthRequestError ||
       error instanceof RequestBodyTooLargeError ||

@@ -28,6 +28,7 @@ export type HostedApplicationRequest = {
   readonly onTokenRevoked: (tokenId: string) => Promise<void>;
   readonly principal: HostedPrincipal;
   readonly repositoryName: RepositoryName | null;
+  readonly reserveProcessingCapacity?: (() => (() => void) | null) | undefined;
   readonly store: MessageStore;
   readonly token: string;
 };
@@ -97,6 +98,7 @@ export async function createHostedMurmurApplication(
     orchestrationEnabled: request.authenticator.orchestrationEnabled,
     principal: request.principal,
     repositoryName: request.repositoryName,
+    reserveProcessingCapacity: request.reserveProcessingCapacity,
     store: tenantStore,
     tenantOnboardingEnabled: request.authenticator.tenantOnboardingEnabled,
   });

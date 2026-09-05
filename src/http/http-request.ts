@@ -1,4 +1,6 @@
 import { AgentClient, BranchName, RepositoryName } from "../domain/value-objects.js";
+import { logSafeError } from "../safe-errors.js";
+import { SYSTEM_TIME_SOURCE, type TimeSource } from "./http-capacity.js";
 
 const BRANCH_HEADER: string = "x-murmur-branch";
 const CLIENT_HEADER: string = "x-murmur-client";
@@ -14,6 +16,13 @@ export class RequestBodyTooLargeError extends Error {
   public constructor(limit: number) {
     super(`The MCP request body exceeds ${limit} bytes`);
     this.name = "RequestBodyTooLargeError";
+  }
+}
+
+export class RequestBodyTimeoutError extends Error {
+  public constructor() {
+    super("Request body deadline exceeded");
+    this.name = "RequestBodyTimeoutError";
   }
 }
 
@@ -99,7 +108,39 @@ export function mcpRequestMetadata(body: unknown): McpRequestMetadata {
   };
 }
 
-export async function requestBodyBytes(request: Request, maxBytes: number): Promise<Uint8Array> {
+async function consumeBody(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  maxBytes: number,
+  deadline: number,
+  time: TimeSource,
+): Promise<Uint8Array> {
+  let buffer: Uint8Array = new Uint8Array(Math.min(maxBytes, 16_384));
+  let total: number = 0;
+  while (true) {
+    if (time.now() >= deadline) throw new RequestBodyTimeoutError();
+    const result: Awaited<ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]>> =
+      await reader.read();
+    if (time.now() >= deadline) throw new RequestBodyTimeoutError();
+    if (result.done) return buffer.subarray(0, total);
+    const nextTotal: number = total + result.value.byteLength;
+    if (nextTotal > maxBytes) throw new RequestBodyTooLargeError(maxBytes);
+    if (nextTotal > buffer.byteLength) {
+      const grown: Uint8Array = new Uint8Array(
+        Math.min(maxBytes, Math.max(nextTotal, buffer.byteLength * 2)),
+      );
+      grown.set(buffer.subarray(0, total));
+      buffer = grown;
+    }
+    buffer.set(result.value, total);
+    total = nextTotal;
+  }
+}
+
+export async function requestBodyBytes(
+  request: Request,
+  maxBytes: number,
+  time: TimeSource = SYSTEM_TIME_SOURCE,
+): Promise<Uint8Array> {
   const declaredLength: string | null = request.headers.get("content-length");
   if (declaredLength !== null && Number(declaredLength) > maxBytes) {
     throw new RequestBodyTooLargeError(maxBytes);
@@ -107,40 +148,39 @@ export async function requestBodyBytes(request: Request, maxBytes: number): Prom
   const body: ReadableStream<Uint8Array> | null = request.body;
   if (body === null) return new Uint8Array();
   const reader: ReadableStreamDefaultReader<Uint8Array> = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total: number = 0;
+  const deadline: number = time.now() + 10_000;
+  let cancelDeadline: () => void = (): void => {};
+  const expired: Promise<never> = new Promise<never>(
+    (_resolve: (value: never) => void, reject: (error: Error) => void): void => {
+      cancelDeadline = time.schedule(10_000, (): void => reject(new RequestBodyTimeoutError()));
+    },
+  );
   try {
-    while (true) {
-      const result: { readonly done: boolean; readonly value?: Uint8Array | undefined } =
-        await reader.read();
-      if (result.done) break;
-      const value: Uint8Array | undefined = result.value;
-      if (value === undefined) continue;
-      total += value.byteLength;
-      if (total > maxBytes) throw new RequestBodyTooLargeError(maxBytes);
-      chunks.push(value);
-    }
+    return await Promise.race([consumeBody(reader, maxBytes, deadline, time), expired]);
   } catch (error: unknown) {
-    await reader.cancel(error);
+    // An unresponsive producer must not extend the absolute read deadline during cleanup.
+    void reader.cancel().catch((cancelError: unknown): void => {
+      logSafeError("Murmur request body cancellation failed", cancelError);
+    });
     throw error;
   } finally {
+    cancelDeadline();
     reader.releaseLock();
   }
-  const merged: Uint8Array = new Uint8Array(total);
-  let offset: number = 0;
-  chunks.forEach((chunk: Uint8Array): void => {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  });
-  return merged;
 }
 
-export async function parseRequestBody(request: Request, maxBytes: number): Promise<unknown> {
+export async function parseRequestBody(
+  request: Request,
+  maxBytes: number,
+  time: TimeSource = SYSTEM_TIME_SOURCE,
+): Promise<unknown> {
   try {
-    const bytes: Uint8Array = await requestBodyBytes(request, maxBytes);
+    const bytes: Uint8Array = await requestBodyBytes(request, maxBytes, time);
     return JSON.parse(new TextDecoder().decode(bytes));
   } catch (error: unknown) {
-    if (error instanceof RequestBodyTooLargeError) throw error;
+    if (error instanceof RequestBodyTooLargeError || error instanceof RequestBodyTimeoutError) {
+      throw error;
+    }
     throw new Error("The MCP request body must be valid JSON", { cause: error });
   }
 }

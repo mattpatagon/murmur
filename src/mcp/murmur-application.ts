@@ -1,11 +1,22 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import type { AnyObjectSchema, SchemaOutput } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type {
   CallToolRequest,
   CallToolResult,
   ListToolsResult,
+  Notification,
+  Request,
+  Result,
+  ServerNotification,
+  ServerRequest,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  McpError,
+} from "@modelcontextprotocol/sdk/types.js";
 import packageMetadata from "../../package.json" with { type: "json" };
 
 import { RETENTION_DAYS } from "../domain/contracts.js";
@@ -55,6 +66,43 @@ import { callUpgradeTool } from "./murmur-upgrade-tool.js";
 
 const SERVER_VERSION: string = packageMetadata.version;
 
+function installProcessingAdmission(
+  server: Server,
+  reserveCapacity: (() => (() => void) | null) | undefined,
+): void {
+  if (reserveCapacity === undefined) return;
+  const register: Server["setRequestHandler"] = server.setRequestHandler.bind(server);
+  server.setRequestHandler = <T extends AnyObjectSchema>(
+    schema: T,
+    handler: (
+      request: SchemaOutput<T>,
+      extra: RequestHandlerExtra<ServerRequest | Request, ServerNotification | Notification>,
+    ) => Result | Promise<Result>,
+  ): void => {
+    register(
+      schema,
+      async (
+        request: SchemaOutput<T>,
+        extra: RequestHandlerExtra<ServerRequest | Request, ServerNotification | Notification>,
+      ): Promise<Result> => {
+        const release: (() => void) | null = reserveCapacity();
+        if (release === null) {
+          throw new McpError(-32003, "MCP processing capacity reached; retry later.", {
+            retryable: true,
+            retry_after_ms: 1000,
+          });
+        }
+        try {
+          // HTTP disconnect and SDK cancellation do not terminate a pending storage operation.
+          return await handler(request, extra);
+        } finally {
+          release();
+        }
+      },
+    );
+  };
+}
+
 export type MurmurApplicationDependencies = {
   readonly branchName: BranchName | null;
   readonly bootstrapCredentialHash?: Buffer | null;
@@ -73,6 +121,7 @@ export type MurmurApplicationDependencies = {
   readonly orchestrationEnabled?: boolean;
   readonly principal?: HostedPrincipal | null;
   readonly repositoryName: RepositoryName | null;
+  readonly reserveProcessingCapacity?: (() => (() => void) | null) | undefined;
   readonly store: MessageStore | null;
   readonly tenantOnboardingEnabled?: boolean;
   readonly upgradeChecker?: MurmurUpgradeChecker | undefined;
@@ -142,6 +191,7 @@ export class MurmurApplication {
         instructions: this.serverInstructions(),
       },
     );
+    installProcessingAdmission(this.server, dependencies.reserveProcessingCapacity);
     const resourceStore: MessageStore | null =
       this.e2eeEntitlement !== null && this.e2eeEntitlement.state === "enforced"
         ? null

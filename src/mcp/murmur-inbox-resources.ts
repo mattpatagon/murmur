@@ -1,9 +1,12 @@
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type {
   ListResourcesResult,
   ListResourceTemplatesResult,
   ReadResourceRequest,
   ReadResourceResult,
+  ServerNotification,
+  ServerRequest,
   SubscribeRequest,
   UnsubscribeRequest,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -20,17 +23,39 @@ import {
 import { type InboxOutput, InboxOutputSchema, toMessageDto } from "../domain/contracts.js";
 import type { Agent, GetMessagesQuery, Message } from "../domain/models.js";
 import { AgentId, Sequence } from "../domain/value-objects.js";
-import { logSafeError } from "../safe-errors.js";
+import { logSafeError, safeErrorMessage } from "../safe-errors.js";
 import type {
   InboxSubscription,
   InboxUpdateHandler,
   MessageStore,
 } from "../storage/message-store.js";
+import { normalizePostgresStorageError } from "../storage/postgres-storage-errors.js";
+import { ResourceMutationQueue } from "./resource-mutation-queue.js";
 
 const INBOX_PREFIX: string = "murmur://inbox/";
 const MAX_INBOX_SUBSCRIPTIONS_PER_SESSION: number = 10;
 type ListedResource = ListResourcesResult["resources"][number];
 type ActiveInboxSubscription = { readonly storeSubscription: InboxSubscription };
+
+async function safeStorageRequest<T>(action: () => Promise<T>): Promise<T> {
+  try {
+    return await action();
+  } catch (error: unknown) {
+    // SDK resource errors otherwise serialize the original exception message and data.
+    if (
+      typeof error !== "object" ||
+      error === null ||
+      typeof Reflect.get(error, "code") !== "string"
+    ) {
+      throw error;
+    }
+    logSafeError("Murmur resource storage request failed", error);
+    throw new McpError(
+      ErrorCode.InternalError,
+      safeErrorMessage(normalizePostgresStorageError(error)),
+    );
+  }
+}
 
 function inboxUri(agentId: AgentId): string {
   return `${INBOX_PREFIX}${encodeURIComponent(agentId.value)}`;
@@ -59,12 +84,12 @@ export class MurmurInboxResources {
   private readonly server: Server;
   private readonly store: MessageStore | null;
   private readonly subscriptions: Map<string, ActiveInboxSubscription>;
-  private mutationQueue: Promise<void>;
+  private readonly mutationQueue: ResourceMutationQueue;
 
   public constructor(server: Server, store: MessageStore | null, closeStoreOnClose: boolean) {
     this.closed = false;
     this.closeStoreOnClose = closeStoreOnClose;
-    this.mutationQueue = Promise.resolve();
+    this.mutationQueue = new ResourceMutationQueue();
     this.server = server;
     this.store = store;
     this.subscriptions = new Map<string, ActiveInboxSubscription>();
@@ -75,13 +100,11 @@ export class MurmurInboxResources {
     return this.store;
   }
 
-  private async serializeMutation<T>(action: () => Promise<T>): Promise<T> {
-    const result: Promise<T> = this.mutationQueue.then(action, action);
-    this.mutationQueue = result.then(
-      (): void => undefined,
-      (): void => undefined,
-    );
-    return await result;
+  private requireActiveMutation(signal: AbortSignal): void {
+    if (this.closed) throw new McpError(ErrorCode.InvalidRequest, "Session is closed.");
+    if (signal.aborted) {
+      throw new McpError(ErrorCode.InvalidRequest, "Inbox mutation request was canceled.");
+    }
   }
 
   private async readResource(request: ReadResourceRequest): Promise<ReadResourceResult> {
@@ -109,9 +132,12 @@ export class MurmurInboxResources {
     };
   }
 
-  private async subscribe(request: SubscribeRequest): Promise<Record<string, never>> {
-    return await this.serializeMutation(async (): Promise<Record<string, never>> => {
-      if (this.closed) throw new McpError(ErrorCode.InvalidRequest, "Session is closed.");
+  private async subscribe(
+    request: SubscribeRequest,
+    signal: AbortSignal,
+  ): Promise<Record<string, never>> {
+    return await this.mutationQueue.run(async (): Promise<Record<string, never>> => {
+      this.requireActiveMutation(signal);
       const uri: string = request.params.uri;
       const agentId: AgentId = agentIdFromInboxUri(uri);
       const store: MessageStore = this.dataStore();
@@ -131,11 +157,14 @@ export class MurmurInboxResources {
           `Unknown agent '${agentId.value}'. Register it first.`,
         );
       }
+      this.requireActiveMutation(signal);
       if (existing !== undefined) {
         await existing.storeSubscription.close();
         this.subscriptions.delete(uri);
       }
+      this.requireActiveMutation(signal);
       let latestSequence: Sequence = await store.getInboxVersion(agentId);
+      this.requireActiveMutation(signal);
       const handler: InboxUpdateHandler = async (sequence: Sequence): Promise<void> => {
         if (!sequence.isAfter(latestSequence) || this.closed) return;
         await this.server.sendResourceUpdated({ uri });
@@ -146,38 +175,50 @@ export class MurmurInboxResources {
         latestSequence,
         handler,
       );
+      if (this.closed || signal.aborted) {
+        await storeSubscription.close();
+        this.requireActiveMutation(signal);
+      }
       this.subscriptions.set(uri, { storeSubscription });
       return {};
-    });
+    }, signal);
   }
 
-  private async unsubscribe(request: UnsubscribeRequest): Promise<Record<string, never>> {
-    return await this.serializeMutation(async (): Promise<Record<string, never>> => {
+  private async unsubscribe(
+    request: UnsubscribeRequest,
+    signal: AbortSignal,
+  ): Promise<Record<string, never>> {
+    return await this.mutationQueue.run(async (): Promise<Record<string, never>> => {
+      this.requireActiveMutation(signal);
       const subscription: ActiveInboxSubscription | undefined = this.subscriptions.get(
         request.params.uri,
       );
       if (subscription !== undefined) await subscription.storeSubscription.close();
       this.subscriptions.delete(request.params.uri);
       return {};
-    });
+    }, signal);
   }
 
   public registerHandlers(): void {
     this.server.setRequestHandler(
       ListResourcesRequestSchema,
-      async (): Promise<ListResourcesResult> => ({
-        resources: (this.store === null
-          ? []
-          : (await this.store.listAgents({ cursor: null, limit: 1_000, state: "active" })).agents
-        ).map(
-          (agent: Agent): ListedResource => ({
-            description: `Durable inbox for ${agent.agentId.value}`,
-            mimeType: "application/json",
-            name: `${agent.displayName.value} inbox`,
-            uri: inboxUri(agent.agentId),
+      async (): Promise<ListResourcesResult> =>
+        await safeStorageRequest(
+          async (): Promise<ListResourcesResult> => ({
+            resources: (this.store === null
+              ? []
+              : (await this.store.listAgents({ cursor: null, limit: 1_000, state: "active" }))
+                  .agents
+            ).map(
+              (agent: Agent): ListedResource => ({
+                description: `Durable inbox for ${agent.agentId.value}`,
+                mimeType: "application/json",
+                name: `${agent.displayName.value} inbox`,
+                uri: inboxUri(agent.agentId),
+              }),
+            ),
           }),
         ),
-      }),
     );
     this.server.setRequestHandler(
       ListResourceTemplatesRequestSchema,
@@ -199,24 +240,36 @@ export class MurmurInboxResources {
     this.server.setRequestHandler(
       ReadResourceRequestSchema,
       async (request: ReadResourceRequest): Promise<ReadResourceResult> =>
-        await this.readResource(request),
+        await safeStorageRequest(
+          async (): Promise<ReadResourceResult> => await this.readResource(request),
+        ),
     );
     this.server.setRequestHandler(
       SubscribeRequestSchema,
-      async (request: SubscribeRequest): Promise<Record<string, never>> =>
-        await this.subscribe(request),
+      async (
+        request: SubscribeRequest,
+        extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
+      ): Promise<Record<string, never>> =>
+        await safeStorageRequest(
+          async (): Promise<Record<string, never>> => await this.subscribe(request, extra.signal),
+        ),
     );
     this.server.setRequestHandler(
       UnsubscribeRequestSchema,
-      async (request: UnsubscribeRequest): Promise<Record<string, never>> =>
-        await this.unsubscribe(request),
+      async (
+        request: UnsubscribeRequest,
+        extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
+      ): Promise<Record<string, never>> =>
+        await safeStorageRequest(
+          async (): Promise<Record<string, never>> => await this.unsubscribe(request, extra.signal),
+        ),
     );
   }
 
   public async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    await this.mutationQueue;
+    await this.mutationQueue.close();
     const subscriptions: readonly ActiveInboxSubscription[] = Array.from(
       this.subscriptions.values(),
     );

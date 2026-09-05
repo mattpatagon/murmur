@@ -39,6 +39,7 @@ import {
   SystemClock,
   TenantId,
 } from "../domain/value-objects.js";
+import { POSTGRES_RUNTIME_POOL } from "../postgres-runtime.js";
 import {
   type PostgresSslOptions,
   type PostgresTlsConfiguration,
@@ -62,6 +63,7 @@ import {
 } from "./postgres-e2ee-message-store.js";
 import { verifyPostgresE2eeSchema } from "./postgres-e2ee-schema.js";
 import { submitPostgresFeedback } from "./postgres-feedback-store.js";
+import { postgresHasPruneCandidates } from "./postgres-expiry-preflight.js";
 import {
   getPostgresInboxVersion,
   getPostgresMessages,
@@ -69,6 +71,12 @@ import {
   pruneExpiredPostgresMessages,
 } from "./postgres-inbox-store.js";
 import { prunePostgresLifecycle } from "./postgres-lifecycle-prune.js";
+import {
+  type DispatcherSubscription,
+  type InboxDispatcherTimeSource,
+  PostgresInboxDispatcher,
+  SYSTEM_INBOX_DISPATCHER_TIME,
+} from "./postgres-inbox-dispatcher.js";
 import { type InboxNotification, InboxNotificationSchema } from "./postgres-message-rows.js";
 import { verifyPostgresMessageSchema } from "./postgres-message-schema.js";
 import { setPostgresTenantContext } from "./postgres-message-transactions.js";
@@ -85,41 +93,12 @@ export { POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED } from "./postgres-message-transac
 
 const INBOX_CHANNEL: string = "murmur_inbox_changed";
 
-type PostgresInboxSubscriber = {
-  readonly agentId: AgentId;
-  readonly handler: InboxUpdateHandler;
-  readonly id: number;
-  readonly tenantId: TenantId;
-  lastSequence: Sequence;
-};
-
 type PostgresSharedState = {
   closed: boolean;
+  closePromise: Promise<void> | null;
+  readonly dispatcher: PostgresInboxDispatcher;
   listener: ListenMeta | null;
-  nextSubscriberId: number;
-  notificationQueue: Promise<void>;
-  readonly subscribersByInbox: Map<string, Map<number, PostgresInboxSubscriber>>;
 };
-
-function subscriberInboxKey(tenantId: TenantId, agentId: AgentId): string {
-  return `${tenantId.value}\u0000${agentId.value}`;
-}
-
-class CallbackInboxSubscription implements InboxSubscription {
-  private readonly closeAction: () => void;
-  private closed: boolean;
-
-  public constructor(closeAction: () => void) {
-    this.closeAction = closeAction;
-    this.closed = false;
-  }
-
-  public close(): void {
-    if (this.closed) return;
-    this.closed = true;
-    this.closeAction();
-  }
-}
 
 export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvider {
   private readonly clock: Clock;
@@ -146,19 +125,21 @@ export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvi
     databaseUrl: string,
     tlsConfiguration: PostgresTlsConfiguration,
     clock: Clock = new SystemClock(),
+    time: InboxDispatcherTimeSource = SYSTEM_INBOX_DISPATCHER_TIME,
   ): Promise<PostgresMessageStore> {
     const ssl: PostgresSslOptions = postgresSslOptions(databaseUrl, tlsConfiguration);
-    const database: Sql = postgres(databaseUrl, {
-      connect_timeout: 10,
-      max: 4,
-      ssl,
-    });
+    const database: Sql = postgres(databaseUrl, { ...POSTGRES_RUNTIME_POOL, ssl });
     const shared: PostgresSharedState = {
       closed: false,
+      closePromise: null,
+      dispatcher: new PostgresInboxDispatcher({
+        readVersion: async (tenantId: TenantId, agentId: AgentId): Promise<Sequence> =>
+          await getPostgresInboxVersion(database, tenantId, agentId, clock.now()),
+        reportError: (error: unknown): void =>
+          logSafeError("Murmur Postgres inbox listener error", error),
+        time,
+      }),
       listener: null,
-      nextSubscriberId: 1,
-      notificationQueue: Promise.resolve(),
-      subscribersByInbox: new Map<string, Map<number, PostgresInboxSubscriber>>(),
     };
     const store: PostgresMessageStore = new PostgresMessageStore(
       database,
@@ -171,6 +152,7 @@ export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvi
       await store.initialize();
       return store;
     } catch (error: unknown) {
+      shared.dispatcher.close();
       await database.end({ timeout: 1 });
       throw error;
     }
@@ -229,80 +211,25 @@ export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvi
   }
 
   private enqueueNotification(payload: string): void {
-    const task: () => Promise<void> = async (): Promise<void> => {
+    try {
       const parsedPayload: unknown = JSON.parse(payload);
       const notification: InboxNotification = InboxNotificationSchema.parse(parsedPayload);
       const tenantId: TenantId =
         notification.tenant_id === undefined
           ? TenantId.founding()
           : TenantId.parse(notification.tenant_id);
-      await this.deliverUpdate(
+      this.shared.dispatcher.publish(
         tenantId,
         AgentId.parse(notification.agent_id),
         Sequence.parse(notification.sequence),
       );
-    };
-    this.enqueue(task);
+    } catch (error: unknown) {
+      logSafeError("Murmur Postgres inbox listener error", error);
+    }
   }
 
   private enqueueCatchUp(): void {
-    const task: () => Promise<void> = async (): Promise<void> => this.catchUpSubscribers();
-    this.enqueue(task);
-  }
-
-  private enqueue(task: () => Promise<void>): void {
-    const guardedTask: () => Promise<void> = async (): Promise<void> => {
-      try {
-        await task();
-      } catch (error: unknown) {
-        logSafeError("Murmur Postgres inbox listener error", error);
-      }
-    };
-    this.shared.notificationQueue = this.shared.notificationQueue.then(guardedTask, guardedTask);
-  }
-
-  private async catchUpSubscribers(): Promise<void> {
-    const subscribers: readonly PostgresInboxSubscriber[] = Array.from(
-      this.shared.subscribersByInbox.values(),
-    ).flatMap((inboxSubscribers: Map<number, PostgresInboxSubscriber>): PostgresInboxSubscriber[] =>
-      Array.from(inboxSubscribers.values()),
-    );
-    let index: number = 0;
-    while (index < subscribers.length) {
-      const subscriber: PostgresInboxSubscriber | undefined = subscribers[index];
-      if (subscriber === undefined) throw new Error("Inbox subscriber disappeared during catch-up");
-      const scopedStore: MessageStore = this.scope(subscriber.tenantId);
-      const currentSequence: Sequence = await scopedStore.getInboxVersion(subscriber.agentId);
-      await this.deliverToSubscriber(subscriber, currentSequence);
-      index += 1;
-    }
-  }
-
-  private async deliverUpdate(
-    tenantId: TenantId,
-    agentId: AgentId,
-    sequence: Sequence,
-  ): Promise<void> {
-    const inboxSubscribers: Map<number, PostgresInboxSubscriber> | undefined =
-      this.shared.subscribersByInbox.get(subscriberInboxKey(tenantId, agentId));
-    const subscribers: readonly PostgresInboxSubscriber[] =
-      inboxSubscribers === undefined ? [] : Array.from(inboxSubscribers.values());
-    let index: number = 0;
-    while (index < subscribers.length) {
-      const subscriber: PostgresInboxSubscriber | undefined = subscribers[index];
-      if (subscriber === undefined) throw new Error("Inbox subscriber disappeared during delivery");
-      await this.deliverToSubscriber(subscriber, sequence);
-      index += 1;
-    }
-  }
-
-  private async deliverToSubscriber(
-    subscriber: PostgresInboxSubscriber,
-    sequence: Sequence,
-  ): Promise<void> {
-    if (!sequence.isAfter(subscriber.lastSequence)) return;
-    await subscriber.handler(sequence);
-    subscriber.lastSequence = sequence;
+    this.shared.dispatcher.requestCatchUp();
   }
 
   public async registerAgent(command: RegisterAgentCommand): Promise<RegisterAgentResult> {
@@ -438,28 +365,15 @@ export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvi
     this.ensureOpen();
     const agent: Agent = await this.requireAgent(agentId);
     if (agent.state === "closed") throw new AgentClosedError(agentId.value);
-    const subscriberId: number = this.shared.nextSubscriberId;
-    this.shared.nextSubscriberId += 1;
-    const subscriber: PostgresInboxSubscriber = {
+    const subscription: DispatcherSubscription = this.shared.dispatcher.subscribe(
+      this.tenantId,
       agentId,
+      afterSequence,
       handler,
-      id: subscriberId,
-      lastSequence: afterSequence,
-      tenantId: this.tenantId,
-    };
-    const inboxKey: string = subscriberInboxKey(this.tenantId, agentId);
-    const inboxSubscribers: Map<number, PostgresInboxSubscriber> =
-      this.shared.subscribersByInbox.get(inboxKey) ?? new Map<number, PostgresInboxSubscriber>();
-    inboxSubscribers.set(subscriberId, subscriber);
-    this.shared.subscribersByInbox.set(inboxKey, inboxSubscribers);
-    const closeAction: () => void = (): void => {
-      inboxSubscribers.delete(subscriberId);
-      if (inboxSubscribers.size === 0) this.shared.subscribersByInbox.delete(inboxKey);
-    };
-    const subscription: InboxSubscription = new CallbackInboxSubscription(closeAction);
+    );
     try {
       const currentSequence: Sequence = await this.getInboxVersion(agentId);
-      await this.deliverToSubscriber(subscriber, currentSequence);
+      await subscription.initialize(currentSequence);
       return subscription;
     } catch (error: unknown) {
       await subscription.close();
@@ -470,6 +384,7 @@ export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvi
   public async pruneExpired(now: Instant): Promise<number> {
     this.ensureOpen();
     try {
+      if (!(await postgresHasPruneCandidates(this.database, this.tenantId, now))) return 0;
       const messageChanges: number = await pruneExpiredPostgresMessages(
         this.database,
         this.tenantId,
@@ -487,13 +402,31 @@ export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvi
   }
 
   public async close(): Promise<void> {
-    if (!this.ownsDatabase || this.shared.closed) return;
+    if (!this.ownsDatabase) return;
+    if (this.shared.closePromise !== null) return await this.shared.closePromise;
     this.shared.closed = true;
-    this.shared.subscribersByInbox.clear();
+    this.shared.dispatcher.close();
     const listener: ListenMeta | null = this.shared.listener;
     this.shared.listener = null;
-    if (listener !== null) await listener.unlisten();
-    await this.shared.notificationQueue;
-    await this.database.end({ timeout: 5 });
+    this.shared.closePromise = this.finishClose(listener);
+    await this.shared.closePromise;
+  }
+
+  private async finishClose(listener: ListenMeta | null): Promise<void> {
+    let failure: { readonly error: unknown } | null = null;
+    const actions: readonly (() => Promise<void>)[] = [
+      async (): Promise<void> => {
+        if (listener !== null) await listener.unlisten();
+      },
+      async (): Promise<void> => await this.database.end({ timeout: 5 }),
+    ];
+    for (const action of actions) {
+      try {
+        await this.shared.dispatcher.settleCleanup(action);
+      } catch (error: unknown) {
+        if (failure === null) failure = { error };
+      }
+    }
+    if (failure !== null) throw failure.error;
   }
 }
