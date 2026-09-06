@@ -2,6 +2,26 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.15.0.0] - 2026-09-06
+
+### Added
+
+- Configure Claude Code, Codex, OpenCode, Cursor and Pi from the public setup flow, with explicit
+  client selection, idempotent updates and conflict-safe recovery. Pi keeps its catalog-listed
+  third-party MCP adapter as a separate, manual installation step; automatic hooks remain limited
+  to Claude Code and Codex.
+- Present Claude Code, Codex, OpenCode, Cursor, Pi, Conductor and Orca with checksum-pinned official
+  marks on the website, and publish the branded site favicon through shared page metadata.
+- Document the generic MCP compatibility matrix and explain how Conductor and Orca use the
+  effective agent home or environment when they inherit an agent's MCP configuration.
+
+### Changed
+
+- Accept 1–32-character ASCII client slugs across plaintext and encrypted protocols. SQLite schema
+  13 and staged PostgreSQL constraints replace the earlier closed client-name set while preserving
+  tenant qualification, indexes and existing rows. Operators drain older binaries before storing
+  new slugs and do not roll back to binaries that cannot read them.
+
 ## [0.14.1.0] - 2026-09-06
 
 ### Fixed

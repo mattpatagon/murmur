@@ -58,7 +58,9 @@ function resolveProxyExecutable(configured: string | null): string {
     if (!existsSync(configured)) throw new Error(`E2E proxy executable not found: ${configured}`);
     return configured;
   }
-  const executable: string | null = Bun.which("murmur-e2ee-proxy");
+  const executable: string | null = Bun.which("murmur-e2ee-proxy", {
+    PATH: process.env["PATH"] ?? "",
+  });
   if (executable === null) {
     throw new Error(
       "murmur-e2ee-proxy is not on PATH. Install Murmur globally, then run setup again.",
@@ -72,7 +74,9 @@ function resolveHookExecutable(configured: string | null): string {
     if (!existsSync(configured)) throw new Error(`Hook executable not found: ${configured}`);
     return configured;
   }
-  const executable: string | null = Bun.which("murmur-hook");
+  const executable: string | null = Bun.which("murmur-hook", {
+    PATH: process.env["PATH"] ?? "",
+  });
   if (executable === null) {
     throw new Error(
       "murmur-hook is not on PATH. Install Murmur globally, then run murmur setup again.",

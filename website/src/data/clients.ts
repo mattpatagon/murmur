@@ -83,7 +83,7 @@ export const CLIENTS: readonly AgentClient[] = [
           label: "ADD TO ~/.config/opencode/opencode.json",
           copyLabel: "configuration",
           value:
-            '{\n  "mcp": {\n    "murmur": {\n      "type": "remote",\n      "url": "https://api.usemurmur.dev/setup/mcp",\n      "enabled": true\n    }\n  }\n}',
+            '{\n  "mcp": {\n    "murmur": {\n      "type": "remote",\n      "url": "https://api.usemurmur.dev/setup/mcp",\n      "enabled": true,\n      "oauth": false\n    }\n  }\n}',
         },
       ],
       note: "OpenCode has native remote MCP configuration. Restart it after adding the public setup connection; lifecycle checks remain manual.",

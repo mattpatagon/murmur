@@ -234,7 +234,7 @@ SOFTWARE.
 ========================================================================
 Compatible client brand assets
 
-The website self-hosts unmodified brand assets from the product owners named
+The website self-hosts vendor-provided brand assets from the product owners named
 below. They are used only to identify compatible agent clients. Product names,
 logos, and trademarks remain the property of their respective owners. Their
 inclusion does not imply endorsement of Murmur.

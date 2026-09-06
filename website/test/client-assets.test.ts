@@ -66,6 +66,27 @@ test("Pi is presented as a third-party adapter with official-catalog provenance"
   expect((): unknown => JSON.parse(configuration.value)).not.toThrow();
 });
 
+test("OpenCode bootstrap disables unsupported OAuth discovery", (): void => {
+  const openCode: AgentClient = getClient("opencode");
+  if (openCode.setup.kind === "inherited") {
+    throw new Error("OpenCode setup must provide a configuration");
+  }
+  const configuration: (typeof openCode.setup.actions)[number] | undefined =
+    openCode.setup.actions[0];
+  if (configuration === undefined) throw new Error("OpenCode configuration is missing");
+  const parsed: unknown = JSON.parse(configuration.value);
+  expect(parsed).toEqual({
+    mcp: {
+      murmur: {
+        type: "remote",
+        url: "https://api.usemurmur.dev/setup/mcp",
+        enabled: true,
+        oauth: false,
+      },
+    },
+  });
+});
+
 test("catalog support tiers match each client integration", (): void => {
   expect(getClient("claude-code").supportLabel).toContain("automatic hooks");
   expect(getClient("codex").supportLabel).toContain("automatic hooks");
