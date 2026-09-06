@@ -32,6 +32,19 @@ const GENERATED_DIRECTORIES: ReadonlySet<string> = new Set<string>([
   "coverage",
   "dist",
 ]);
+const PAGE_SOURCES: readonly string[] = [
+  "src/pages/404.md",
+  "src/pages/[page].md.ts",
+  "src/pages/get-started.md",
+  "src/pages/how-it-works.md",
+  "src/pages/index.md",
+  "src/pages/license.md",
+  "src/pages/robots.txt.ts",
+  "src/pages/security.md",
+  "src/pages/sitemap.xml.ts",
+  "src/pages/version.json.ts",
+];
+const PAGE_SOURCE_SET: ReadonlySet<string> = new Set<string>(PAGE_SOURCES);
 
 class SourceAuditError extends Error {}
 
@@ -104,6 +117,16 @@ export function auditSource(input: SourceInput): readonly SourceViolation[] {
   for (const suffix of ["ignore", "expect-error", "nocheck"]) {
     const position: number = input.text.indexOf(`@ts-${suffix}`);
     if (position >= 0) report(position, "TypeScript suppression comments are forbidden.");
+  }
+
+  const isMarkdown: boolean = input.path.endsWith(".md") || input.path.endsWith(".mdx");
+  const isHtml: boolean = input.path.endsWith(".html");
+  if (isMarkdown || isHtml) {
+    const script: RegExpMatchArray | null = input.text.match(/<script\b/iu);
+    if (script !== null && script.index !== undefined) {
+      report(script.index, "Authored markup script tags are forbidden; use checked modules.");
+    }
+    return violations;
   }
 
   let code: string = input.text;
@@ -253,7 +276,7 @@ export function collectSources(workspace: string): readonly SourceInput[] {
           const absolutePath: string = join(directoryPath, entry.name);
           if (entry.isDirectory()) {
             walk(absolutePath, path, depth + 1);
-          } else if (entry.isFile() && /\.(?:[cm]?ts|tsx|astro)$/u.test(entry.name)) {
+          } else if (entry.isFile() && /\.(?:[cm]?ts|tsx|astro|mdx?|html)$/u.test(entry.name)) {
             const size: number = lstatSync(absolutePath).size;
             totalBytes += size;
             if (
@@ -286,9 +309,16 @@ export function collectSources(workspace: string): readonly SourceInput[] {
 export function auditWebsiteSources(workspace: string): SourceAudit {
   const sources: readonly SourceInput[] = collectSources(workspace);
   if (sources.length === 0) throw new SourceAuditError("The website source census is empty.");
-  for (const required of ["astro.config.ts", "src/pages/index.astro"]) {
+  for (const required of ["astro.config.ts", ...PAGE_SOURCES]) {
     if (!sources.some((source: SourceInput): boolean => source.path === required)) {
       throw new SourceAuditError(`The website source census is missing '${required}'.`);
+    }
+  }
+  for (const source of sources) {
+    if (source.path.startsWith("src/pages/") && !PAGE_SOURCE_SET.has(source.path)) {
+      throw new SourceAuditError(
+        `The website page source '${source.path}' is not an allowlisted Markdown page or machine endpoint.`,
+      );
     }
   }
   return {

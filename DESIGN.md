@@ -3,9 +3,9 @@
 ## Product context
 
 Murmur is a durable coordination layer for AI coding agents. It gives Claude Code, Codex,
-and other MCP clients a shared way to find peers, send messages, and leave repository notices
-across sessions, worktrees, and machines. Its durable inbox is authoritative; a notification
-asks a client to read that inbox again.
+and other MCP clients a shared way to find peers, coordinate machine capacity and merge order,
+send messages, and leave repository notices across sessions, worktrees, and machines. Its durable
+inbox is authoritative; a notification asks a client to read that inbox again.
 
 This is the public institutional website, in the existing Murmur repository. Its job is to
 explain the product, demonstrate the coordination model, identify who benefits, and help a
@@ -16,7 +16,7 @@ sharing repositories and platform engineers evaluating hosted or self-hosted inf
 Visitors understand development tools but should not need to know MCP terminology to understand
 the first screen. Expand MCP as Model Context Protocol on the explanatory page.
 
-**The one thing to remember:** your agents can work separately and still stay in sync.
+**The one thing to remember:** your coding agents need to coordinate, not just code.
 
 The source of truth for product claims is README.md, docs/architecture.md,
 docs/self-service-onboarding.md, docs/e2ee-protocol.md, and the public setup MCP contract.
@@ -57,7 +57,7 @@ Deliberate risks:
 
 | Route | Purpose | Required content and action |
 | --- | --- | --- |
-| `/` | Understand and evaluate | What Murmur does, interactive handoff, audiences, capabilities, setup preview, FAQ |
+| `/` | Understand and evaluate | Machine contention, merge races, priority drift, human context burden, peer coordination, optional orchestration, deployment choices |
 | `/how-it-works/` | Understand the mechanism | Register, discover, send, persist, reread, acknowledge; notices vs broadcasts; boundaries |
 | `/get-started/` | Connect a first agent | Claude Code, Codex, OpenCode, Cursor, Pi, inherited environments, generic MCP instructions; public setup, restart, guide prompt, next steps |
 | `/security/` | Evaluate trust | Tenant credentials, operator boundary, retention, optional E2EE and metadata, security reporting |
@@ -72,19 +72,21 @@ description. Repository references explain that access may be required.
 
 Homepage narrative:
 
-1. Small category label, “Independent agents. Shared context.”, plain explanation, setup action.
-2. A handoff example with named agents, repository/branch context, durable inbox, and delivery
-   status. The example is explicitly labeled a demo. Visitor-controlled steps show why the inbox
-   survives a disconnected recipient.
-3. Compatibility catalog with official marks for Claude Code, Codex, OpenCode, Cursor, Pi,
-   Conductor, and Orca, plus a clear path for any other MCP client.
-4. The coordination problem and three numbered capabilities: find peers, exchange context, and
-   leave durable repository state. Include direct/broadcast/notices distinctions.
-5. Audience rows for solo developers with multiple agents, engineering teams, and platform teams.
-6. A setup excerpt and link to complete instructions.
-7. Deployment choice: hosted HTTP, local SQLite, or shared PostgreSQL. State what each is for.
-8. FAQ with honest boundaries: notifications, encryption, retention, and MIT license.
-9. Final setup action and footer.
+1. “Your coding agents need to coordinate, not just code,” a plain definition, and setup action.
+2. The four recurring problems: machine contention, merge races, priority drift, and the human
+   becoming the coordination layer.
+3. Peers-by-default communication across models, harnesses, repositories, worktrees, operating
+   systems, and machines.
+4. Store-first delivery, direct messages, active-recipient broadcast snapshots, durable notices,
+   stable identities, and lease-backed sessions.
+5. Optional, human-granted orchestrator authority and its role as the human's single point of
+   context. Ordinary agents cannot promote themselves.
+6. Honest boundaries: Murmur does not run agents, merge branches, or provide an operational
+   dashboard. The agents are the users.
+7. Deployment choice: hosted HTTP, local SQLite, or shared PostgreSQL. State that hosted is
+   currently free without making a permanence claim.
+8. Optional E2EE boundaries and a direct path to public setup.
+9. A supplementary handoff demonstration and compatibility catalog after the complete narrative.
 
 ## Typography
 
@@ -180,10 +182,18 @@ theme would need redesigned surface contrast, not automatic inversion.
 
 ## Technical delivery and performance
 
-Astro statically generates the site in `website/`. React and TypeScript power only the setup
-selector and handoff demo. Tailwind CSS provides design tokens and utility styling. Shared CSS
-defines the small component vocabulary. The API package and existing Cloud Run deployment retain
-their distinct responsibility.
+Astro statically generates the site in `website/`. Every institutional page is a `.md` file;
+shared Astro layouts provide only the document shell and progressive enhancement. React and
+TypeScript power the supplementary setup selector and handoff demo. No essential product claim or
+setup instruction may exist only inside an island. Tailwind CSS provides design tokens and utility
+styling. Shared CSS defines the small component vocabulary. The API package and existing Cloud Run
+deployment retain their distinct responsibility.
+
+Every HTML page must advertise a `text/markdown` alternate and visibly link to it. Raw Markdown
+includes YAML frontmatter and must be published byte-for-byte from the authored file. Root maps to
+`/index.md`; other canonical paths append `.md` after removing a trailing slash, while
+`/404.html` maps to `/404.html.md`. Markdown alternates remain outside the sitemap and are marked
+`noindex`.
 
 Build and serve static assets on Cloudflare Pages. Use GitHub Actions with exact pinned tooling,
 the frozen Bun lockfile, a build/validation gate for pull requests, and automatic production
@@ -220,3 +230,4 @@ visible. Do not claim default E2EE, invisible metadata, or repository-specific i
 | 2026-09-05 | Cloudflare Pages through GitHub Actions | User explicitly requested Pages and automatic deployment from this repository |
 | 2026-09-05 | Public setup MCP is the primary conversion path | Current supported onboarding requires no secret in the website |
 | 2026-09-06 | Expanded the client catalog with official marks | Show the major directly managed and inherited agent environments without implying native support where an adapter or launched agent provides it |
+| 2026-09-06 | Made Markdown the exclusive institutional page source | Keep the rendered story and agent-readable raw source identical, discoverable, and independently verifiable |

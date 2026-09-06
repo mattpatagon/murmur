@@ -1,33 +1,62 @@
 ---
 import "@fontsource/ibm-plex-mono/latin-400.css";
-import "../styles/global.css";
 import Brand from "../components/Brand.astro";
+import ClientCatalogItem from "../components/ClientCatalogItem.astro";
+import HandoffDemo from "../components/HandoffDemo";
+import Setup from "../components/Setup";
+import { type AgentClient, CLIENTS } from "../data/clients";
+import "../styles/global.css";
 
-interface Props {
+type PageVariant = "error" | "guide" | "home" | "legal" | "setup";
+
+interface PageFrontmatter {
   title: string;
   description: string;
+  canonicalPath: string;
+  rawPath: string;
+  eyebrow: string;
+  variant: PageVariant;
 }
-const { title, description }: Props = Astro.props;
-const path: string = Astro.url.pathname.startsWith("/404") ? "/404.html" : Astro.url.pathname;
-const canonical: URL = new URL(path, Astro.site);
+
+interface MarkdownHeading {
+  depth: number;
+  slug: string;
+  text: string;
+}
+
+interface Props {
+  frontmatter: PageFrontmatter;
+  headings: readonly MarkdownHeading[];
+}
+
+const { frontmatter, headings }: Props = Astro.props;
+const canonical: URL = new URL(frontmatter.canonicalPath, Astro.site);
+const rawSource: URL = new URL(frontmatter.rawPath, Astro.site);
 const socialImage: URL = new URL("/social.png", Astro.site);
+const sectionHeadings: readonly MarkdownHeading[] = headings.filter(
+  (heading: MarkdownHeading): boolean => heading.depth === 2,
+);
+const isError: boolean = frontmatter.variant === "error";
+const isHome: boolean = frontmatter.variant === "home";
+const isSetup: boolean = frontmatter.variant === "setup";
 ---
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{title}</title>
-    <meta name="description" content={description} />
+    <title>{frontmatter.title}</title>
+    <meta name="description" content={frontmatter.description} />
     <meta name="application-name" content="Murmur" />
     <meta name="theme-color" content="#f5f4ed" />
-    {path === "/404.html" || path === "/404" ? <meta name="robots" content="noindex" /> : null}
+    {isError ? <meta name="robots" content="noindex" /> : null}
     <link rel="canonical" href={canonical} />
+    <link rel="alternate" type="text/markdown" href={rawSource} title="Markdown source" />
     <link rel="icon" type="image/svg+xml" sizes="any" href="/favicon.svg" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Murmur" />
-    <meta property="og:title" content={title} />
-    <meta property="og:description" content={description} />
+    <meta property="og:title" content={frontmatter.title} />
+    <meta property="og:description" content={frontmatter.description} />
     <meta property="og:url" content={canonical} />
     <meta property="og:image" content={socialImage} />
     <meta property="og:image:alt" content="Murmur. Independent agents. Shared context." />
@@ -36,18 +65,24 @@ const socialImage: URL = new URL("/social.png", Astro.site);
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header wrap">
-      <a href="/" aria-label="Murmur home">
-<Brand />
-</a>
+      <a href="/" aria-label="Murmur home"><Brand /></a>
       <nav class="desktop-nav" aria-label="Main navigation">
-        <a href="/how-it-works/" aria-current={path === "/how-it-works/" ? "page" : undefined}>How it works</a>
-        <a href="/security/" aria-current={path === "/security/" ? "page" : undefined}>Security</a>
-        <a class="button button-small" href="/get-started/">Get started <span aria-hidden="true">↗</span>
-</a>
+        <a
+          href="/how-it-works/"
+          aria-current={frontmatter.canonicalPath === "/how-it-works/" ? "page" : undefined}
+          >How it works</a
+        >
+        <a
+          href="/security/"
+          aria-current={frontmatter.canonicalPath === "/security/" ? "page" : undefined}
+          >Security</a
+        >
+        <a class="button button-small" href="/get-started/"
+          >Get started <span aria-hidden="true">↗</span></a
+        >
       </nav>
       <details class="mobile-nav">
-        <summary>Menu <span aria-hidden="true">+</span>
-</summary>
+        <summary>Menu <span aria-hidden="true">+</span></summary>
         <nav aria-label="Mobile navigation">
           <a href="/how-it-works/">How it works</a>
           <a href="/security/">Security</a>
@@ -55,29 +90,75 @@ const socialImage: URL = new URL("/social.png", Astro.site);
         </nav>
       </details>
     </header>
-    <main id="main">
-<slot />
-</main>
+    <main id="main" class:list={["markdown-page", `markdown-page-${frontmatter.variant}`]}>
+      <div class="wrap">
+        <span class="eyebrow section-label markdown-eyebrow">{frontmatter.eyebrow}</span>
+        <div class="markdown-layout">
+          <article class="prose markdown-prose">
+            <slot />
+          </article>
+          {
+            !isError ? (
+              <aside class="prose-aside markdown-aside">
+                <span class="eyebrow section-label">ON THIS PAGE</span>
+                {sectionHeadings.map((heading: MarkdownHeading) => (
+                  // biome-ignore lint/correctness/useJsxKeyInIterable: Astro emits static anchors and does not support React's key attribute here.
+                  <a href={`#${heading.slug}`}>{heading.text}</a>
+                ))}
+                <hr class="markdown-aside-rule" />
+                <a class="markdown-source-link" href={frontmatter.rawPath}>
+                  View this page as Markdown <span aria-hidden="true">↗</span>
+                </a>
+              </aside>
+            ) : null
+          }
+        </div>
+        {
+          isHome ? (
+            <section class="markdown-widget" aria-label="Interactive handoff demonstration">
+              <HandoffDemo client:visible />
+              <div class="compatibility">
+                <div class="compatibility-heading">
+                  <p>Different tools. One coordination layer.</p>
+                  <span>Other standard MCP clients can connect manually.</span>
+                </div>
+                <ul class="client-names" aria-label="Supported agent clients">
+                  {CLIENTS.map((client: AgentClient) => (
+                    <ClientCatalogItem client={client} key={client.id} />
+                  ))}
+                </ul>
+              </div>
+            </section>
+          ) : null
+        }
+        {
+          isSetup ? (
+            <section class="markdown-widget setup-widget" aria-label="Interactive client setup">
+              <Setup client:visible />
+            </section>
+          ) : null
+        }
+      </div>
+    </main>
     <footer class="site-footer wrap">
       <div class="footer-top">
         <div>
-<a href="/" aria-label="Murmur home">
-<Brand />
-</a>
-<p>A little coordination.<br />A lot more working together.</p>
-</div>
+          <a href="/" aria-label="Murmur home"><Brand /></a>
+          <p>Coordination that survives<br />the next agent turn.</p>
+        </div>
         <nav aria-label="Footer navigation">
           <a href="/how-it-works/">How it works</a>
           <a href="/get-started/">Get started</a>
           <a href="/security/">Security & privacy</a>
           <a href="/license/">License</a>
+          <a href={frontmatter.rawPath}>Markdown source</a>
           <a href="https://github.com/mattpatagon/murmur">Source on GitHub ↗</a>
         </nav>
       </div>
       <div class="footer-bottom">
-<span>Durable coordination for AI agents.</span>
-<span>Open source · MIT License</span>
-</div>
+        <span>Durable coordination for coding agents.</span>
+        <span>Open source · MIT License</span>
+      </div>
     </footer>
   </body>
 </html>

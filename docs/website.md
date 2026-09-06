@@ -1,9 +1,11 @@
 # Murmur institutional website
 
-The public website explains what Murmur does, its durable inbox model, its audiences, setup,
-and security boundaries. Its design contract is [DESIGN.md](../DESIGN.md). It lives in `website/`
-and uses Astro for static HTML, React for the setup selector and handoff demonstration,
-TypeScript, and Tailwind CSS. It has no tenant session, credential form, or database access.
+The public website explains Murmur's durable inbox, peer coordination, optional orchestration,
+deployment choices, setup, and security boundaries. Its design contract is
+[DESIGN.md](../DESIGN.md). Every human-facing page is authored as Markdown in
+`website/src/pages/`. Astro turns those files into static HTML; React supplements the Markdown
+with a setup selector and handoff demonstration. TypeScript and Tailwind CSS provide the bounded
+build and presentation layer. The site has no tenant session, credential form, or database access.
 
 The website targets `https://usemurmur.dev` on Cloudflare Pages. The hosted messaging API remains
 on Cloud Run at `https://api.usemurmur.dev`; website publication does not replace API deployment.
@@ -38,10 +40,24 @@ Wrangler's JavaScript entry point with Node because authenticated Wrangler comma
 observed to exit successfully without returning the expected identity output.
 Run the repository's required [quality gates](../CONTRIBUTING.md) before requesting review.
 
-The website supports `/`, `/how-it-works/`, `/get-started/`, `/security/`, `/license/`, and `/404.html`.
-The default rendered HTML contains useful setup instructions and a readable handoff example
-before React hydrates. No external font host, analytics service, or authenticated API call is
-required to read the site.
+The website supports `/`, `/how-it-works/`, `/get-started/`, `/security/`, `/license/`, and
+`/404.html`. Each rendered page advertises and visibly links to its byte-faithful raw Markdown
+source:
+
+| Rendered route | Raw Markdown |
+| --- | --- |
+| `/` | `/index.md` |
+| `/how-it-works/` | `/how-it-works.md` |
+| `/get-started/` | `/get-started.md` |
+| `/security/` | `/security.md` |
+| `/license/` | `/license.md` |
+| `/404.html` | `/404.html.md` |
+
+Root uses the conventional `/index.md`; the error page literally appends `.md` to its public
+filename. Raw responses include their YAML frontmatter, use `text/markdown; charset=utf-8`, and
+are marked `noindex`. They are alternate representations, so only canonical HTML routes appear
+in the sitemap. Default rendered HTML contains the complete written guide before React hydrates.
+No external font host, analytics service, or authenticated API call is required to read the site.
 
 The client catalog shows only vendor-provided marks for Claude Code, Codex, OpenCode, Cursor, Pi,
 Conductor, and Orca. The vendored asset provenance file records each primary source and SHA-256.
@@ -137,9 +153,10 @@ CI passes that response path through `WEBSITE_IDENTITY_FILE` to
 
 After deployment the job verifies that `/version.json` serves the exact deployed Git revision,
 then checks the public pages, `robots.txt`, the `nosniff` response header, proxy transformation
-protection, absence of Cloudflare analytics injection,
-and a real HTTP 404 for an unknown route. A failed smoke check fails the workflow even when the
-upload succeeded. Inspect the deployment before deciding whether to roll it back.
+protection, absence of Cloudflare analytics injection, and a real HTTP 404 for an unknown route.
+It also fetches all six Markdown alternates, requires their Markdown content type, and compares
+each response byte-for-byte with its authored `.md` file. A failed smoke check fails the workflow
+even when the upload succeeded. Inspect the deployment before deciding whether to roll it back.
 The version marker is served with `Cache-Control: no-store`; the live check bounds its response
 to 4 KiB and requests the expected revision explicitly to avoid accepting stale deployment evidence.
 
@@ -153,11 +170,14 @@ transformation policy, and production smoke checks reject injected Cloudflare an
 ## Verification and maintenance
 
 The artifact verifier checks required pages, document language, title and description, canonical
-and Open Graph URLs, social image and favicon references, one main landmark and h1, duplicate IDs,
-internal links and fragments, linked HTML/CSS and client-logo assets, the component and renderer
-bundles referenced by Astro's React islands, robots configuration, and the Pages header artifact. It validates the
-bounded `/version.json` against the expected revision. Sitemap coverage counts only pages reachable
-from the advertised root sitemap or its child indexes; orphan sitemap files cannot satisfy it.
+and Open Graph URLs, the Markdown alternate link, social image and favicon references, one main
+landmark and h1, duplicate IDs, internal links and fragments, linked HTML/CSS and client-logo
+assets, the component and renderer bundles referenced by Astro's React islands, robots
+configuration, and the Pages header artifact. It requires all six bounded UTF-8 Markdown
+artifacts, validates their structure and response-header rules, and compares build output with the
+authored page bytes. It validates the bounded `/version.json` against the expected revision.
+Sitemap coverage counts only pages reachable from the advertised root sitemap or its child
+indexes; orphan sitemap files cannot satisfy it.
 The sitemap traversal rejects malformed XML, cycles, external origins, and excessive depth,
 files, bytes, or locations, without resolving external entities or making network requests.
 It rejects builds over 100 KiB of total gzip JavaScript or 250 KiB of font assets.

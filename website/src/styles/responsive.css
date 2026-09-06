@@ -43,6 +43,10 @@
     grid-template-columns: minmax(0, 1fr) 180px;
     gap: 40px;
   }
+  .markdown-layout {
+    grid-template-columns: minmax(0, 1fr) 180px;
+    gap: 40px;
+  }
 }
 
 @media (max-width: 760px) {
@@ -80,6 +84,17 @@
   .prose-layout {
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
+  }
+  .markdown-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .markdown-aside {
+    position: static;
+    max-height: none;
+  }
+  .markdown-widget .compatibility {
+    grid-template-columns: 1fr;
   }
   .prose-aside {
     margin-top: 32px;
@@ -157,6 +172,9 @@
   .page-intro {
     padding-top: 48px;
   }
+  .markdown-page {
+    padding-top: 48px;
+  }
   .page-intro p {
     font-size: 18px;
   }
@@ -165,6 +183,23 @@
   }
   .prose-layout {
     padding-bottom: 48px;
+  }
+  .markdown-layout {
+    padding-bottom: 48px;
+  }
+  .markdown-prose > h1:first-child + p {
+    font-size: 18px;
+  }
+  .markdown-prose table {
+    table-layout: fixed;
+    white-space: normal;
+  }
+  .markdown-prose th,
+  .markdown-prose td {
+    overflow-wrap: anywhere;
+  }
+  .markdown-widget {
+    padding-block: 48px;
   }
   .command-label {
     align-items: flex-start;

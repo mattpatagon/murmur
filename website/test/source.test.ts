@@ -11,6 +11,35 @@ import {
   type SourceViolation,
 } from "../scripts/check-source.ts";
 
+const MARKDOWN_PAGE: string = [
+  "---",
+  "layout: ../layouts/Page.astro",
+  'title: "Murmur"',
+  'description: "Coordination"',
+  "---",
+  "",
+  "# Murmur",
+].join("\n");
+
+function websiteFiles(
+  extra: Readonly<Record<string, string>> = {},
+): Readonly<Record<string, string>> {
+  return {
+    "astro.config.ts": "export {};",
+    "src/pages/404.md": MARKDOWN_PAGE,
+    "src/pages/[page].md.ts": "export function getStaticPaths(): readonly never[] { return []; }",
+    "src/pages/get-started.md": MARKDOWN_PAGE,
+    "src/pages/how-it-works.md": MARKDOWN_PAGE,
+    "src/pages/index.md": MARKDOWN_PAGE,
+    "src/pages/license.md": MARKDOWN_PAGE,
+    "src/pages/robots.txt.ts": 'export const route: string = "robots";',
+    "src/pages/security.md": MARKDOWN_PAGE,
+    "src/pages/sitemap.xml.ts": 'export const route: string = "sitemap";',
+    "src/pages/version.json.ts": 'export const route: string = "version";',
+    ...extra,
+  };
+}
+
 function messages(path: string, text: string): readonly string[] {
   return auditSource({ path, text }).map((violation: SourceViolation): string => violation.message);
 }
@@ -193,28 +222,46 @@ test("TypeScript suppression directives fail in TSX, Astro frontmatter, and mark
   }
 });
 
+test("Markdown participates in the census and refuses authored script tags", (): void => {
+  expect(messages("src/pages/index.md", MARKDOWN_PAGE)).toEqual([]);
+  // biome-ignore lint/security/noSecrets: Static markup exercises the script-tag rejection path.
+  expect(messages("src/pages/index.md", "# Unsafe\n\n<script>run()</script>")).toContain(
+    "Authored markup script tags are forbidden; use checked modules.",
+  );
+});
+
 test("census audits scripts, tests, config, and pages without executing their source", (): void => {
-  const workspace: string = createWorkspace({
-    "astro.config.ts": 'throw new Error("must never execute");',
-    "src/pages/index.astro": "<h1>Murmur</h1>",
-    "scripts/extra.ts": "export const ready: boolean = true;",
-    "test/example.tsx": 'export const label: string = "Hello";',
-    ".astro/generated.ts": "const ignored = 1;",
-    "dist/bundle.js": "const ignored = 1;",
-    "node_modules/package/index.ts": "const ignored = 1;",
-    "src/generated/authored.ts": "export const included: boolean = true;",
-  });
+  const workspace: string = createWorkspace(
+    websiteFiles({
+      "astro.config.ts": 'throw new Error("must never execute");',
+      "scripts/extra.ts": "export const ready: boolean = true;",
+      "test/example.tsx": 'export const label: string = "Hello";',
+      ".astro/generated.ts": "const ignored = 1;",
+      "dist/bundle.js": "const ignored = 1;",
+      "node_modules/package/index.ts": "const ignored = 1;",
+      "src/generated/authored.ts": "export const included: boolean = true;",
+    }),
+  );
   try {
     const sources: readonly SourceInput[] = collectSources(workspace);
     expect(sources.map((source: SourceInput): string => source.path)).toEqual([
       "astro.config.ts",
       "scripts/extra.ts",
       "src/generated/authored.ts",
-      "src/pages/index.astro",
+      "src/pages/404.md",
+      "src/pages/[page].md.ts",
+      "src/pages/get-started.md",
+      "src/pages/how-it-works.md",
+      "src/pages/index.md",
+      "src/pages/license.md",
+      "src/pages/robots.txt.ts",
+      "src/pages/security.md",
+      "src/pages/sitemap.xml.ts",
+      "src/pages/version.json.ts",
       "test/example.tsx",
     ]);
     const audit: SourceAudit = auditWebsiteSources(workspace);
-    expect(audit.checkedFiles).toBe(5);
+    expect(audit.checkedFiles).toBe(14);
     expect(audit.violations).toEqual([]);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
@@ -226,7 +273,20 @@ test("census rejects empty projects and missing application entry points", (): v
   try {
     expect((): SourceAudit => auditWebsiteSources(workspace)).toThrow("source census is empty");
     writeFileSync(join(workspace, "astro.config.ts"), "export {};");
-    expect((): SourceAudit => auditWebsiteSources(workspace)).toThrow("src/pages/index.astro");
+    expect((): SourceAudit => auditWebsiteSources(workspace)).toThrow("src/pages/404.md");
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("website page sources are Markdown or explicit machine endpoints", (): void => {
+  const workspace: string = createWorkspace(
+    websiteFiles({ "src/pages/legacy.astro": "<h1>Legacy page</h1>" }),
+  );
+  try {
+    expect((): SourceAudit => auditWebsiteSources(workspace)).toThrow(
+      "is not an allowlisted Markdown page or machine endpoint",
+    );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }

@@ -46,7 +46,7 @@ jobs:
         run: bun run website:check
 
       - name: Exercise the artifact validation contract
-        run: bun test test/website.test.ts test/website-identity.test.ts test/website-publication.test.ts website/test
+        run: bun test test/website.test.ts test/website-markdown.test.ts test/website-identity.test.ts test/website-publication.test.ts website/test
 
       - name: Build the static website
         run: bun run website:build
@@ -104,7 +104,7 @@ jobs:
           --branch=main
           --commit-hash="$GITHUB_SHA"
 
-      - name: Verify public pages, security headers, and the 404 response
+      - name: Verify public HTML, Markdown sources, security headers, and the 404 response
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
@@ -131,10 +131,53 @@ jobs:
               exit 1
             fi
           done
+          markdown_paths=(index.md how-it-works.md get-started.md security.md license.md 404.html.md)
+          markdown_sources=(index.md how-it-works.md get-started.md security.md license.md 404.md)
+          for markdown_index in "${!markdown_paths[@]}"; do
+            markdown_path="${markdown_paths[$markdown_index]}"
+            markdown_source="${markdown_sources[$markdown_index]}"
+            curl --fail --silent --show-error --max-time 20 --retry 3 --retry-max-time 60 \
+              --max-filesize 1048576 --dump-header "$website_headers" \
+              --output "$website_body" "$website_origin/$markdown_path"
+            if ! grep --ignore-case --extended-regexp --quiet \
+              '^content-type:[[:space:]]*text/markdown;[[:space:]]*charset=utf-8[[:space:]]*$' \
+              "$website_headers"; then
+              echo 'A published Markdown source has the wrong content type.' >&2
+              exit 1
+            fi
+            if ! grep --ignore-case --extended-regexp --quiet \
+              '^x-robots-tag:[[:space:]]*noindex([[:space:],]|$)' "$website_headers"; then
+              echo 'A published Markdown source is missing its noindex header.' >&2
+              exit 1
+            fi
+            if ! grep --ignore-case --quiet '^x-content-type-options: nosniff' "$website_headers"; then
+              echo 'A published Markdown source is missing its nosniff header.' >&2
+              exit 1
+            fi
+            if ! grep --ignore-case --extended-regexp --quiet \
+              '^cache-control:.*[[:space:],]no-transform([[:space:],]|$)' "$website_headers"; then
+              echo 'A published Markdown source permits proxy transformations.' >&2
+              exit 1
+            fi
+            if ! cmp --silent "$website_body" "website/src/pages/$markdown_source"; then
+              echo 'A published Markdown source differs from the authored page.' >&2
+              exit 1
+            fi
+          done
           website_missing_status="$(curl --silent --show-error --max-time 20 \
-            --output /dev/null --write-out '%{http_code}' \
+            --dump-header "$website_headers" --output "$website_body" --write-out '%{http_code}' \
             "$website_origin/murmur-missing-page-$GITHUB_SHA")"
           if [[ "$website_missing_status" != '404' ]]; then
             echo 'The published website did not return HTTP 404 for an unknown route.' >&2
+            exit 1
+          fi
+          if ! grep --fixed-strings --quiet 'This page isn’t here.' "$website_body"; then
+            echo 'The published 404 response did not use the authored Markdown page.' >&2
+            exit 1
+          fi
+          if ! grep --fixed-strings --quiet \
+            "rel=\"alternate\" type=\"text/markdown\" href=\"$website_origin/404.html.md\"" \
+            "$website_body"; then
+            echo 'The published 404 response did not advertise its Markdown source.' >&2
             exit 1
           fi
