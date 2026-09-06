@@ -12,6 +12,7 @@ import {
   websiteOrigin,
   websiteRevision,
 } from "../scripts/verify-website.js";
+import { MARKDOWN_ALTERNATES } from "../scripts/lib/website-markdown.js";
 
 const ORIGIN: string = "https://usemurmur.dev";
 const PAGE_ROUTES: ReadonlyMap<string, string> = new Map<string, string>([
@@ -22,16 +23,36 @@ const PAGE_ROUTES: ReadonlyMap<string, string> = new Map<string, string>([
   ["license/index.html", "/license/"],
   ["404.html", "/404.html"],
 ]);
+const MARKDOWN_ROUTES: ReadonlyMap<string, string> = new Map<string, string>([
+  ["/", "/index.md"],
+  ["/how-it-works/", "/how-it-works.md"],
+  ["/get-started/", "/get-started.md"],
+  ["/security/", "/security.md"],
+  ["/license/", "/license.md"],
+  ["/404.html", "/404.html.md"],
+]);
+const MARKDOWN_PAGE: string = [
+  "---",
+  "layout: ../layouts/Page.astro",
+  'title: "Murmur"',
+  "---",
+  "",
+  "# Durable coordination",
+  "",
+].join("\n");
 
 function bytes(value: string): Uint8Array {
   return new TextEncoder().encode(value);
 }
 
 function pageHtml(route: string, body: string = ""): string {
+  const markdownRoute: string | undefined = MARKDOWN_ROUTES.get(route);
+  if (markdownRoute === undefined) throw new Error("Fixture Markdown route is missing");
   return `<!doctype html><html lang="en"><head>
     <title>Murmur — shared context for agents</title>
     <meta name="description" content="Durable coordination across coding agents.">
     <link rel="canonical" href="${ORIGIN}${route}">
+    <link rel="alternate" type="text/markdown" href="${ORIGIN}${markdownRoute}">
     <meta property="og:url" content="${ORIGIN}${route}">
     <meta property="og:image" content="${ORIGIN}/social.png">
     ${route === "/404.html" ? '<meta name="robots" content="noindex">' : ""}
@@ -47,7 +68,9 @@ function completeWebsite(): Map<string, Uint8Array> {
     ["version.json", bytes(JSON.stringify({ revision: "development" }))],
     [
       "_headers",
-      bytes("/*\n  X-Content-Type-Options: nosniff\n  Cache-Control: public, no-transform\n"),
+      bytes(
+        "/*\n  X-Content-Type-Options: nosniff\n  Cache-Control: public, no-transform\n\n/*.md\n  Content-Type: text/markdown; charset=utf-8\n  X-Robots-Tag: noindex\n",
+      ),
     ],
     ["social.png", new Uint8Array([137, 80, 78, 71])],
     ["assets/site.css", bytes('@font-face{font-family:Demo;src:url("./font.woff2")}')],
@@ -55,6 +78,9 @@ function completeWebsite(): Map<string, Uint8Array> {
     ["assets/app.js", bytes('console.log("sample");')],
   ]);
   for (const [path, route] of PAGE_ROUTES) files.set(path, bytes(pageHtml(route)));
+  for (const alternate of MARKDOWN_ALTERNATES) {
+    files.set(alternate.rawPath, bytes(MARKDOWN_PAGE));
+  }
   const urls: string = [...PAGE_ROUTES.values()]
     .filter((route: string): boolean => route !== "/404.html")
     .map((route: string): string => `<url><loc>${ORIGIN}${route}</loc></url>`)
@@ -87,6 +113,20 @@ describe("website artifact verification", (): void => {
     files.delete("license/index.html");
     expect((await auditWebsite(files)).errors).toContain(
       "Missing required page: license/index.html",
+    );
+  });
+
+  test("requires every raw Markdown alternate and its exact HTML discovery link", async (): Promise<void> => {
+    const files: Map<string, Uint8Array> = completeWebsite();
+    files.delete("security.md");
+    files.set(
+      "index.html",
+      bytes(pageHtml("/").replace(`href="${ORIGIN}/index.md"`, `href="${ORIGIN}/wrong.md"`)),
+    );
+    const audit: WebsiteAudit = await auditWebsite(files);
+    expect(audit.errors).toContain("Missing required Markdown source: security.md");
+    expect(audit.errors).toContain(
+      "index.html: Markdown alternate does not match its public source route",
     );
   });
 
@@ -215,7 +255,7 @@ describe("website artifact verification", (): void => {
     files.set(
       "_headers",
       bytes(
-        "# Website privacy\r\n/*\r\n  X-Content-Type-Options: nosniff\r\n  Cache-Control: Public, No-Transform\r\n",
+        "# Website privacy\r\n/*\r\n  X-Content-Type-Options: nosniff\r\n  Cache-Control: Public, No-Transform\r\n\r\n/*.md\r\n  Content-Type: text/markdown; charset=utf-8\r\n  X-Robots-Tag: noindex\r\n",
       ),
     );
     expect((await auditWebsite(files)).errors).toHaveLength(0);

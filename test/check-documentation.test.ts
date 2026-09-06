@@ -40,7 +40,13 @@ function completeRepository(): Map<string, string> {
 
 describe("documentation policy", (): void => {
   test("accepts a complete repository contract with valid local links", (): void => {
-    expect(auditDocumentation(completeRepository())).toEqual([]);
+    const files: Map<string, string> = completeRepository();
+    files.set(
+      "website/src/pages/index.md",
+      // biome-ignore lint/security/noSecrets: Static public-link fixtures contain no credential material.
+      "# Website\n\n[Setup](/get-started/)\n\n[Notices](/third-party-notices.txt)\n",
+    );
+    expect(auditDocumentation(files)).toEqual([]);
   });
 
   test("rejects missing required contracts and broken repository links", (): void => {

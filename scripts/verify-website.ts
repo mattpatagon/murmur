@@ -6,6 +6,11 @@ import { gzipSync } from "node:zlib";
 import { z } from "zod";
 
 import { compareText } from "./lib/deterministic-order.js";
+import {
+  auditWebsiteMarkdown,
+  markdownPathForHtml,
+  readWebsiteMarkdownSources,
+} from "./lib/website-markdown.js";
 import { auditWebsiteSitemaps, type SitemapAudit } from "./lib/website-sitemaps.js";
 
 const DEFAULT_ORIGIN: string = "https://usemurmur.dev";
@@ -36,6 +41,7 @@ type Reference = { readonly fragment: boolean; readonly value: string };
 type Metadata = {
   description: string | null;
   canonical: string | null;
+  markdownAlternate: string | null;
   socialUrl: string | null;
   socialImage: string | null;
   robots: string | null;
@@ -124,6 +130,7 @@ async function inspectPage(
     canonical: null,
     description: null,
     language: null,
+    markdownAlternate: null,
     robots: null,
     socialImage: null,
     socialUrl: null,
@@ -173,8 +180,11 @@ async function inspectPage(
     })
     .on("link", {
       element(element: HtmlElement): void {
-        if (element.getAttribute("rel") === "canonical")
-          metadata.canonical = element.getAttribute("href");
+        const rel: string | null = element.getAttribute("rel");
+        if (rel === "canonical") metadata.canonical = element.getAttribute("href");
+        if (rel === "alternate" && element.getAttribute("type") === "text/markdown") {
+          metadata.markdownAlternate = element.getAttribute("href");
+        }
       },
     });
   for (const attribute of ["href", "src", "poster", "component-url", "renderer-url"]) {
@@ -206,6 +216,13 @@ async function inspectPage(
   if (mainElements !== 1) errors.push(`${path}: expected exactly one main landmark`);
   if (metadata.canonical !== url.href)
     errors.push(`${path}: canonical URL does not match its public route`);
+  const markdownPath: string | null = markdownPathForHtml(path);
+  if (
+    markdownPath === null ||
+    metadata.markdownAlternate !== new URL(`/${markdownPath}`, origin).href
+  ) {
+    errors.push(`${path}: Markdown alternate does not match its public source route`);
+  }
   if (metadata.socialUrl !== url.href)
     errors.push(`${path}: Open Graph URL does not match its public route`);
   if (metadata.socialImage === null || metadata.socialImage === "") {
@@ -283,8 +300,12 @@ export async function auditWebsite(
   files: ReadonlyMap<string, Uint8Array>,
   origin: URL = websiteOrigin(undefined),
   expectedRevision: string = "development",
+  markdownSources: ReadonlyMap<string, Uint8Array> | null = null,
 ): Promise<WebsiteAudit> {
-  const errors: string[] = [...auditVersionMarker(files, websiteRevision(expectedRevision))];
+  const errors: string[] = [
+    ...auditVersionMarker(files, websiteRevision(expectedRevision)),
+    ...auditWebsiteMarkdown(files, markdownSources),
+  ];
   const pages: Map<string, Page> = new Map<string, Page>();
   let javascriptGzipBytes: number = 0;
   let fontBytes: number = 0;
@@ -386,6 +407,7 @@ async function main(): Promise<void> {
       readWebsiteFiles(join(process.cwd(), "website", "dist")),
       websiteOrigin(process.env["WEBSITE_SITE_URL"]),
       websiteRevision(process.env["WEBSITE_REVISION"]),
+      readWebsiteMarkdownSources(join(process.cwd(), "website", "src", "pages")),
     );
     if (audit.errors.length > 0) {
       for (const error of audit.errors) process.stderr.write(`Website verification: ${error}\n`);

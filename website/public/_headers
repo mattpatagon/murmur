@@ -13,6 +13,10 @@
 /404.html
   X-Robots-Tag: noindex
 
+/*.md
+  Content-Type: text/markdown; charset=utf-8
+  X-Robots-Tag: noindex
+
 /version.json
   ! Cache-Control
   Cache-Control: no-store, no-transform

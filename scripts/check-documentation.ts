@@ -70,7 +70,9 @@ function auditMarkdownLinks(
   while (match !== null) {
     const rawTarget: string | undefined = match[1];
     if (rawTarget === undefined) throw new Error("The Markdown-link parser lost its target");
-    const target: string | null = linkTarget(rawTarget);
+    const websitePublicRoute: boolean =
+      path.startsWith("website/src/pages/") && rawTarget.startsWith("/");
+    const target: string | null = websitePublicRoute ? null : linkTarget(rawTarget);
     if (target !== null) {
       const resolved: string = posix.normalize(posix.join(posix.dirname(path), target));
       if (resolved.startsWith("../") || resolved === "..") {

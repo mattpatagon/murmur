@@ -158,4 +158,100 @@
   .skip-link:focus {
     top: 10px;
   }
+  .markdown-page {
+    padding-block: 72px 0;
+  }
+  .markdown-eyebrow {
+    margin-bottom: 28px;
+  }
+  .markdown-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 780px) 240px;
+    gap: 80px;
+    align-items: start;
+    padding-bottom: 96px;
+  }
+  .markdown-prose > h1:first-child {
+    margin-bottom: 28px;
+    font-size: clamp(44px, 5.4vw, 72px);
+  }
+  .markdown-prose > h1:first-child + p {
+    max-width: 720px;
+    margin-bottom: 28px;
+    color: var(--color-ink);
+    font-size: 21px;
+    line-height: 1.55;
+  }
+  .markdown-prose h2 {
+    padding-top: 8px;
+    border-top: 1px solid var(--color-line);
+  }
+  .markdown-prose blockquote {
+    margin: 24px 0;
+    padding: 16px 24px;
+    border-left: 3px solid var(--color-ink);
+    background: #e9ecdf;
+  }
+  .markdown-prose blockquote p:last-child {
+    margin-bottom: 0;
+  }
+  .markdown-prose table {
+    width: 100%;
+    margin-block: 24px;
+    border-collapse: collapse;
+    font-size: 16px;
+  }
+  .markdown-prose th,
+  .markdown-prose td {
+    padding: 12px 16px;
+    border: 1px solid var(--color-line);
+    text-align: left;
+    vertical-align: top;
+  }
+  .markdown-prose th {
+    background: #e9ecdf;
+    color: var(--color-ink);
+  }
+  .markdown-aside {
+    position: sticky;
+    top: 24px;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+  }
+  .markdown-aside-rule {
+    margin-block: 22px;
+    border: 0;
+    border-top: 1px solid var(--color-line);
+  }
+  .markdown-source-link {
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  .markdown-widget {
+    display: grid;
+    grid-template-columns: minmax(0, 780px);
+    justify-content: start;
+    gap: 28px;
+    padding-block: 72px 96px;
+    border-top: 1px solid var(--color-line);
+  }
+  .markdown-widget .handoff,
+  .markdown-widget .setup-box {
+    width: 100%;
+    max-width: 780px;
+  }
+  .markdown-widget .compatibility {
+    grid-template-columns: minmax(180px, 0.55fr) minmax(0, 2fr);
+  }
+  .markdown-page-error .markdown-layout {
+    grid-template-columns: minmax(0, 780px);
+    min-height: 56vh;
+  }
+  .markdown-page-legal .markdown-prose pre {
+    background: transparent;
+    color: var(--color-ink);
+    padding-inline: 0;
+    font-size: 14px;
+  }
 }

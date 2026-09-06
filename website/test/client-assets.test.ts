@@ -98,7 +98,7 @@ test("catalog support tiers match each client integration", (): void => {
 
 test("client presentation surfaces contain no generic glyph or letter avatars", (): void => {
   const surfaces: readonly string[] = [
-    readFileSync(join(PUBLIC_DIRECTORY, "../src/pages/index.astro"), "utf8"),
+    readFileSync(join(PUBLIC_DIRECTORY, "../src/layouts/Page.astro"), "utf8"),
     readFileSync(join(PUBLIC_DIRECTORY, "../src/components/ClientCatalogItem.astro"), "utf8"),
     readFileSync(join(PUBLIC_DIRECTORY, "../src/components/HandoffDemo.tsx"), "utf8"),
   ];
