@@ -268,7 +268,8 @@ test("workflow preserves revisions without bypassing writer drainage for contrac
   expect(drainStep).toContain("gcloud run services update-traffic");
   expect(workflow).not.toContain("gcloud run revisions delete");
   expect(drainStep).not.toContain("gcloud run revisions delete");
-  expect(drainStep).toContain('--to-revisions "$latest_revision=100"');
+  expect(drainStep).toContain("--to-latest");
+  expect(drainStep).not.toContain('--to-revisions "$latest_revision=100"');
   expect(drainStep).toContain("--clear-tags");
   expect(drainStep).toContain("if [ \"$TENANT_CONTRACT_FINALIZE_REQUIRED\" = 'true' ]");
   expect(drainStep).toContain("--limit 2");

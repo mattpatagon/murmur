@@ -1,6 +1,6 @@
 {
   "name": "murmur-agent-chat-mcp",
-  "version": "0.15.0.0",
+  "version": "0.15.0.1",
   "private": true,
   "packageManager": "bun@1.3.14",
   "description": "Durable, push-signaled agent-to-agent messaging over MCP",

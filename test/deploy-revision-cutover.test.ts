@@ -54,8 +54,7 @@ const trafficCall: CutoverCommand = {
     "test-project",
     "--region",
     "us-central1",
-    "--to-revisions",
-    `${READY_REVISION}=100`,
+    "--to-latest",
     "--clear-tags",
     "--quiet",
   ],
@@ -93,14 +92,14 @@ const healthCall: CutoverCommand = {
 };
 
 describe.skipIf(!enabled)("Linux non-destructive revision cutover", (): void => {
-  test("false contraction cuts over the exact ready revision and clears tags without listing or deleting revisions", async (): Promise<void> => {
+  test("false contraction unpins traffic to current and future latest revisions without deleting revisions", async (): Promise<void> => {
     const result: CutoverResult = await runCutoverFixture({
       revisionNames: [READY_REVISION, "murmur-old-retained"],
     });
     expect(result.code).toBe(0);
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe("");
-    expect(actualCalls(result)).toEqual([readyCall, trafficCall, healthCall]);
+    expect(actualCalls(result)).toEqual([trafficCall, readyCall, healthCall]);
     const bounded: CutoverCommand[] = result.calls.filter(
       (call: CutoverCommand): boolean => call.command === "timeout",
     );
@@ -120,7 +119,7 @@ describe.skipIf(!enabled)("Linux non-destructive revision cutover", (): void => 
     expect(result.code).toBe(0);
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe("");
-    expect(actualCalls(result)).toEqual([readyCall, trafficCall, retainedCall, healthCall]);
+    expect(actualCalls(result)).toEqual([trafficCall, readyCall, retainedCall, healthCall]);
   });
 
   test("latest-first and older-second inventory refuses contraction despite limit-before-filter behavior", async (): Promise<void> => {
@@ -132,7 +131,7 @@ describe.skipIf(!enabled)("Linux non-destructive revision cutover", (): void => 
       result,
       "Tenant contraction requires independently verified writer drainage; retained revisions were not deleted",
     );
-    expect(actualCalls(result)).toEqual([readyCall, trafficCall, retainedCall]);
+    expect(actualCalls(result)).toEqual([trafficCall, readyCall, retainedCall]);
   });
 
   const unsupportedInventories: readonly {
@@ -162,26 +161,17 @@ describe.skipIf(!enabled)("Linux non-destructive revision cutover", (): void => 
         result,
         "Tenant contraction requires independently verified writer drainage; retained revisions were not deleted",
       );
-      expect(actualCalls(result)).toEqual([readyCall, trafficCall, retainedCall]);
+      expect(actualCalls(result)).toEqual([trafficCall, readyCall, retainedCall]);
     });
   }
 
-  test("a 63-character ready revision is retained exactly in the traffic target", async (): Promise<void> => {
+  test("a 63-character ready revision is accepted after the latest cutover", async (): Promise<void> => {
     const readyRevision: string = `murmur-${"a".repeat(56)}`;
     const result: CutoverResult = await runCutoverFixture({ readyRevision });
     expect(result.code).toBe(0);
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe("");
-    expect(actualCalls(result)).toEqual([
-      readyCall,
-      {
-        ...trafficCall,
-        arguments: trafficCall.arguments.map((argument: string): string =>
-          argument === `${READY_REVISION}=100` ? `${readyRevision}=100` : argument,
-        ),
-      },
-      healthCall,
-    ]);
+    expect(actualCalls(result)).toEqual([trafficCall, readyCall, healthCall]);
   });
 
   const malformedReady: readonly string[] = [
@@ -194,10 +184,10 @@ describe.skipIf(!enabled)("Linux non-destructive revision cutover", (): void => 
     CUTOVER_SENTINEL,
   ];
   for (const readyRevision of malformedReady) {
-    test(`malformed ready revision ${JSON.stringify(readyRevision)} stops before traffic updates`, async (): Promise<void> => {
+    test(`malformed ready revision ${JSON.stringify(readyRevision)} stops after the bounded latest cutover`, async (): Promise<void> => {
       const result: CutoverResult = await runCutoverFixture({ readyRevision });
       expectFailure(result, "Cloud Run did not report a valid ready revision for this service");
-      expect(actualCalls(result)).toEqual([readyCall]);
+      expect(actualCalls(result)).toEqual([trafficCall, readyCall]);
     });
   }
 
@@ -226,27 +216,27 @@ describe.skipIf(!enabled)("Linux non-destructive revision cutover", (): void => 
     readonly failing: CutoverCommand;
   }[] = [
     {
-      stage: "ready",
-      message: "Cloud Run ready revision lookup failed",
-      preceding: [],
-      failing: readyCall,
-    },
-    {
       stage: "traffic",
       message: "Cloud Run traffic cutover failed; revision definitions were preserved",
-      preceding: [readyCall],
+      preceding: [],
       failing: trafficCall,
+    },
+    {
+      stage: "ready",
+      message: "Cloud Run ready revision lookup failed",
+      preceding: [trafficCall],
+      failing: readyCall,
     },
     {
       stage: "retained",
       message: "Cloud Run retained revision lookup failed; tenant contraction cannot proceed",
-      preceding: [readyCall, trafficCall],
+      preceding: [trafficCall, readyCall],
       failing: retainedCall,
     },
     {
       stage: "health",
       message: "Production health verification failed after traffic cutover",
-      preceding: [readyCall, trafficCall, retainedCall],
+      preceding: [trafficCall, readyCall, retainedCall],
       failing: healthCall,
     },
   ];
