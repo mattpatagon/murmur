@@ -88,6 +88,10 @@ jobs:
       - name: Run the portable test contract
         run: bun run test:portability
 
+      - name: Run the environment-independent contributor suite
+        if: matrix.os == 'ubuntu-latest'
+        run: bun run test
+
       - name: Build both production entry points
         run: |
           bun run build

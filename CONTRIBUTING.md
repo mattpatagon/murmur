@@ -57,7 +57,7 @@ for the visual contract and [website operations](docs/website.md) for developmen
 
 The full hosted test needs an isolated database administrator URL as documented by the script. CI
 supplies it through a disposable PostgreSQL service, then runs the Linux-container test against the
-same service. Environment-backed tests may skip in `bun run test`; that does not replace either
+same service. The Ubuntu portability job also runs the environment-independent `bun run test` suite. Environment-backed tests may skip in `bun run test`; that does not replace either
 required CI result.
 
 The Linux gate sets `MURMUR_TEST_DEPLOY_REVISIONS=1` for synthetic deployment-preservation tests.
