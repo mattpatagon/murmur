@@ -273,6 +273,13 @@ function loggingArguments(
     filter,
     "--project",
     config.project,
+    // The IAM grant is on this service's view, not on the project-wide log collection.
+    "--location",
+    "global",
+    "--bucket",
+    "_Default",
+    "--view",
+    config.service,
     "--limit",
     "2",
     "--order",

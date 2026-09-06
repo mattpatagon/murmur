@@ -2,6 +2,15 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.15.1.0] - 2026-09-06
+
+### Fixed
+
+- Verify production stream rotation and reconnection using service-scoped log access, without
+  requiring a project-wide log-reader role. All log queries explicitly select the service-named
+  view and fail closed if access is missing; see [production log access](docs/production-log-access.md)
+  for the required operator-approved setup.
+
 ## [0.15.0.1] - 2026-09-06
 
 ### Fixed
