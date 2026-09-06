@@ -124,7 +124,7 @@ export function createUpgradeCheckOutput(
       {
         command: null,
         description:
-          "Restart active Codex and Claude sessions so they load the upgraded tools and hooks.",
+          "Restart active Claude Code, Codex, OpenCode, Cursor, and Pi sessions so they load the upgraded connection. Conductor and Orca inherit the restarted agent's configuration.",
       },
     ],
   });

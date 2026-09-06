@@ -117,6 +117,8 @@ test("upgrade output distinguishes available, current, and ahead versions", (): 
   }
   expect(setupStep.description).toContain("--e2ee");
   expect(restartStep.description).toContain("Restart");
+  expect(restartStep.description).toContain("OpenCode");
+  expect(restartStep.description).toContain("Conductor");
 });
 
 test("upgrade checker validates and caches official release metadata", async (): Promise<void> => {
