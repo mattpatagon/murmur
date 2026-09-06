@@ -417,6 +417,10 @@ tenant; retained rows are not deleted. Cloud authentication is refreshed after o
 reading final logs. Missing log-read or registry metadata permission fails closed; it never grants
 IAM access automatically.
 
+Log reads target the service-named view in the project's global `_Default` bucket, not the
+project-wide log collection. Provision its filter and view-only IAM using
+[production log access](production-log-access.md) before running the real-window mode.
+
 The preflight and log verifier require explicit `PROJECT_ID`, `REGION`, `SERVICE`,
 `ARTIFACT_REPOSITORY`, `PRODUCTION_URL`, `EXPECTED_GITHUB_SHA`, `MURMUR_LIVE_EXPECTED_VERSION`, and
 `RUNNER_TEMP`. The observer uses `MURMUR_LIVE_URL`, `MURMUR_LIVE_OPERATOR_TOKEN`,
