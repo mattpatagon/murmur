@@ -9,12 +9,7 @@
     "seededAccounts": 25000,
     "exercisedAccounts": 25000,
     "steadyConcurrency": 8,
-    "rampConcurrency": [
-      1,
-      4,
-      16,
-      64
-    ],
+    "rampConcurrency": [1, 4, 16, 64],
     "attackConcurrency": 66,
     "authenticationSlots": 4,
     "maxSessions": 1000,

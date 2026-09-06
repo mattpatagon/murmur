@@ -404,23 +404,25 @@ gh workflow run production-smoke.yml --ref main -f real_window=true
 
 The opt-in mode shares the deployment concurrency group, checks the exact deployed source revision
 and existing Cloud Logging read access before provisioning, and observes one disposable tenant's
-SDK session. For digest-only images, the expected source tag in the configured artifact repository
-must resolve to the deployed digest before and after observation. The bounded lookup reads only
-Artifact Registry tag metadata, without requiring Container Analysis permissions. It requires successful
-same-session stream reconnection, a new notification and durable
+SDK session. For a digest-only image, it resolves the expected source tag in the configured artifact
+repository and requires that digest to match the deployed image before and after observation.
+The bounded lookup reads only Artifact Registry tag metadata, without requiring Container Analysis.
+It requires successful same-session stream reconnection, a new notification and durable
 inbox delivery, then checks the corresponding server completion events and platform failures. The
 55-minute window cannot be shortened through environment configuration. The job is bounded to 70
-minutes, including setup, targeted credential revocation, tenant suspension and log-ingestion waits.
-Cloud authentication is refreshed after observation, before reading final logs. Missing log-read
-permission or required registry metadata access fails closed; it never grants IAM automatically.
-The preflight and
-log verifier require explicit `PROJECT_ID`, `REGION`, `SERVICE`, `ARTIFACT_REPOSITORY`,
-`PRODUCTION_URL`, `EXPECTED_GITHUB_SHA`, `MURMUR_LIVE_EXPECTED_VERSION` and `RUNNER_TEMP`.
-The observer uses `MURMUR_LIVE_URL`, `MURMUR_LIVE_OPERATOR_TOKEN`, `MURMUR_LIVE_EXPECTED_SHA`
-and `MURMUR_LIVE_EXPECTED_VERSION`, with explicit `MURMUR_VERIFY_PRODUCTION_STREAM=1` opt-in.
-The workflow supplies them; credentials must not be passed
-as command-line arguments. JSON evidence contains only allowlisted verification metadata and a
-hashed session correlation. No other tenant's inbox is used by this opt-in observer.
+minutes, including setup, targeted credential revocation, tenant suspension, and log-ingestion waits.
+Cleanup verifies that the observer's revoked credentials return 401 and suspends only its derived
+tenant; retained rows are not deleted. Cloud authentication is refreshed after observation, before
+reading final logs. Missing log-read or registry metadata permission fails closed; it never grants
+IAM access automatically.
+
+The preflight and log verifier require explicit `PROJECT_ID`, `REGION`, `SERVICE`,
+`ARTIFACT_REPOSITORY`, `PRODUCTION_URL`, `EXPECTED_GITHUB_SHA`, `MURMUR_LIVE_EXPECTED_VERSION`, and
+`RUNNER_TEMP`. The observer uses `MURMUR_LIVE_URL`, `MURMUR_LIVE_OPERATOR_TOKEN`,
+`MURMUR_LIVE_EXPECTED_SHA`, and `MURMUR_LIVE_EXPECTED_VERSION`, with explicit
+`MURMUR_VERIFY_PRODUCTION_STREAM=1` opt-in. The workflow supplies them; credentials must not be
+passed as command-line arguments. JSON evidence contains only allowlisted verification metadata
+and a hashed session correlation. No other tenant's inbox is used by this opt-in observer.
 
 The canary obtains and masks the operator credential through the deploy
 identity. It creates a short-lived tenant credential, verifies operator/admin/

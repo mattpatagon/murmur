@@ -1,6 +1,6 @@
 # Contributing to Murmur
 
-Thank you for improving Murmur. The repository is source-available under the Elastic License 2.0;
+Thank you for improving Murmur. The repository is open source under the MIT License;
 by submitting a contribution, you agree that it may be distributed under those terms.
 
 ## Before starting
@@ -22,6 +22,7 @@ Install Bun 1.3.14 or newer, Git, and the repository dependencies:
 git clone https://github.com/mattpatagon/murmur.git
 cd murmur
 bun install --frozen-lockfile
+bun run website:install
 bun run verify
 bun run test
 bun run test:portability
@@ -37,7 +38,6 @@ hosted verifier creates isolated roles and databases; never aim it at production
 | `bun run verify` | Strict types, zero-warning Biome, safety AST, 500-line, dependency, and format gates |
 | `bun run test` | Environment-independent full suite; hosted and cross-machine cases report explicit skips when their external fixtures are absent |
 | `bun run test:portability` | Platform-safe unit and integration suite used on Linux, macOS, and Windows |
-| `bun run test:distribution` | Builds and installs the public tarball, then exercises all package commands without repository access |
 | `bun run test:linux` | Required Linux deployment-preservation regressions and host-to-container MCP test; needs Bash, jq, Docker, and `MURMUR_TEST_DATABASE_URL` for disposable PostgreSQL 17 |
 | `bun run test:coverage` | Strict coverage for an already-provisioned hosted-test environment; fails early instead of auditing skipped hosted code |
 | `MURMUR_VERIFY_COVERAGE=1 bash scripts/verify-hosted-postgres.sh` | Authoritative PostgreSQL 17, RLS, upgrade, and hosted coverage gate |
@@ -45,10 +45,20 @@ hosted verifier creates isolated roles and databases; never aim it at production
 | `bun run build` | Bundles the stdio MCP entry point |
 | `bun run build:http` | Bundles the hosted HTTP entry point |
 | `bun run format` | Applies deterministic Biome formatting |
+| `bun run website:install` | Installs the isolated website dependencies from its frozen lockfile |
+| `bun run website:dev` | Starts the institutional website locally |
+| `bun run website:check` | Astro types and frontend source policy with the isolated website toolchain |
+| `bun run website:build` | Generates static pages for Cloudflare Pages |
+| `bun run website:preview` | Serves the existing static build locally; run `website:build` first |
+| `bun run website:test` | Audits built pages, links, metadata, headers, and asset budgets |
+
+The website uses a separate frozen lockfile because Astro's checker requires TypeScript 6 while
+the backend uses TypeScript 7. Install both dependency sets before verification. Read [DESIGN.md](DESIGN.md)
+for the visual contract and [website operations](docs/website.md) for development and deployment.
 
 The full hosted test needs an isolated database administrator URL as documented by the script. CI
 supplies it through a disposable PostgreSQL service, then runs the Linux-container test against the
-same service. Environment-backed tests may skip in `bun run test`; that does not replace either
+same service. The Ubuntu portability job also runs the environment-independent `bun run test` suite. Environment-backed tests may skip in `bun run test`; that does not replace either
 required CI result.
 
 The Linux gate sets `MURMUR_TEST_DEPLOY_REVISIONS=1` for synthetic deployment-preservation

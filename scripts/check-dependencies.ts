@@ -13,7 +13,7 @@ const PackageManifestSchema: z.ZodObject<{
   dependencies: z.ZodRecord<z.ZodString, z.ZodString>;
   devDependencies: z.ZodRecord<z.ZodString, z.ZodString>;
   engines: z.ZodObject<{ bun: z.ZodString }>;
-  license: z.ZodLiteral<"Elastic-2.0">;
+  license: z.ZodLiteral<"MIT">;
   optionalDependencies: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodString>>;
   overrides: z.ZodRecord<z.ZodString, z.ZodString>;
   packageManager: z.ZodString;
@@ -23,7 +23,7 @@ const PackageManifestSchema: z.ZodObject<{
   dependencies: z.record(z.string(), z.string()),
   devDependencies: z.record(z.string(), z.string()),
   engines: z.object({ bun: z.string() }),
-  license: z.literal("Elastic-2.0"),
+  license: z.literal("MIT"),
   optionalDependencies: z.record(z.string(), z.string()).default({}),
   overrides: z.record(z.string(), z.string()),
   packageManager: z.string(),
@@ -233,6 +233,75 @@ export function auditDependencyPolicy(
   return errors.sort(compareText);
 }
 
+export function auditWebsiteDependencyPolicy(
+  rootPackageJsonText: string,
+  websitePackageJsonText: string,
+  websiteBunfigText: string,
+  websiteWorkflow: string,
+): readonly string[] {
+  const errors: string[] = [];
+  let rootPackage: unknown;
+  let websitePackage: unknown;
+  try {
+    rootPackage = JSON.parse(rootPackageJsonText);
+  } catch {
+    return ["package.json must be valid JSON before validating website toolchain parity"];
+  }
+  try {
+    websitePackage = JSON.parse(websitePackageJsonText);
+  } catch {
+    return ["website/package.json is not valid JSON"];
+  }
+  const root: ReturnType<typeof PackageManifestSchema.safeParse> =
+    PackageManifestSchema.safeParse(rootPackage);
+  const website: ReturnType<typeof PackageManifestSchema.safeParse> =
+    PackageManifestSchema.safeParse(websitePackage);
+  if (!root.success || !root.data.packageManager.startsWith("bun@")) {
+    return ["package.json must declare its Bun toolchain before validating website parity"];
+  }
+  const rootBunVersion: string = root.data.packageManager.slice(4);
+  if (!EXACT_SEMVER.test(rootBunVersion)) {
+    return ["package.json must pin an exact Bun release before validating website parity"];
+  }
+  if (!website.success) {
+    errors.push(
+      "website/package.json dependency policy fields are invalid; require MIT metadata and dependency sections",
+    );
+  } else {
+    const sections: DependencySections = website.data;
+    const versionErrors: string[] = [];
+    auditVersions("dependencies", sections.dependencies, versionErrors);
+    auditVersions("devDependencies", sections.devDependencies, versionErrors);
+    auditVersions("optionalDependencies", sections.optionalDependencies, versionErrors);
+    auditVersions("overrides", sections.overrides, versionErrors);
+    auditVersions("peerDependencies", sections.peerDependencies, versionErrors);
+    for (const error of versionErrors) errors.push(`website/package.json: ${error}`);
+    if (website.data.packageManager !== root.data.packageManager) {
+      errors.push(
+        `website/package.json packageManager must match the root pin 'bun@${rootBunVersion}'`,
+      );
+    }
+    if (website.data.engines.bun !== `>=${rootBunVersion}`) {
+      errors.push(
+        `website/package.json engines.bun must declare compatibility from '>=${rootBunVersion}'`,
+      );
+    }
+  }
+  const configurationErrors: string[] = [];
+  auditBunConfiguration(websiteBunfigText, configurationErrors);
+  for (const error of configurationErrors) errors.push(`website/bunfig.toml: ${error}`);
+  const workflowVersions: readonly string[] = workflowBunVersions(websiteWorkflow);
+  if (
+    workflowVersions.length === 0 ||
+    !workflowVersions.every((version: string): boolean => version === rootBunVersion)
+  ) {
+    errors.push(
+      `.github/workflows/website.yml must install the pinned Bun release '${rootBunVersion}'`,
+    );
+  }
+  return errors.sort(compareText);
+}
+
 function main(): void {
   try {
     const packageJsonText: string = readFileSync("package.json", "utf8");
@@ -243,11 +312,15 @@ function main(): void {
       dockerfile: readFileSync("Dockerfile", "utf8"),
       productionSmokeWorkflow: readFileSync(".github/workflows/production-smoke.yml", "utf8"),
     };
-    const errors: readonly string[] = auditDependencyPolicy(
-      packageJsonText,
-      bunfigText,
-      bunPinSurfaces,
-    );
+    const errors: readonly string[] = [
+      ...auditDependencyPolicy(packageJsonText, bunfigText, bunPinSurfaces),
+      ...auditWebsiteDependencyPolicy(
+        packageJsonText,
+        readFileSync("website/package.json", "utf8"),
+        readFileSync("website/bunfig.toml", "utf8"),
+        readFileSync(".github/workflows/website.yml", "utf8"),
+      ),
+    ].sort(compareText);
     if (errors.length > 0) {
       errors.forEach((error: string): void => {
         process.stderr.write(`Dependency policy: ${error}\n`);
@@ -256,7 +329,7 @@ function main(): void {
       return;
     }
     process.stdout.write(
-      "Dependency policy passed: exact versions, synchronized Bun pins, ELv2 metadata, and 72-hour package quarantine.\n",
+      "Dependency policy passed for runtime and website: exact versions, synchronized Bun pins, MIT metadata, and 72-hour package quarantine.\n",
     );
   } catch (error: unknown) {
     const detail: string = error instanceof Error ? error.message : String(error);

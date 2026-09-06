@@ -2,7 +2,7 @@
 
 All notable changes to Murmur are documented in this file.
 
-## [0.14.0.0] - 2026-09-05
+## [0.14.0.0] - 2026-09-06
 
 ### Security
 
@@ -54,6 +54,55 @@ All notable changes to Murmur are documented in this file.
   verification instead of reporting successful cleanup, and failed cleanup retains the hard deadline.
 - Skip redundant storage-size calculations for fixed-size usage-counter updates, with a catalog
   guard that falls back for schema changes and preserves existing quota admission ordering.
+
+## [0.13.2.0] - 2026-09-06
+
+### Changed
+
+- Use, modify, redistribute, and host Murmur under the MIT License. Package metadata, contribution terms, and setup guidance now reflect the open-source license.
+- Find the MIT license and public source links on the institutional website, including its FAQ, footer, and complete license page.
+
+### Removed
+
+- Remove the separate tarball-installation verification gate. Hosted package downloads and artifact integrity validation remain available.
+
+### Fixed
+
+- Allow up to 60 seconds for website publication to reach the custom domain before verifying the exact release revision.
+
+## [0.13.1.0] - 2026-09-06
+
+### Added
+
+- Introduce Murmur's institutional website with product, audience, architecture, onboarding,
+  security, and license pages. An interactive handoff explains durable delivery, and a client
+  selector provides copyable Claude Code, Codex, and generic MCP setup instructions.
+- Define the visual, content, accessibility, and performance contract in `DESIGN.md` before
+  implementation. Serve static Astro pages with React islands, TypeScript, Tailwind CSS, and
+  self-hosted fonts from an isolated website package.
+- Automate Cloudflare Pages publication from `main`, with source and artifact checks, bounded
+  deployment jobs, authenticated account verification, security headers, and revision and 404
+  smoke checks for `usemurmur.dev`. Run Wrangler with the pinned Node runtime.
+- Prevent Cloudflare proxy analytics injection with website response headers and verify the
+  privacy policy in both artifact validation and production smoke checks.
+- Add an opt-in real-window production stream check with exact-revision and log-access preflight,
+  same-session reconnect evidence, and targeted disposable-tenant cleanup.
+
+### Changed
+
+- Preserve compatible Cloud Run revisions and retained database rows during deployment, with
+  source checks before migrations and no bypass of writer-drain safety for contraction.
+- Verify digest-only Cloud Run image provenance through bounded registry metadata and exact
+  source-tag binding during preservation preflight and production stream observation.
+
+### For contributors
+
+- Install the website's frozen dependencies with `bun run website:install` before verification.
+  The frontend keeps Astro's TypeScript 6 checker separate from the backend's TypeScript 7 gate.
+- Extend exact dependency and file-size policies to the website, enforce safe frontend source,
+  and test metadata, link, asset, clipboard, and deployment artifact failure paths.
+- Correct the pinned MCP SDK's optional session-ID declarations without changing its runtime or
+  disabling strict library checks.
 
 ## [0.13.0.0] - 2026-09-05
 

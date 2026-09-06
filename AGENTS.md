@@ -58,7 +58,7 @@ Run `bun run verify` before requesting review. It enforces:
   comments;
 - a maximum of 500 lines for every authored text file, with hash-pinned exceptions only for
   immutable generated or already-deployed artifacts;
-- exact dependency versions, the ELv2 package identifier, an exact Bun toolchain pin, and Bun's
+- exact dependency versions, the MIT package identifier, an exact Bun toolchain pin, and Bun's
   72-hour minimum dependency release age;
 - deterministic formatting.
 
@@ -88,6 +88,7 @@ an owner, and a deterministic removal condition.
 - `src/observability/`: structured logs, request correlation, deadlines, and OpenTelemetry.
 - `scripts/`: deterministic validation, deployment, migration, recovery, and smoke gates.
 - `test/`: unit, contract, integration, upgrade, security, and portability tests.
+- `website/`: static Astro pages, React interactions, styles, and isolated website tooling.
 - `supabase/migrations/`: immutable, ordered PostgreSQL migrations.
 - `docs/`: architecture, operations, observability, platform, and upgrade contracts.
 

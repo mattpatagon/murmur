@@ -6,17 +6,26 @@ configuration for Codex and Claude, stdio package entry points, HTTP logic, and 
 
 ## CI contract
 
-Every pull request runs `bun install --frozen-lockfile`, `bun run verify`,
-`bun run test:portability`, `bun run test:distribution`, `bun run build`, and `bun run build:http`
-on Ubuntu, macOS, and Windows. The distribution gate builds the public tarball, installs it in an
-isolated global package directory, and exercises setup, hooks, encrypted key generation, and the
-local MCP setup guide without access to the checkout or installed development dependencies.
+Every pull request runs `bun install --frozen-lockfile`, `bun run website:install`, `bun run verify`,
+`bun run test:portability`, `bun run build`, and `bun run build:http` on Ubuntu, macOS, and Windows.
+Tests run from the source checkout; CI no longer installs a separate tarball for verification.
+Ubuntu also runs `bun run test` for the environment-independent contributor suite.
 Ubuntu additionally runs PostgreSQL 17, TLS, RLS, populated upgrades, hosted integration, and the
 authoritative coverage gate. It also starts Murmur once on the runner and once in a clean Linux Bun
 container, then proves bidirectional MCP delivery through the shared PostgreSQL service. Linux-only
-deployment scripts are separately exercised by CI and the production workflow. The Linux gate
-also runs revision-preservation regressions with Bash and jq against synthetic command responses;
-these tests never contact a cloud account and are not a shell dependency of portable test gates.
+deployment scripts are separately exercised by CI and the production workflow. The Linux gate also
+runs revision-preservation regressions with Bash and jq against synthetic command responses; these
+tests never contact a cloud account and are not a shell dependency of portable test gates.
+
+The portability gate exercises production-stream observation, real SDK reconnect with in-memory
+SQLite, targeted cleanup, and log-verifier subprocess deadlines using injected local fixtures.
+These tests need no cloud credentials, live deployment, or installed Google Cloud CLI.
+
+The Ubuntu `production-image` CI job builds the production Docker image, then runs
+`scripts/verify-production-image.ts` inside a network-disabled, read-only container. It verifies both
+reviewed SDK declaration patches, an SDK runtime import, and the public distribution's version,
+revision, byte size, and SHA-256 digest. This checks the production dependency installation
+independently of the runner's development tools.
 
 Platform support means a change cannot merge when a matrix job fails. It does not mean every
 operator convenience script is portable.
@@ -27,9 +36,6 @@ staging implementation runs on Windows, macOS, and Linux without relying on nati
 Portable PostgreSQL-driver recordings also check fresh expiry probes, transaction rollback and
 cleanup ordering without requiring a database or shell; real PostgreSQL verification remains in
 the Linux hosted gate.
-The same portability gate exercises production-stream observation, real SDK reconnect with
-in-memory SQLite, targeted cleanup, and log-verifier subprocess deadlines using injected local
-fixtures. These tests need no cloud credentials, live deployment, or installed Google Cloud CLI.
 Managed hosting relies on Cloud Run's frontend to terminate external connections; a self-hosted
 public listener needs the equivalent edge protections documented by the transport contract.
 
@@ -75,6 +81,7 @@ The commands are identical in Bash, zsh, and PowerShell:
 
 ```text
 bun install --frozen-lockfile
+bun run website:install
 bun run verify
 bun run test:portability
 bun run build
@@ -99,6 +106,19 @@ PostgreSQL client tools on Linux. Cloud Run deployment requires the tools listed
 The host-to-container gate rewrites only loopback database hostnames to Docker's runner gateway and
 adds that gateway explicitly when the container launches. Remote PostgreSQL hostnames are preserved
 unchanged.
+
+## Institutional website
+
+The Astro, React, TypeScript, and Tailwind site in `website/` has its own exact dependency pins
+and frozen lockfile. Its check/build commands use Bun and portable platform APIs on all three
+operating systems. The repository verification gate includes Astro and frontend source checks.
+The dedicated Ubuntu website workflow builds static pages, validates links and assets, and deploys
+verified pushes to `main` automatically to Cloudflare Pages. The MCP service remains on Cloud Run.
+Only Wrangler authentication, project creation, and deployment require Node.js 22.22.1; the
+publication workflow installs that exact version before checking the authenticated account and
+uploading. Astro development and verification remain Bun-only. The canonical website target is
+`https://usemurmur.dev`; the existing Pages project hostname is `murmur-site-eip.pages.dev`.
+See [website operations](website.md) for required Cloudflare configuration and smoke checks.
 
 ## Reporting a platform defect
 

@@ -129,6 +129,7 @@ For a repository checkout:
 
 ```bash
 bun install --frozen-lockfile
+bun run website:install
 bun run verify
 bun run test
 bun run test:portability
@@ -142,6 +143,12 @@ hosted-test environment.
 Committed project configurations live in `.mcp.json` and
 `.codex/config.toml`. They authenticate with `MURMUR_API_TOKEN` and contain no
 user-specific paths or secrets.
+
+## Institutional website
+
+The institutional website lives in `website/` in this repository. It uses Astro, React,
+TypeScript, and Tailwind CSS and deploys to Cloudflare Pages through the dedicated website workflow.
+See [website development and deployment](docs/website.md) and the [design system](DESIGN.md).
 
 ## Machine-wide instructions and hooks
 
@@ -418,13 +425,10 @@ Dependencies are exact-pinned, installs use the frozen Bun lockfile, and
 - [Observability](docs/observability.md)
 - [Upgrade policy](docs/upgrading.md)
 - [Platform support](docs/platform-support.md)
+- [Public distribution](docs/public-distribution.md)
 - [Release history](CHANGELOG.md)
 - [Roadmap and completed work](TODOS.md)
 
 ## License
 
-Murmur is source-available under the Elastic License 2.0. ELv2 permits use,
-copying, distribution, and modification subject to its limitations, including
-the restriction on offering a substantial set of Murmur's functionality as a
-hosted or managed service. It is not an OSI-approved open-source license. Read
-the complete [LICENSE](LICENSE) before using or redistributing the software.
+Murmur is open source under the [MIT License](LICENSE).

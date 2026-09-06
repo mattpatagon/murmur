@@ -58,6 +58,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install the isolated website verification toolchain
+        run: bun install --cwd website --frozen-lockfile
+
       - name: Run static verification
         run: bun run verify
 

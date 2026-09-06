@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { auditDependencyPolicy, type BunPinSurfaces } from "../scripts/check-dependencies.js";
+import {
+  auditDependencyPolicy,
+  auditWebsiteDependencyPolicy,
+  type BunPinSurfaces,
+} from "../scripts/check-dependencies.js";
 
 const VALID_BUNFIG: string = `[install]
 minimumReleaseAge = 259200
@@ -20,7 +24,7 @@ function manifest(overrides: Readonly<Record<string, unknown>> = {}): string {
   return JSON.stringify({
     dependencies: { zod: "4.4.3" },
     devDependencies: { typescript: "7.0.2" },
-    license: "Elastic-2.0",
+    license: "MIT",
     overrides: { zod: "4.4.3" },
     packageManager: "bun@1.3.14",
     engines: { bun: ">=1.3.14" },
@@ -35,6 +39,22 @@ function audit(
   surfaces: BunPinSurfaces = VALID_BUN_PIN_SURFACES,
 ): readonly string[] {
   return auditDependencyPolicy(packageJsonText, bunfigText, surfaces);
+}
+
+function websiteManifest(overrides: Readonly<Record<string, unknown>> = {}): string {
+  return manifest({
+    devDependencies: { astro: "6.3.8", typescript: "6.0.3" },
+    scripts: { build: "astro build" },
+    ...overrides,
+  });
+}
+
+function auditWebsite(
+  packageJsonText: string = websiteManifest(),
+  bunfigText: string = VALID_BUNFIG,
+  workflow: string = "bun-version: 1.3.14\n",
+): readonly string[] {
+  return auditWebsiteDependencyPolicy(manifest(), packageJsonText, bunfigText, workflow);
 }
 
 describe("dependency policy", (): void => {
@@ -67,7 +87,7 @@ describe("dependency policy", (): void => {
   });
 
   test("rejects the wrong license, package manager, or release age", (): void => {
-    expect(audit(manifest({ license: "MIT" }), VALID_BUNFIG)).not.toEqual([]);
+    expect(audit(manifest({ license: "Elastic-2.0" }), VALID_BUNFIG)).not.toEqual([]);
     expect(audit(manifest({ packageManager: "bun@latest" }), VALID_BUNFIG)).not.toEqual([]);
     expect(audit(manifest(), "[install]\nminimumReleaseAge = 86400\n")).toEqual([
       "minimumReleaseAge must be 259200 seconds (72 hours); received 86400",
@@ -159,6 +179,115 @@ describe("dependency policy", (): void => {
       ).toEqual([
         ".github/workflows/production-smoke.yml must install the pinned Bun release '1.3.14'",
       ]);
+    }
+  });
+});
+
+describe("isolated website dependency policy", (): void => {
+  test("accepts a compatible independent compiler without imposing runtime Docker scripts", (): void => {
+    expect(auditWebsite()).toEqual([]);
+    expect(auditWebsite(websiteManifest({ dependencies: {}, overrides: {}, scripts: {} }))).toEqual(
+      [],
+    );
+  });
+
+  test("requires exact versions across every website dependency section", (): void => {
+    const sections: readonly string[] = [
+      "dependencies",
+      "devDependencies",
+      "overrides",
+      "optionalDependencies",
+      "peerDependencies",
+    ];
+    const references: readonly string[] = [
+      "^1.2.3",
+      "latest",
+      "workspace:*",
+      "npm:typescript@6.0.3",
+    ];
+    for (const section of sections) {
+      for (const reference of references) {
+        const errors: readonly string[] = auditWebsite(
+          websiteManifest({ [section]: { unsafe: reference } }),
+        );
+        expect(errors).toEqual([
+          `website/package.json: ${section}.unsafe must use an exact semantic version; received '${reference}'`,
+        ]);
+      }
+    }
+  });
+
+  test("requires MIT metadata and a structurally valid nested manifest", (): void => {
+    expect(auditWebsite(websiteManifest({ license: "Elastic-2.0" }))).not.toEqual([]);
+    expect(auditWebsite(websiteManifest({ dependencies: undefined }))).not.toEqual([]);
+    expect(auditWebsite("{")).toEqual(["website/package.json is not valid JSON"]);
+    expect(
+      auditWebsiteDependencyPolicy("{", websiteManifest(), VALID_BUNFIG, "bun-version: 1.3.14\n"),
+    ).toEqual(["package.json must be valid JSON before validating website toolchain parity"]);
+  });
+
+  test("rejects website Bun drift and nonexact toolchain references", (): void => {
+    for (const packageManager of ["bun@1.3.13", "bun@1.3.140", "bun@latest", "npm@1.3.14"]) {
+      expect(auditWebsite(websiteManifest({ packageManager }))).toContain(
+        "website/package.json packageManager must match the root pin 'bun@1.3.14'",
+      );
+    }
+    expect(auditWebsite(websiteManifest({ engines: { bun: ">=1.3.10" } }))).toContain(
+      "website/package.json engines.bun must declare compatibility from '>=1.3.14'",
+    );
+  });
+
+  test("derives website parity from the reviewed root Bun pin", (): void => {
+    const toolchain: Readonly<Record<string, unknown>> = {
+      engines: { bun: ">=1.4.0" },
+      packageManager: "bun@1.4.0",
+    };
+    expect(
+      auditWebsiteDependencyPolicy(
+        manifest(toolchain),
+        websiteManifest(toolchain),
+        VALID_BUNFIG,
+        "bun-version: 1.4.0\n",
+      ),
+    ).toEqual([]);
+    expect(
+      auditWebsiteDependencyPolicy(
+        manifest({ packageManager: "bun@latest" }),
+        websiteManifest(),
+        VALID_BUNFIG,
+        "bun-version: 1.3.14\n",
+      ),
+    ).not.toEqual([]);
+  });
+
+  test("rejects absent, drifting, or mixed website workflow pins", (): void => {
+    for (const workflow of [
+      "",
+      "bun-version: 1.3.13\n",
+      "bun-version: 1.3.14\nbun-version: 1.3.14-canary\n",
+    ]) {
+      expect(auditWebsite(websiteManifest(), VALID_BUNFIG, workflow)).toEqual([
+        ".github/workflows/website.yml must install the pinned Bun release '1.3.14'",
+      ]);
+    }
+    expect(
+      auditWebsite(websiteManifest(), VALID_BUNFIG, "bun-version: '1.3.14' # pinned\n"),
+    ).toEqual([]);
+  });
+
+  test("enforces the separate 72-hour quarantine without accepting misplaced or repeated values", (): void => {
+    const invalid: readonly string[] = [
+      "[install]\n",
+      "[install]\nminimumReleaseAge = 0\n",
+      "[test]\nminimumReleaseAge = 259200\n",
+      ["[install]", "minimumReleaseAge = 259200", "minimumReleaseAge = 259200", ""].join("\n"),
+    ];
+    for (const bunfig of invalid) {
+      const errors: readonly string[] = auditWebsite(websiteManifest(), bunfig);
+      expect(errors.length).toBeGreaterThan(0);
+      expect(
+        errors.every((error: string): boolean => error.startsWith("website/bunfig.toml:")),
+      ).toBe(true);
     }
   });
 });
