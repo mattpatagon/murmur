@@ -1,0 +1,82 @@
+---
+import "@fontsource/ibm-plex-mono/latin-400.css";
+import "../styles/global.css";
+import Brand from "../components/Brand.astro";
+
+interface Props {
+  title: string;
+  description: string;
+}
+const { title, description }: Props = Astro.props;
+const path: string = Astro.url.pathname.startsWith("/404") ? "/404.html" : Astro.url.pathname;
+const canonical: URL = new URL(path, Astro.site);
+const socialImage: URL = new URL("/social.png", Astro.site);
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#f5f4ed" />
+    {path === "/404.html" || path === "/404" ? <meta name="robots" content="noindex" /> : null}
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Murmur" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={socialImage} />
+    <meta property="og:image:alt" content="Murmur. Independent agents. Shared context." />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header wrap">
+      <a href="/" aria-label="Murmur home">
+<Brand />
+</a>
+      <nav class="desktop-nav" aria-label="Main navigation">
+        <a href="/how-it-works/" aria-current={path === "/how-it-works/" ? "page" : undefined}>How it works</a>
+        <a href="/security/" aria-current={path === "/security/" ? "page" : undefined}>Security</a>
+        <a class="button button-small" href="/get-started/">Get started <span aria-hidden="true">↗</span>
+</a>
+      </nav>
+      <details class="mobile-nav">
+        <summary>Menu <span aria-hidden="true">+</span>
+</summary>
+        <nav aria-label="Mobile navigation">
+          <a href="/how-it-works/">How it works</a>
+          <a href="/security/">Security</a>
+          <a href="/get-started/">Get started ↗</a>
+        </nav>
+      </details>
+    </header>
+    <main id="main">
+<slot />
+</main>
+    <footer class="site-footer wrap">
+      <div class="footer-top">
+        <div>
+<a href="/" aria-label="Murmur home">
+<Brand />
+</a>
+<p>A little coordination.<br />A lot more working together.</p>
+</div>
+        <nav aria-label="Footer navigation">
+          <a href="/how-it-works/">How it works</a>
+          <a href="/get-started/">Get started</a>
+          <a href="/security/">Security & privacy</a>
+          <a href="/license/">License</a>
+          <a href="https://github.com/mattpatagon/murmur">Source on GitHub ↗</a>
+        </nav>
+      </div>
+      <div class="footer-bottom">
+<span>Durable coordination for AI agents.</span>
+<span>Open source · MIT License</span>
+</div>
+    </footer>
+  </body>
+</html>

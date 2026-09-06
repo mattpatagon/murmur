@@ -1,0 +1,36 @@
+{
+  "name": "murmur-website",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "packageManager": "bun@1.3.14",
+  "engines": {
+    "bun": ">=1.3.14"
+  },
+  "scripts": {
+    "dev": "bun --bun astro dev --host 127.0.0.1",
+    "check": "bun --bun astro check --minimumFailingSeverity warning && bun run scripts/check-source.ts",
+    "build": "bun --bun astro build",
+    "preview": "bun --bun astro preview --host 127.0.0.1",
+    "deploy": "node node_modules/wrangler/bin/wrangler.js pages deploy dist --project-name=murmur-site",
+    "test": "bun test test"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@astrojs/check": "0.9.10",
+    "@astrojs/react": "6.0.5",
+    "@fontsource-variable/dm-sans": "5.3.0",
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "astro": "7.2.10",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "tailwindcss": "4.3.3",
+    "typescript": "6.0.3",
+    "wrangler": "4.128.0"
+  },
+  "overrides": {}
+}

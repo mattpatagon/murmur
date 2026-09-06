@@ -2,9 +2,14 @@ name: Verify production isolation
 
 on:
   workflow_dispatch:
+    inputs:
+      real_window:
+        description: Verify real-window stream rotation and production logs for at least 55 minutes
+        type: boolean
+        default: false
 
 concurrency:
-  group: production-smoke
+  group: production
   cancel-in-progress: false
 
 permissions:
@@ -14,8 +19,9 @@ permissions:
 jobs:
   verify:
     name: Exercise live tenant boundaries
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: ${{ inputs.real_window && 70 || 10 }}
     environment:
       name: production
       url: ${{ vars.PRODUCTION_URL }}
@@ -43,6 +49,7 @@ jobs:
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
 
       - name: Verify live operator, tenant, and data isolation paths
+        if: ${{ !inputs.real_window }}
         shell: bash
         env:
           PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
@@ -57,3 +64,60 @@ jobs:
             MURMUR_LIVE_OPERATOR_TOKEN="$operator_token" \
             bun scripts/verify-production-hosted.ts
           unset operator_token
+
+      - name: Verify deployed revision and existing log-read access
+        if: ${{ inputs.real_window }}
+        env:
+          ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY }}
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION }}
+          SERVICE: ${{ vars.GCP_SERVICE }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          EXPECTED_GITHUB_SHA: ${{ github.sha }}
+        run: |
+          MURMUR_LIVE_EXPECTED_VERSION="$(head --bytes=129 VERSION)" \
+            bun scripts/verify-production-stream-logs.ts preflight
+
+      - name: Observe real-window same-session stream rotation
+        if: ${{ inputs.real_window }}
+        shell: bash
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          MURMUR_LIVE_EXPECTED_SHA: ${{ github.sha }}
+          MURMUR_VERIFY_PRODUCTION_STREAM: "1"
+        run: |
+          set -euo pipefail
+          umask 077
+          operator_token="$(timeout --signal=TERM --kill-after=5s 30s \
+            gcloud secrets versions access latest --project "$PROJECT_ID" \
+              --secret MURMUR_OPERATOR_TOKEN 2>/dev/null)"
+          echo "::add-mask::$operator_token"
+          expected_version="$(head --bytes=129 VERSION)"
+          MURMUR_LIVE_URL="$PRODUCTION_URL/mcp" \
+            MURMUR_LIVE_OPERATOR_TOKEN="$operator_token" \
+            MURMUR_LIVE_EXPECTED_VERSION="$expected_version" \
+            bun scripts/verify-production-stream.ts \
+              | tee "$RUNNER_TEMP/murmur-production-stream-result.jsonl"
+          unset operator_token
+
+      - name: Refresh cloud authentication after the real-window observation
+        if: ${{ inputs.real_window }}
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+
+      - name: Verify server rotation, reconnect, and platform-error evidence
+        if: ${{ inputs.real_window }}
+        env:
+          ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY }}
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION }}
+          SERVICE: ${{ vars.GCP_SERVICE }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          EXPECTED_GITHUB_SHA: ${{ github.sha }}
+        run: |
+          MURMUR_LIVE_EXPECTED_VERSION="$(head --bytes=129 VERSION)" \
+            bun scripts/verify-production-stream-logs.ts verify

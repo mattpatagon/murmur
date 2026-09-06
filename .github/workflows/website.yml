@@ -1,0 +1,153 @@
+name: Website
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  WEBSITE_SITE_URL: ${{ vars.WEBSITE_SITE_URL || 'https://usemurmur.dev' }}
+  WEBSITE_REVISION: ${{ github.sha }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || 'e357ed8d64611204842123ade5ea838f' }}
+
+jobs:
+  website:
+    name: Verify and publish the institutional website
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the proposed revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies from the reviewed lockfile
+        run: bun install --frozen-lockfile
+
+      - name: Install the isolated website toolchain from its reviewed lockfile
+        run: bun install --cwd website --frozen-lockfile
+
+      - name: Check website types and source
+        run: bun run website:check
+
+      - name: Exercise the artifact validation contract
+        run: bun test test/website.test.ts test/website-identity.test.ts website/test
+
+      - name: Build the static website
+        run: bun run website:build
+
+      - name: Verify pages, metadata, links, assets, and performance budgets
+        run: bun run website:test
+
+      - name: Require production Pages credentials
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUDFLARE_ACCOUNT_ID" =~ ^[0-9a-fA-F]{32}$ ]]; then
+            echo 'Set repository variable CLOUDFLARE_ACCOUNT_ID to the Pages account ID.' >&2
+            exit 1
+          fi
+          if [[ -z "$CLOUDFLARE_API_TOKEN" ]]; then
+            echo 'Set repository secret CLOUDFLARE_API_TOKEN with Cloudflare Pages Edit permission.' >&2
+            exit 1
+          fi
+
+      - name: Install Node for Cloudflare publication
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.22.1
+
+      - name: Verify authenticated Wrangler identity
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          WRANGLER_SEND_METRICS: "false"
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          website_identity="$(mktemp "$RUNNER_TEMP/murmur-website-identity.XXXXXX")"
+          trap 'rm -f "$website_identity"' EXIT
+          if ! timeout 45s node website/node_modules/wrangler/bin/wrangler.js whoami --json \
+            2>/dev/null | head --bytes=65537 > "$website_identity"; then
+            echo 'Wrangler authentication failed before the Pages upload.' >&2
+            exit 1
+          fi
+          WEBSITE_IDENTITY_FILE="$website_identity" timeout 10s bun run scripts/verify-website-identity.ts
+
+      - name: Deploy the verified revision to Cloudflare Pages
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          WRANGLER_SEND_METRICS: "false"
+        run: >-
+          bun run --cwd website deploy
+          --branch=main
+          --commit-hash="$GITHUB_SHA"
+
+      - name: Verify public pages, security headers, and the 404 response
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          website_origin="${WEBSITE_SITE_URL%/}"
+          website_headers="$RUNNER_TEMP/murmur-website-headers.txt"
+          website_body="$RUNNER_TEMP/murmur-website-body.txt"
+          website_version="$RUNNER_TEMP/murmur-website-version.json"
+          curl --fail --silent --show-error --max-time 20 --max-filesize 4096 \
+            --retry 3 --retry-max-time 60 --output "$website_version" \
+            "$website_origin/version.json?revision=$GITHUB_SHA"
+          WEBSITE_VERSION_FILE="$website_version" bun -e '
+            const file = process.env.WEBSITE_VERSION_FILE;
+            const expected = process.env.WEBSITE_REVISION;
+            if (file === undefined || expected === undefined) process.exit(1);
+            const body = await Bun.file(file).json();
+            if (typeof body !== "object" || body === null || body.revision !== expected) {
+              console.error("The public website is not serving the deployed Git revision.");
+              process.exit(1);
+            }
+          '
+          for website_path in / /how-it-works/ /get-started/ /security/ /license/ /robots.txt; do
+            curl --fail --silent --show-error --max-time 20 --retry 3 --retry-max-time 60 \
+              --max-filesize 1048576 --dump-header "$website_headers" \
+              --output "$website_body" "$website_origin$website_path"
+            if ! grep --ignore-case --quiet '^x-content-type-options: nosniff' "$website_headers"; then
+              echo 'The published website is missing its nosniff security header.' >&2
+              exit 1
+            fi
+            if ! grep --ignore-case --extended-regexp --quiet \
+              '^cache-control:.*[[:space:],]no-transform([[:space:],]|$)' "$website_headers"; then
+              echo 'The published website does not prevent proxy content transformations.' >&2
+              exit 1
+            fi
+            if grep --extended-regexp --quiet 'static\.cloudflareinsights\.com|data-cf-beacon' "$website_body"; then
+              echo 'The published website contains an injected analytics beacon.' >&2
+              exit 1
+            fi
+          done
+          website_missing_status="$(curl --silent --show-error --max-time 20 \
+            --output /dev/null --write-out '%{http_code}' \
+            "$website_origin/murmur-missing-page-$GITHUB_SHA")"
+          if [[ "$website_missing_status" != '404' ]]; then
+            echo 'The published website did not return HTTP 404 for an unknown route.' >&2
+            exit 1
+          fi

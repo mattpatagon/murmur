@@ -129,6 +129,7 @@ For a repository checkout:
 
 ```bash
 bun install --frozen-lockfile
+bun run website:install
 bun run verify
 bun run test
 bun run test:portability
@@ -142,6 +143,12 @@ hosted-test environment.
 Committed project configurations live in `.mcp.json` and
 `.codex/config.toml`. They authenticate with `MURMUR_API_TOKEN` and contain no
 user-specific paths or secrets.
+
+## Institutional website
+
+The institutional website lives in `website/` in this repository. It uses Astro, React,
+TypeScript, and Tailwind CSS and deploys to Cloudflare Pages through the dedicated website workflow.
+See [website development and deployment](docs/website.md) and the [design system](DESIGN.md).
 
 ## Machine-wide instructions and hooks
 

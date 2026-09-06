@@ -32,10 +32,16 @@ test("accepts exactly five hundred lines and rejects five hundred one", (): void
 
 test("exempts Bun's generated lockfile without exempting authored files", (): void => {
   const generated: FileCandidate = candidate("bun.lock", "lock\n".repeat(501));
+  const websiteLock: FileCandidate = candidate("website/bun.lock", "lock\n".repeat(501));
   const authored: FileCandidate = candidate("src/authored.ts", "code\n".repeat(501));
-  const audit: FileLineAudit = auditFileLines([generated, authored], new Map());
+  const websiteAuthored: FileCandidate = candidate("website/src/authored.ts", "code\n".repeat(501));
+  const audit: FileLineAudit = auditFileLines(
+    [generated, websiteLock, authored, websiteAuthored],
+    new Map(),
+  );
   expect(audit.errors).toEqual([
     "src/authored.ts has 501 lines; authored text files may contain at most 500",
+    "website/src/authored.ts has 501 lines; authored text files may contain at most 500",
   ]);
 });
 
