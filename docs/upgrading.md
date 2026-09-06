@@ -78,20 +78,13 @@ patch-copy step when the pinned upstream SDK's unmodified declarations pass `bun
 the production-stream tests. Review the patch on every SDK upgrade; do not carry it to another
 version automatically. CI and Docker must install it through the reviewed frozen lockfile.
 
-### Pinned SDK declaration correction
-
-`@modelcontextprotocol/sdk@1.30.0` has a version-pinned Bun patch in `patches/`. Its
-`StreamableHTTPClientTransport.sessionId` getter returns `string | undefined`, but the shared
-`Transport` declaration omits explicit `undefined` from the optional property. The two ESM/CommonJS
-declaration edits make that interface match the existing runtime behavior under
-`exactOptionalPropertyTypes`. No JavaScript, dependency version, license (MIT), or runtime surface
-changes; strict library checking remains enabled. The real production-observer SDK import and
-reconnect test exercise this compatibility boundary.
-
-The release maintainer owns the patch. Remove it, its manifest/lockfile mapping, and the Docker
-patch-copy step when the pinned upstream SDK's unmodified declarations pass `bun run verify` and
-the production-stream tests. Review the patch on every SDK upgrade; do not carry it to another
-version automatically. CI and Docker must install it through the reviewed frozen lockfile.
+Isolated cloud-test installations copy `src/`, `package.json`, `bun.lock`, `bunfig.toml`, and
+`patches/` before running `bun install --frozen-lockfile --production`. Keep these inputs together:
+Bun 1.3.14 resolves a raw dependency tarball's patch path relative to its consuming installation,
+so including the patch in that tarball alone does not make global installation work. Source users
+install from a complete checkout; public users install the separately bundled hosted download.
+The cloud integration executes each isolated source entrypoint from a different workspace and
+retains all shared-database delivery, ordering and notification assertions.
 
 ## Bun upgrades
 
