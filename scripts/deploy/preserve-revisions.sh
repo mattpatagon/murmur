@@ -32,6 +32,14 @@ case "${TENANT_CONTRACT_FINALIZE_REQUIRED:-}" in
   *) fail 'Revision preservation requires an explicit tenant contraction state' ;;
 esac
 
+if ! bounded_command gcloud run services update-traffic "$SERVICE" \
+  --project "$PROJECT_ID" \
+  --region "$REGION" \
+  --to-latest \
+  --clear-tags \
+  --quiet >/dev/null; then
+  fail 'Cloud Run traffic cutover failed; revision definitions were preserved'
+fi
 if ! latest_revision="$(bounded_command gcloud run services describe "$SERVICE" \
   --project "$PROJECT_ID" \
   --region "$REGION" \
@@ -41,14 +49,6 @@ fi
 if [[ ! "$latest_revision" =~ ^[a-z][a-z0-9-]{0,62}$ ]] ||
   [[ "$latest_revision" != "$SERVICE-"* ]]; then
   fail 'Cloud Run did not report a valid ready revision for this service'
-fi
-if ! bounded_command gcloud run services update-traffic "$SERVICE" \
-  --project "$PROJECT_ID" \
-  --region "$REGION" \
-  --to-revisions "$latest_revision=100" \
-  --clear-tags \
-  --quiet >/dev/null; then
-  fail 'Cloud Run traffic cutover failed; revision definitions were preserved'
 fi
 if [ "$TENANT_CONTRACT_FINALIZE_REQUIRED" = 'true' ]; then
   # The SDK applies --limit before its display filter; filtering can hide an older writer.

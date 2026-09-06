@@ -179,9 +179,10 @@ concurrency group. It performs these phases in order:
 5. Deploy a compatibility revision when legacy adoption is still required,
    atomically bootstrap the first operator if necessary, adopt the founding
    token, and switch to strict multi-tenant authorization.
-6. Route all traffic to the healthy revision and remove direct revision tags,
-   preserving superseded revision definitions. Existing streams can finish;
-   traffic routing alone does not prove their writers have drained.
+6. Route all traffic to the current and future latest healthy revision and remove direct revision
+   tags, preserving superseded revision definitions. The floating latest target prevents a prior
+   exact-revision cutover from pinning later deployments away from traffic. Existing streams can
+   finish; traffic routing alone does not prove their writers have drained.
 7. Finalize and validate tenant-qualified foreign keys when the database is at
    contract version 1, restart the strict revision at contract version 2, and
    verify health again.

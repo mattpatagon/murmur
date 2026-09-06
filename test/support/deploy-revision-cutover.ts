@@ -181,8 +181,7 @@ function commandStage(command: string, args: readonly string[], ready: string): 
         "test-project",
         "--region",
         "us-central1",
-        "--to-revisions",
-        `${ready}=100`,
+        "--to-latest",
         "--clear-tags",
         "--quiet",
       ])

@@ -2,6 +2,14 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.15.0.1] - 2026-09-06
+
+### Fixed
+
+- Keep Cloud Run traffic attached to the current and future latest revision after preservation.
+  Explicit revision pinning could leave a successful deployment serving the preceding release;
+  the bounded cutover now removes that stale pin before verifying the ready revision and health.
+
 ## [0.15.0.0] - 2026-09-06
 
 ### Added
