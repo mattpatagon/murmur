@@ -191,9 +191,8 @@ deployment retain their distinct responsibility.
 
 Every HTML page must advertise a `text/markdown` alternate and visibly link to it. Raw Markdown
 includes YAML frontmatter and must be published byte-for-byte from the authored file. Root maps to
-`/index.md`; other canonical paths append `.md` after removing a trailing slash, while
-`/404.html` maps to `/404.html.md`. Markdown alternates remain outside the sitemap and are marked
-`noindex`.
+`/index.md`; every other canonical path appends `.md` directly, so `/404.html` maps to
+`/404.html.md`. Markdown alternates remain outside the sitemap and are marked `noindex`.
 
 Build and serve static assets on Cloudflare Pages. Use GitHub Actions with exact pinned tooling,
 the frozen Bun lockfile, a build/validation gate for pull requests, and automatic production

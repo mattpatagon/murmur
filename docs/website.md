@@ -53,6 +53,9 @@ source:
 | `/license` | `/license.md` |
 | `/404.html` | `/404.html.md` |
 
+Each extensionless non-root HTML route returns HTTP 200 directly at the listed path, without a
+trailing slash or redirect.
+
 Root uses the conventional `/index.md`; every other raw route literally appends `.md` to its
 canonical HTML route. Raw responses include their YAML frontmatter, use
 `text/markdown; charset=utf-8`, and are marked `noindex`. They are alternate representations, so
