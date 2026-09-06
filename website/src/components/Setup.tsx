@@ -1,82 +1,123 @@
 import { type Dispatch, type ReactElement, type SetStateAction, useState } from "react";
 
+import {
+  type AgentClient,
+  CLIENTS,
+  type ClientId,
+  type ClientSetup,
+  getClient,
+  type SetupAction,
+} from "../data/clients";
 import { ClipboardCopy } from "./clipboard";
 
-type Client = "Claude Code" | "Codex" | "Other MCP client";
-const clients: readonly Client[] = ["Claude Code", "Codex", "Other MCP client"];
-const commands: Readonly<Record<Client, string>> = {
-  "Claude Code":
-    "claude mcp add --transport http --scope user murmur https://api.usemurmur.dev/setup/mcp",
-  Codex: "codex mcp add murmur --url https://api.usemurmur.dev/setup/mcp",
-  "Other MCP client": "https://api.usemurmur.dev/setup/mcp",
-};
-
 export default function Setup(): ReactElement {
-  const [client, setClient]: [Client, Dispatch<SetStateAction<Client>>] =
-    useState<Client>("Claude Code");
+  const [clientId, setClientId]: [ClientId, Dispatch<SetStateAction<ClientId>>] =
+    useState<ClientId>("claude-code");
   const [feedback, setFeedback]: [string, Dispatch<SetStateAction<string>>] = useState("");
   const [clipboard]: [ClipboardCopy, Dispatch<SetStateAction<ClipboardCopy>>] = useState(
     (): ClipboardCopy =>
       new ClipboardCopy((text: string): Promise<void> => navigator.clipboard.writeText(text)),
   );
+  const client: AgentClient = getClient(clientId);
+  const setup: ClientSetup = client.setup;
+  const claudeSetup: ClientSetup = getClient("claude-code").setup;
+  const codexSetup: ClientSetup = getClient("codex").setup;
 
-  function choose(next: Client): void {
+  function choose(next: ClientId): void {
     clipboard.clear();
-    setClient(next);
+    setClientId(next);
     setFeedback("");
   }
 
-  async function copy(): Promise<void> {
-    await clipboard.copy(commands[client], setFeedback);
+  async function copy(action: SetupAction): Promise<void> {
+    setFeedback("");
+    await clipboard.copy(action.value, (message: string): void => {
+      const subject: string = action.copyLabel === "configuration" ? "Configuration" : "Command";
+      setFeedback(`${subject}: ${message}`);
+    });
+  }
+
+  function firstSetupValue(candidate: ClientSetup): string {
+    if (candidate.kind === "inherited") return "";
+    const first: SetupAction | undefined = candidate.actions[0];
+    return first === undefined ? "" : first.value;
   }
 
   return (
     <div className="setup-box">
       <fieldset className="client-selector" aria-label="Choose your MCP client">
-        {clients.map(
-          (item: Client): ReactElement => (
+        {CLIENTS.map(
+          (item: AgentClient): ReactElement => (
             <button
-              key={item}
+              key={item.id}
               type="button"
-              aria-pressed={client === item}
-              onClick={(): void => choose(item)}
+              aria-pressed={clientId === item.id}
+              onClick={(): void => choose(item.id)}
             >
-              {item}
+              <span className={`setup-client-logo setup-client-logo-${item.id}`} aria-hidden="true">
+                <img src={item.logoPath} alt="" width="34" height="34" />
+              </span>
+              <span>{item.name}</span>
             </button>
           ),
         )}
       </fieldset>
-      <div className="command-label">
-        <span className="eyebrow">
-          {client === "Other MCP client"
-            ? "STREAMABLE HTTP · NO AUTHENTICATION"
-            : "RUN IN YOUR TERMINAL"}
-        </span>
-        <button type="button" className="copy-button" onClick={copy}>
-          Copy {client === "Other MCP client" ? "URL" : "command"} <span aria-hidden="true">⧉</span>
-        </button>
-      </div>
-      <pre className="command">
-        <code>{commands[client]}</code>
-      </pre>
+      {setup.kind === "inherited" ? (
+        <>
+          <div className="command-label">
+            <span className="eyebrow">{setup.label}</span>
+          </div>
+          <div className="inherited-setup">
+            <img
+              className={`inherited-logo inherited-logo-${client.id}`}
+              src={client.logoPath}
+              alt=""
+              width="48"
+              height="48"
+            />
+            <strong>{client.name} uses the effective MCP configuration for its agent.</strong>
+          </div>
+        </>
+      ) : (
+        <div className="setup-actions">
+          {setup.actions.map(
+            (action: SetupAction): ReactElement => (
+              <div className="setup-action" key={action.label}>
+                <div className="command-label">
+                  <span className="eyebrow">{action.label}</span>
+                  <button
+                    type="button"
+                    className="copy-button"
+                    onClick={(): Promise<void> => copy(action)}
+                  >
+                    Copy {action.copyLabel} <span aria-hidden="true">⧉</span>
+                  </button>
+                </div>
+                <pre className="command">
+                  <code>{action.value}</code>
+                </pre>
+              </div>
+            ),
+          )}
+        </div>
+      )}
       <p className="copy-feedback" role="status">
         {feedback}
       </p>
-      <p className="setup-note">
-        {client === "Other MCP client"
-          ? "Add this URL in your client’s MCP settings using Streamable HTTP, with no authentication."
-          : "This adds Murmur’s public, read-only setup connection. It does not create an account or install hooks."}
-      </p>
+      <p className="setup-tier">{client.supportLabel}</p>
+      <p className="setup-note">{setup.note}</p>
       <noscript>
         <div className="no-js-setup">
-          <p>For Codex:</p>
+          <p>Claude Code:</p>
           <pre>
-            <code>{commands.Codex}</code>
+            <code>{firstSetupValue(claudeSetup)}</code>
           </pre>
-          <p>For another MCP client, use Streamable HTTP without authentication:</p>
+          <p>Codex:</p>
           <pre>
-            <code>{commands["Other MCP client"]}</code>
+            <code>{firstSetupValue(codexSetup)}</code>
           </pre>
+          <p>OpenCode, Cursor, and Pi use the configuration shown in the setup guide.</p>
+          <p>Conductor and Orca use the effective MCP configuration of their selected agent.</p>
         </div>
       </noscript>
     </div>

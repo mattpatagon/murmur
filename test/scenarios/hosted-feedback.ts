@@ -2,6 +2,7 @@ import { expect } from "bun:test";
 import postgres, { type Sql } from "postgres";
 import { z } from "zod";
 
+import { type AgentClientName, AgentClientNameSchema } from "../../src/domain/client-provenance.js";
 import {
   type SubmitFeedbackOutput,
   SubmitFeedbackOutputSchema,
@@ -17,7 +18,7 @@ import type { HostedTenantScenario } from "./hosted-tenant-provisioning.js";
 
 type StoredFeedbackRow = {
   readonly branch_name: string;
-  readonly client_name: "claude" | "codex" | "connector";
+  readonly client_name: AgentClientName;
   readonly created_at: string;
   readonly description: string;
   readonly feedback_id: string;
@@ -32,7 +33,7 @@ type StoredFeedbackRow = {
 
 const StoredFeedbackRowSchema: z.ZodType<StoredFeedbackRow> = z.strictObject({
   branch_name: z.string(),
-  client_name: z.enum(["claude", "codex", "connector"]),
+  client_name: AgentClientNameSchema,
   created_at: z.string(),
   description: z.string(),
   feedback_id: z.string().uuid(),

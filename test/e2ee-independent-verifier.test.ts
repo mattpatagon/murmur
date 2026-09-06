@@ -167,7 +167,7 @@ async function capturedEnvelope(): Promise<{
   const header: EnvelopeHeaderInput = {
     branchName: "feature/e2ee",
     broadcastId: null,
-    client: "codex",
+    client: "cursor-agent",
     createdAt: "2026-08-10T17:00:00.000Z",
     expiresAt: "2026-09-09T17:00:00.000Z",
     idempotencyKey: "send-0001",

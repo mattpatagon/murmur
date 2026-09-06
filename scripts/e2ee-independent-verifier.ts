@@ -40,7 +40,7 @@ type HeaderDto = {
   readonly branch_name: string | null;
   readonly broadcast_id: string | null;
   readonly cipher_suite: "x25519-xsalsa20-poly1305+ed25519";
-  readonly client: "claude" | "codex" | "connector" | null;
+  readonly client: string | null;
   readonly created_at: string;
   readonly expires_at: string;
   readonly idempotency_key: string;
@@ -100,6 +100,7 @@ export type IndependentHeaderDigest = {
 };
 
 const Base64UrlSchema: z.ZodString = z.string().regex(/^[A-Za-z0-9_-]+$/u);
+const AgentClientNameSchema: z.ZodString = z.string().regex(/^[a-z][a-z0-9-]{0,31}$/u);
 const AgentIdSchema: z.ZodString = z
   .string()
   .min(1)
@@ -133,7 +134,7 @@ const HeaderSchema: z.ZodType<HeaderDto> = z.strictObject({
   branch_name: z.string().min(1).max(500).nullable(),
   broadcast_id: UuidSchema.nullable(),
   cipher_suite: z.literal(CIPHER_SUITE),
-  client: z.enum(["claude", "codex", "connector"]).nullable(),
+  client: AgentClientNameSchema.nullable(),
   created_at: InstantSchema,
   expires_at: InstantSchema,
   idempotency_key: z.string().min(1).max(200),

@@ -19,10 +19,11 @@ const socialImage: URL = new URL("/social.png", Astro.site);
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
+    <meta name="application-name" content="Murmur" />
     <meta name="theme-color" content="#f5f4ed" />
     {path === "/404.html" || path === "/404" ? <meta name="robots" content="noindex" /> : null}
     <link rel="canonical" href={canonical} />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" sizes="any" href="/favicon.svg" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Murmur" />
     <meta property="og:title" content={title} />

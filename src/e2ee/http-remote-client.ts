@@ -3,6 +3,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { z } from "zod";
 
+import { type AgentClientName, AgentClientNameSchema } from "../domain/client-provenance.js";
 import {
   type CloseAgentInput,
   CloseAgentInputSchema,
@@ -117,7 +118,7 @@ const CLAIM_EXPIRED_CONTENT: string = JSON.stringify(
 
 export type E2eeHttpRemoteClientConfig = {
   readonly branch: string | null;
-  readonly client: "claude" | "codex" | "connector";
+  readonly client: AgentClientName;
   readonly endpoint: string;
   readonly repository: string | null;
   readonly token: string;
@@ -137,16 +138,17 @@ class McpWireToolCaller implements E2eeWireToolCaller {
 
   public static async connect(config: E2eeHttpRemoteClientConfig): Promise<McpWireToolCaller> {
     const endpoint: URL = parseEndpoint(config.endpoint);
+    const clientName: AgentClientName = AgentClientNameSchema.parse(config.client);
     const context: {
       branch: string;
-      client: "claude" | "codex" | "connector";
+      client: AgentClientName;
       repository: string;
     } | null =
       config.branch === null || config.repository === null
         ? null
         : E2eeMessageContextDtoSchema.parse({
             branch: config.branch,
-            client: config.client,
+            client: clientName,
             repository: config.repository,
           });
     if (!TOKEN_PATTERN.test(config.token)) {
@@ -154,7 +156,7 @@ class McpWireToolCaller implements E2eeWireToolCaller {
     }
     const headers: Headers = new Headers({
       Authorization: `Bearer ${config.token}`,
-      "X-Murmur-Client": config.client,
+      "X-Murmur-Client": clientName,
     });
     if (context !== null) {
       headers.set("X-Murmur-Branch", context.branch);

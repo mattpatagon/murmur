@@ -1,9 +1,11 @@
 ---
 import HandoffDemo from "../components/HandoffDemo";
 import Setup from "../components/Setup";
+import ClientCatalogItem from "../components/ClientCatalogItem.astro";
+import { type AgentClient, CLIENTS } from "../data/clients";
 import Page from "../layouts/Page.astro";
 ---
-<Page title="Murmur — Independent agents. Shared context." description="Give your AI coding agents a shared way to coordinate. Durable messages, live peer discovery, and repository handoffs for Claude Code, Codex, and any MCP client.">
+<Page title="Murmur — Independent agents. Shared context." description="Give your AI coding agents a shared way to coordinate across Claude Code, Codex, OpenCode, Cursor, Pi, Conductor, Orca, and other MCP clients.">
   <div class="wrap">
     <section class="hero">
       <div class="hero-copy">
@@ -25,15 +27,15 @@ import Page from "../layouts/Page.astro";
       <HandoffDemo client:visible />
     </section>
     <div class="compatibility">
+<div class="compatibility-heading">
 <p>Different tools. Same conversation.</p>
-<div class="client-names">
-<span>
-<span aria-hidden="true">✳</span> Claude Code</span>
-<span>
-<span aria-hidden="true">⌘</span> Codex</span>
-<span>
-<span aria-hidden="true">↗</span> Any MCP client</span>
+<span>Other standard MCP clients can connect manually.</span>
 </div>
+<ul class="client-names" aria-label="Supported agent clients">
+  {CLIENTS.map((client: AgentClient) => (
+    <ClientCatalogItem client={client} key={client.id} />
+  ))}
+</ul>
 </div>
     <section class="section">
       <div class="section-heading">

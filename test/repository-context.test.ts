@@ -21,7 +21,7 @@ function requireRepositoryValue(repositoryName: RepositoryName | null): string {
   return repositoryName.value;
 }
 
-function requireClientValue(client: AgentClient | null): "claude" | "codex" | "connector" {
+function requireClientValue(client: AgentClient | null): string {
   if (client === null) throw new Error("Expected client context");
   return client.value;
 }
@@ -63,9 +63,9 @@ test("detects branch and client context with explicit overrides", (): void => {
   if (branchName === null) throw new Error("Expected branch context");
   expect(branchName.value).toBe("feature/agent-context");
 
-  const client: AgentClient | null = detectAgentClient({ MURMUR_CLIENT: "Claude" });
+  const client: AgentClient | null = detectAgentClient({ MURMUR_CLIENT: "Cursor-Agent" });
   if (client === null) throw new Error("Expected client context");
-  expect(client.value).toBe("claude");
+  expect(client.value).toBe("cursor-agent");
 });
 
 test("detects Claude and Codex from their host environments", (): void => {
@@ -91,11 +91,11 @@ test("allows a send call to override server branch and client context", (): void
   expect(branchName.value).toBe("feature/call-override");
 
   const client: AgentClient | null = agentClientFromInput(
-    { client: "claude" },
+    { client: "cursor-agent" },
     detectAgentClient({ MURMUR_CLIENT: "codex" }),
   );
   if (client === null) throw new Error("Expected client context");
-  expect(client.value).toBe("claude");
+  expect(client.value).toBe("cursor-agent");
 });
 
 test("omits repository context when no portable origin is available", (): void => {

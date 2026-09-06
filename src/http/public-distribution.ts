@@ -2,11 +2,11 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import {
+  type DistributionManifest,
   DistributionManifestSchema,
   distributionDownloadPath,
   MAX_DISTRIBUTION_BYTES,
   PUBLIC_DOWNLOAD_PATH,
-  type DistributionManifest,
 } from "../domain/distribution-contracts.js";
 import type { MurmurReleaseMetadata } from "../domain/upgrade-contracts.js";
 import { SYSTEM_TIME_SOURCE, type TimeSource } from "./http-capacity.js";
@@ -95,6 +95,7 @@ export function createPublicDownloadHandler(
               "codex mcp add murmur --url https://api.usemurmur.dev/setup/mcp",
               "Claude Code:",
               "claude mcp add --transport http --scope user murmur https://api.usemurmur.dev/setup/mcp",
+              "OpenCode, Cursor, and Pi can begin through any standard Streamable HTTP MCP entry at the same setup URL.",
               "Restart the agent and ask it to call get_setup_guide.",
               "",
               "The guide walks through organization signup, token setup, hooks, and encryption.",
@@ -102,7 +103,8 @@ export function createPublicDownloadHandler(
               "bun install --global https://api.usemurmur.dev/downloads/murmur.tgz",
               "",
               "murmur signup --slug YOUR_ORGANIZATION --name 'Your Organization'",
-              "With your credential in MURMUR_API_TOKEN, run murmur setup --user and restart your agent host.",
+              "With your credential in MURMUR_API_TOKEN, run murmur setup --user for Claude Code, Codex, OpenCode, Cursor, and Pi, then restart your agent host.",
+              "Pi also requires the separately installed pi-mcp-adapter from Pi's official package catalog. In Conductor and Orca, configure the selected agent's effective home and environment.",
               "MIT-licensed source: https://github.com/mattpatagon/murmur. No GitHub account or source checkout is required.",
               "",
             ].join("\n"),

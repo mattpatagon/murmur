@@ -34,8 +34,9 @@ latency guarantees, automatic conflict prevention, or a guarantee that idle agen
   the message demonstration and code examples to establish a strong reading rhythm.
 - Layout: asymmetric hero, large confident type, generous section intervals, numbered explanatory
   rows, and visible code. Avoid repeating interchangeable cards throughout the page.
-- Illustration: use actual HTML/SVG geometry and readable sample messages. No stock photography,
-  robot mascots, abstract 3D objects, generic gradients, or raster image dependency.
+- Illustration: use actual HTML/SVG geometry and readable sample messages. Client identity uses only
+  official vendor-provided marks with recorded provenance. No stock photography, robot mascots,
+  abstract 3D objects, generic gradients, or generic stand-in client icons.
 
 Familiar choices: clear navigation, a prominent setup action, copyable commands, public setup
 instructions, readable security information, and responsive layouts. These let developers evaluate a
@@ -58,7 +59,7 @@ Deliberate risks:
 | --- | --- | --- |
 | `/` | Understand and evaluate | What Murmur does, interactive handoff, audiences, capabilities, setup preview, FAQ |
 | `/how-it-works/` | Understand the mechanism | Register, discover, send, persist, reread, acknowledge; notices vs broadcasts; boundaries |
-| `/get-started/` | Connect a first agent | Claude Code, Codex, generic MCP instructions; public setup, restart, guide prompt, next steps |
+| `/get-started/` | Connect a first agent | Claude Code, Codex, OpenCode, Cursor, Pi, inherited environments, generic MCP instructions; public setup, restart, guide prompt, next steps |
 | `/security/` | Evaluate trust | Tenant credentials, operator boundary, retention, optional E2EE and metadata, security reporting |
 | `/license/` | Inspect terms | Full repository license text and accurate source-access expectations |
 | `/404.html` | Recover from a bad link | Plain explanation with home and setup links, real 404 response |
@@ -75,7 +76,8 @@ Homepage narrative:
 2. A handoff example with named agents, repository/branch context, durable inbox, and delivery
    status. The example is explicitly labeled a demo. Visitor-controlled steps show why the inbox
    survives a disconnected recipient.
-3. Compact compatibility strip: Claude Code, Codex, and any MCP client.
+3. Compatibility catalog with official marks for Claude Code, Codex, OpenCode, Cursor, Pi,
+   Conductor, and Orca, plus a clear path for any other MCP client.
 4. The coordination problem and three numbered capabilities: find peers, exchange context, and
    leave durable repository state. Include direct/broadcast/notices distinctions.
 5. Audience rows for solo developers with multiple agents, engineering teams, and platform teams.
@@ -217,3 +219,4 @@ visible. Do not claim default E2EE, invisible metadata, or repository-specific i
 | 2026-09-05 | Static Astro site and two React islands | Fast, inspectable pages with useful progressive enhancement |
 | 2026-09-05 | Cloudflare Pages through GitHub Actions | User explicitly requested Pages and automatic deployment from this repository |
 | 2026-09-05 | Public setup MCP is the primary conversion path | Current supported onboarding requires no secret in the website |
+| 2026-09-06 | Expanded the client catalog with official marks | Show the major directly managed and inherited agent environments without implying native support where an adapter or launched agent provides it |

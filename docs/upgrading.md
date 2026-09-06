@@ -23,9 +23,12 @@ or transport details. Production sets
 `MURMUR_RELEASE_REVISION` to the deployed 40-character source revision so `/version` publishes a
 version and revision from the same release.
 
-Follow the returned install command exactly. Then run `murmur setup --user`, or preserve encrypted
-mode with `murmur setup --user --e2ee`, and restart active Codex and Claude sessions. Repository
-checkouts should fetch and review the returned revision before updating their own pinned checkout.
+Follow the returned install command exactly. Then rerun the exact setup command used for that
+endpoint, preserving its client-selection flags, `--url`, `--e2ee`, and `--vault-path` options.
+Restart each configured agent session. Conductor and Orca users restart the configured agent inside
+that environment.
+Repository checkouts should fetch and review the returned revision before updating their own pinned
+checkout.
 
 Public packages use the hosted `/downloads/` endpoint and contain bundled clients and license
 notices; installation does not require a Git checkout. Call `get_setup_guide`
@@ -125,6 +128,16 @@ upgrade if their contents matter.
 MCP changes are additive when possible. Preserve existing tool names, required fields, error
 meanings, idempotency behavior, resource URIs, and message retention semantics. A breaking change
 requires an explicit compatibility plan, versioned contract, migration path, and release note.
+
+### v0.15 client and operator checklist
+
+The harness-client expansion replaces the closed three-value constraint with the bounded client
+identifier used at every wire boundary. It follows the staged PostgreSQL pattern: add the
+replacement constraints as `NOT VALID`, validate each affected table separately, then swap them
+into the stable names. Apply the complete ordered migration set before configurations begin sending
+new identifiers such as `opencode`, `cursor`, or `pi`. SQLite upgrades the same invariant
+transactionally. Older binaries reject new client identifiers, so drain them before enabling the
+new setup targets; use a forward fix rather than rolling back after new values have been stored.
 
 ### v0.14 client and operator checklist
 

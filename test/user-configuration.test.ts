@@ -1,16 +1,15 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, type Stats, writeFileSync } from "node:fs";
+import { expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, type Stats, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
-import { expect, test } from "bun:test";
 
 import {
   configureClaudeMcp,
   configureCodexMcp,
   configureHooks,
   DEFAULT_MURMUR_URL,
-  installUserConfiguration,
   defaultUserConfigurationPaths,
+  installUserConfiguration,
   shellQuote,
   type UserConfigurationPaths,
 } from "../src/setup/user-configuration.js";
@@ -170,13 +169,16 @@ test("configures portable content-free hooks for E2E setup", (): void => {
   expect(JSON.stringify(custom)).toContain("--vault-path '/var/lib/murmur agent/vault.sqlite'");
 });
 
-test("installs both clients and a second run changes nothing", (): void => {
+test("installs both hook clients and a second run changes nothing", (): void => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-setup-"));
   const paths: UserConfigurationPaths = {
     claudeMcp: join(directory, ".claude.json"),
     claudeSettings: join(directory, ".claude", "settings.json"),
     codexConfig: join(directory, ".codex", "config.toml"),
     codexHooks: join(directory, ".codex", "hooks.json"),
+    cursorMcp: join(directory, ".cursor", "mcp.json"),
+    opencodeConfig: join(directory, ".config", "opencode", "opencode.json"),
+    piMcp: join(directory, ".config", "mcp", "mcp.json"),
   };
   try {
     writeFileSync(paths.claudeMcp, '{"theme":"dark"}\n');
@@ -309,6 +311,9 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
     claudeSettings: "/config/claude/settings.json",
     codexConfig: "/config/codex/config.toml",
     codexHooks: "/config/codex/hooks.json",
+    cursorMcp: "/users/test/.cursor/mcp.json",
+    opencodeConfig: "/users/test/.config/opencode/opencode.json",
+    piMcp: "/users/test/.config/mcp/mcp.json",
   });
   expect(
     defaultUserConfigurationPaths(
@@ -323,6 +328,9 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
     claudeSettings: "C:\\Users\\test\\.claude\\settings.json",
     codexConfig: "C:\\Users\\test\\.codex\\config.toml",
     codexHooks: "C:\\Users\\test\\.codex\\hooks.json",
+    cursorMcp: "C:\\Users\\test\\.cursor\\mcp.json",
+    opencodeConfig: "C:\\Users\\test\\.config\\opencode\\opencode.json",
+    piMcp: "C:\\Users\\test\\.config\\mcp\\mcp.json",
   });
   expect(
     defaultUserConfigurationPaths(
@@ -338,6 +346,9 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
     claudeSettings: "/home/test/.claude/settings.json",
     codexConfig: "/home/test/.codex/config.toml",
     codexHooks: "/home/test/.codex/hooks.json",
+    cursorMcp: "/home/test/.cursor/mcp.json",
+    opencodeConfig: "/home/test/.config/opencode/opencode.json",
+    piMcp: "/home/test/.config/mcp/mcp.json",
   });
 });
 
@@ -348,11 +359,14 @@ test("writes configuration everywhere and preserves POSIX mode contracts", (): v
     claudeSettings: join(directory, ".claude", "settings.json"),
     codexConfig: join(directory, ".codex", "config.toml"),
     codexHooks: join(directory, ".codex", "hooks.json"),
+    cursorMcp: join(directory, ".cursor", "mcp.json"),
+    opencodeConfig: join(directory, ".config", "opencode", "opencode.json"),
+    piMcp: join(directory, ".config", "mcp", "mcp.json"),
   };
   try {
     writeFileSync(paths.claudeMcp, "{}\n", { encoding: "utf8", mode: 0o640 });
     installUserConfiguration({
-      clients: ["codex", "claude"],
+      clients: ["claude", "codex", "opencode", "cursor", "pi"],
       hookExecutable: "/usr/local/bin/murmur-hook",
       paths,
     });
@@ -376,6 +390,9 @@ test("validates every selected client before writing configuration", (): void =>
     claudeSettings: join(directory, ".claude", "settings.json"),
     codexConfig: join(directory, ".codex", "config.toml"),
     codexHooks: join(directory, ".codex", "hooks.json"),
+    cursorMcp: join(directory, ".cursor", "mcp.json"),
+    opencodeConfig: join(directory, ".config", "opencode", "opencode.json"),
+    piMcp: join(directory, ".config", "mcp", "mcp.json"),
   };
   try {
     writeFileSync(

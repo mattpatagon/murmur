@@ -71,6 +71,9 @@ test("installs proxy clients and content-free hooks atomically", (): void => {
     claudeSettings: join(directory, ".claude", "settings.json"),
     codexConfig: join(directory, ".codex", "config.toml"),
     codexHooks: join(directory, ".codex", "hooks.json"),
+    cursorMcp: join(directory, ".cursor", "mcp.json"),
+    opencodeConfig: join(directory, ".config", "opencode", "opencode.json"),
+    piMcp: join(directory, ".config", "mcp", "mcp.json"),
   };
   try {
     writeFileSync(paths.claudeMcp, '{"theme":"dark"}\n');

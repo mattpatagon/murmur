@@ -3,11 +3,13 @@ import process from "node:process";
 
 import {
   CallToolResultSchema,
+  type ElicitResult,
   LATEST_PROTOCOL_VERSION,
   ListToolsResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import type { ElicitResult } from "@modelcontextprotocol/sdk/types.js";
+
+import type { AgentClientName } from "../../src/domain/client-provenance.js";
 import { readApprovedMcpResponse } from "./approved-mcp-response.js";
 
 const UnknownRecordSchema: z.ZodRecord<z.ZodString, z.ZodUnknown> = z.record(
@@ -16,7 +18,7 @@ const UnknownRecordSchema: z.ZodRecord<z.ZodString, z.ZodUnknown> = z.record(
 );
 
 export type ProductionHarness = {
-  readonly clientName: "claude" | "codex";
+  readonly clientName: AgentClientName;
   readonly repositoryName: string;
   readonly sessionId: string;
   readonly token: string;
@@ -52,7 +54,7 @@ async function retry<T>(operation: () => Promise<T>): Promise<T> {
 function headers(
   token: string,
   sessionId: string | null,
-  clientName: "claude" | "codex",
+  clientName: AgentClientName,
   repositoryName: string,
 ): Headers {
   const result: Headers = new Headers({
@@ -100,7 +102,7 @@ async function post(
   url: URL,
   token: string,
   sessionId: string | null,
-  clientName: "claude" | "codex",
+  clientName: AgentClientName,
   repositoryName: string,
   body: Record<string, unknown>,
 ): Promise<Response> {
@@ -124,7 +126,7 @@ export async function connectProductionHarness(
   url: URL,
   token: string,
   name: string,
-  clientName: "claude" | "codex" = "codex",
+  clientName: AgentClientName = "codex",
   repositoryName: string = "mattpatagon/murmur",
 ): Promise<ProductionHarness> {
   return await retry(async (): Promise<ProductionHarness> => {

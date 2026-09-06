@@ -69,7 +69,7 @@ function header(): EnvelopeHeaderInput {
   return {
     branchName: null,
     broadcastId: null,
-    client: "claude",
+    client: "cursor-agent",
     createdAt: "2026-08-10T17:00:00.000Z",
     expiresAt: "2026-09-09T17:00:00.000Z",
     idempotencyKey: "wire-1",
@@ -154,6 +154,10 @@ test("rejects noncanonical, malformed, and length-conflicting envelope bytes", a
   expect(
     (): EncryptedEnvelope => parseEnvelopeDto({ ...dto, ciphertext: dto.ciphertext.slice(1) }),
   ).toThrow("canonical base64url");
+  expect(
+    (): EncryptedEnvelope =>
+      parseEnvelopeDto({ ...dto, header: { ...dto.header, client: "Cursor" } }),
+  ).toThrow();
   expect(
     (): EncryptedEnvelope =>
       parseEnvelopeDto({

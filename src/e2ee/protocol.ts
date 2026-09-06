@@ -1,3 +1,5 @@
+import type { AgentClientName } from "../domain/client-provenance.js";
+
 export const E2EE_PROTOCOL: "murmur-e2ee-v1" = "murmur-e2ee-v1";
 export const E2EE_CIPHER_SUITE: "x25519-xsalsa20-poly1305+ed25519" =
   // biome-ignore lint/security/noSecrets: This is a public cipher-suite identifier, not credential material.
@@ -11,7 +13,7 @@ export type PrekeyClass = "fallback" | "one_time";
 export type EnvelopeHeaderInput = {
   readonly branchName: string | null;
   readonly broadcastId: string | null;
-  readonly client: "claude" | "codex" | "connector" | null;
+  readonly client: AgentClientName | null;
   readonly createdAt: string;
   readonly expiresAt: string;
   readonly idempotencyKey: string;

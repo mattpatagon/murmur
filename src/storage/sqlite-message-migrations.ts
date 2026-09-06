@@ -1,9 +1,10 @@
 import type { Database, Statement } from "bun:sqlite";
 
 import { migrateSqliteClientNames } from "./sqlite-client-name-migration.js";
+import { migrateSqliteClientSlugs } from "./sqlite-client-slug-migration.js";
 import { type UserVersionRow, UserVersionRowSchema } from "./sqlite-message-rows.js";
 
-const SUPPORTED_SCHEMA_VERSION: number = 12;
+const SUPPORTED_SCHEMA_VERSION: number = 13;
 
 function schemaVersion(database: Database): number {
   const statement: Statement<unknown, []> = database.query("PRAGMA user_version");
@@ -430,6 +431,11 @@ export function migrateSqliteDatabase(database: Database): void {
     if (version === 11) {
       migrateSqliteClientNames(database);
       database.exec("PRAGMA user_version = 12");
+      version = 12;
+    }
+    if (version === 12) {
+      migrateSqliteClientSlugs(database);
+      database.exec("PRAGMA user_version = 13");
     }
     const foreignKeyViolation: unknown = database.query("PRAGMA foreign_key_check").get();
     if (foreignKeyViolation !== null) throw new Error("SQLite migration violated a foreign key");

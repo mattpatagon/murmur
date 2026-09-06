@@ -79,6 +79,32 @@ test("CLI setup parsing fails before mutation for incomplete or unsafe input", (
   ).toThrow("Hook executable not found");
 });
 
+test("CLI setup reports missing default hook and proxy executables before mutation", (): void => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-entrypoint-missing-"));
+  const originalClaude: string | undefined = process.env["CLAUDE_CONFIG_DIR"];
+  const originalCodex: string | undefined = process.env["CODEX_HOME"];
+  const originalHome: string | undefined = process.env["HOME"];
+  const originalPath: string | undefined = process.env["PATH"];
+  try {
+    process.env["CLAUDE_CONFIG_DIR"] = join(directory, "claude");
+    process.env["CODEX_HOME"] = join(directory, "codex");
+    process.env["HOME"] = directory;
+    process.env["PATH"] = directory;
+    expect((): readonly string[] => setup(["--user", "--codex"])).toThrow(
+      "murmur-hook is not on PATH",
+    );
+    expect((): readonly string[] => setup(["--user", "--opencode", "--e2ee"])).toThrow(
+      "murmur-e2ee-proxy is not on PATH",
+    );
+  } finally {
+    process.env["CLAUDE_CONFIG_DIR"] = originalClaude;
+    process.env["CODEX_HOME"] = originalCodex;
+    process.env["HOME"] = originalHome;
+    process.env["PATH"] = originalPath;
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
 test("async CLI dispatch exposes E2E help without opening a vault", async (): Promise<void> => {
   expect(await runCliAsync(["e2ee", "--help"])).toContain("Murmur local end-to-end encryption");
 });

@@ -33,9 +33,11 @@
   .faq-layout {
     gap: 40px;
   }
+  .setup-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .client-names {
-    gap: 24px;
-    font-size: 15px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .prose-layout {
     grid-template-columns: minmax(0, 1fr) 180px;
@@ -59,8 +61,7 @@
     width: 100%;
   }
   .compatibility {
-    align-items: flex-start;
-    flex-direction: column;
+    grid-template-columns: 1fr;
     gap: 18px;
   }
   .section-heading,
@@ -123,9 +124,7 @@
     font-size: 11px;
   }
   .client-names {
-    gap: 20px;
-    flex-wrap: wrap;
-    font-size: 14px;
+    gap: 18px 12px;
   }
   .section {
     padding-block: 48px;
@@ -168,21 +167,30 @@
     padding-bottom: 48px;
   }
   .command-label {
+    align-items: flex-start;
+    flex-direction: column;
     padding-inline: 16px;
     gap: 8px;
   }
   .command-label .eyebrow {
-    font-size: 8px;
+    font-size: 11px;
+    overflow-wrap: anywhere;
   }
   .command {
     margin-inline: 16px;
     padding: 16px;
   }
   .client-selector {
-    padding-inline: 4px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .client-selector button {
-    font-size: 11px;
+    font-size: 13px;
+  }
+  .client-selector button:nth-child(4n) {
+    border-right: 1px solid var(--color-line);
+  }
+  .client-selector button:nth-child(2n) {
+    border-right: 0;
   }
 }
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { type AgentClientName, AgentClientNameSchema } from "../domain/client-provenance.js";
 import { type MessageDto, MessageDtoSchema } from "../domain/contracts.js";
 import { OrchestrationScopeKindSchema, SenderAuthoritySchema } from "../domain/orchestration.js";
 import { type IssuedTokenDto, IssuedTokenDtoSchema } from "./contracts.js";
@@ -119,7 +120,7 @@ export type AskOrchestratorInput = {
   readonly context?:
     | {
         readonly branch?: string | undefined;
-        readonly client?: "claude" | "codex" | "connector" | undefined;
+        readonly client?: AgentClientName | undefined;
         readonly repository?: string | undefined;
       }
     | undefined;
@@ -133,7 +134,7 @@ export const AskOrchestratorInputSchema: z.ZodType<AskOrchestratorInput> = z.str
   context: z
     .strictObject({
       branch: z.string().trim().min(1).max(500).optional(),
-      client: z.enum(["claude", "codex", "connector"]).optional(),
+      client: AgentClientNameSchema.optional(),
       repository: RepositorySchema.optional(),
     })
     .optional(),

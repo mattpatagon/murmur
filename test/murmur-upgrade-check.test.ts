@@ -115,8 +115,12 @@ test("upgrade output distinguishes available, current, and ahead versions", (): 
   if (setupStep === undefined || restartStep === undefined) {
     throw new Error("Upgrade instructions were incomplete");
   }
-  expect(setupStep.description).toContain("--e2ee");
+  expect(setupStep.command).toBeNull();
+  expect(setupStep.description).toContain("exact setup command");
+  expect(setupStep.description).toContain("--url");
+  expect(setupStep.description).toContain("--vault-path");
   expect(restartStep.description).toContain("Restart");
+  expect(restartStep.description).toContain("Conductor");
 });
 
 test("upgrade checker validates and caches official release metadata", async (): Promise<void> => {

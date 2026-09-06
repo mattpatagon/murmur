@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { type AgentClientName, AgentClientNameSchema } from "../domain/client-provenance.js";
 import type { AgentKeyCertificate, AgentKeyRevocation, PrekeyCertificate } from "./certificates.js";
 import {
   E2EE_CIPHER_SUITE,
@@ -101,7 +102,7 @@ export type EnvelopeHeaderDto = {
   readonly branch_name: string | null;
   readonly broadcast_id: string | null;
   readonly cipher_suite: typeof E2EE_CIPHER_SUITE;
-  readonly client: "claude" | "codex" | "connector" | null;
+  readonly client: AgentClientName | null;
   readonly created_at: string;
   readonly expires_at: string;
   readonly idempotency_key: string;
@@ -222,7 +223,7 @@ const EnvelopeHeaderDtoSchema: z.ZodType<EnvelopeHeaderDto> = z
     branch_name: z.string().min(1).max(500).nullable(),
     broadcast_id: UuidSchema.nullable(),
     cipher_suite: z.literal(E2EE_CIPHER_SUITE),
-    client: z.enum(["claude", "codex", "connector"]).nullable(),
+    client: AgentClientNameSchema.nullable(),
     created_at: InstantSchema,
     expires_at: InstantSchema,
     idempotency_key: z.string().min(1).max(200),
