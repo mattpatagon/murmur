@@ -244,11 +244,11 @@ are recorded in public/client-logos/PROVENANCE.md and checksums.sha256.
 
 Claude Code: https://claude.ai/favicon.ico
 Codex (OpenAI mark): https://marketplace.visualstudio.com/items?itemName=openai.chatgpt
-OpenCode: https://opencode.ai/docs/_astro/logo-light.B0yzR0O5.svg
-Cursor: https://cursor.com/marketing-static/favicon-light.svg
+OpenCode: https://opencode.ai/favicon.ico
+Cursor: https://cursor.com/favicon.ico
 Pi: https://pi.dev/logo.svg
-Conductor: https://www.conductor.build/brandkit/conductor-letter-dark.svg
-Orca: https://www.onorca.dev/logo.svg
+Conductor: https://www.conductor.build/favicon.ico
+Orca: https://www.onorca.dev/favicon.ico
 
 ========================================================================
 tailwindcss 4.3.3 (MIT)

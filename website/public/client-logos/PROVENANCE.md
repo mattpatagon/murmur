@@ -8,10 +8,10 @@ respective owners.
 | --- | --- | --- | --- |
 | Claude Code | `claude-code.ico` | `525d5c063365f7656ba0fe8b9165742c4874e70852d9bed7153b6faca8663a02` | `https://claude.ai/favicon.ico` |
 | Codex | `codex.png` | `2ce1c57dd3b312417106a487815ab1235bddce17e1fa9b32a2f048bd71ee25d3` | `https://openai.gallerycdn.vsassets.io/extensions/openai/chatgpt/26.5901.22334/1788458585118/Microsoft.VisualStudio.Services.Icons.Default` ([official OpenAI Codex extension](https://marketplace.visualstudio.com/items?itemName=openai.chatgpt)) |
-| OpenCode | `opencode.svg` | `00ac8ac1b456ac230499fa76c08205d7658e29c383cd635669780c644fdcd321` | `https://opencode.ai/docs/_astro/logo-light.B0yzR0O5.svg` |
-| Cursor | `cursor.svg` | `78f169abca311d70e18ada789ccf1a55b4ca0306822f21a9ab0c2658ed88dbe0` | `https://cursor.com/marketing-static/favicon-light.svg` |
-| Pi | `pi.svg` | `2d43cb4f6a239ac70416214ac05842be34175339f761001fab3e8d01459bec69` | `https://pi.dev/logo.svg` ([official press kit](https://pi.dev/press-kit)) |
-| Conductor | `conductor.svg` | `770c742f52a00cd40860aedd42cbcd27916adcd09ef7d3fc2b92fe239e6e2ee1` | `https://www.conductor.build/brandkit/conductor-letter-dark.svg` ([official brand kit](https://www.conductor.build/brandkit)) |
-| Orca | `orca.svg` | `6545255de6cca93679d3419629d0fadae68432475549068e8779811c4aa21f89` | `https://www.onorca.dev/logo.svg` |
+| OpenCode | `opencode.ico` | `808e1ca7659cb52e0240aac075ccecdf5539047da02150f2b95e0aa78a44056f` | `https://opencode.ai/favicon.ico` |
+| Cursor | `cursor.ico` | `0f128813ae8f4360fbe6b5c85e5e9d13b25c6b54da5e9f57fd8f19f965bda773` | `https://cursor.com/favicon.ico` |
+| Pi | `pi.svg` | `4913eb21fe498c92df55f5f32cd1b2deb01851300d9fdde7e49aa416c72a8b8b` | `https://pi.dev/logo.svg` ([official press kit](https://pi.dev/press-kit)); a nonvisual title was added for the repository accessibility gate, with geometry and colors unchanged. |
+| Conductor | `conductor.ico` | `12b6f0b30e826ed67dba36da1a56170beb1c62a68ee126bc91ec1fd98859c010` | `https://www.conductor.build/favicon.ico` ([official brand kit](https://www.conductor.build/brandkit)) |
+| Orca | `orca.ico` | `69a0176b4a5ef47d62704ef2b6cf8113a52e75e3c1629bae14660b06148d2087` | `https://www.onorca.dev/favicon.ico` |
 
 Checksums are recorded in `checksums.sha256` beside these assets.

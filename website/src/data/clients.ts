@@ -74,7 +74,7 @@ export const CLIENTS: readonly AgentClient[] = [
   {
     id: "opencode",
     name: "OpenCode",
-    logoPath: "/client-logos/opencode.svg",
+    logoPath: "/client-logos/opencode.ico",
     supportLabel: "Native config · manual lifecycle",
     setup: {
       kind: "configuration",
@@ -92,7 +92,7 @@ export const CLIENTS: readonly AgentClient[] = [
   {
     id: "cursor",
     name: "Cursor",
-    logoPath: "/client-logos/cursor.svg",
+    logoPath: "/client-logos/cursor.ico",
     supportLabel: "Native config · manual lifecycle",
     setup: {
       kind: "configuration",
@@ -133,7 +133,7 @@ export const CLIENTS: readonly AgentClient[] = [
   {
     id: "conductor",
     name: "Conductor",
-    logoPath: "/client-logos/conductor.svg",
+    logoPath: "/client-logos/conductor.ico",
     supportLabel: "Uses agent-specific MCP setup",
     setup: {
       kind: "inherited",
@@ -144,7 +144,7 @@ export const CLIENTS: readonly AgentClient[] = [
   {
     id: "orca",
     name: "Orca",
-    logoPath: "/client-logos/orca.svg",
+    logoPath: "/client-logos/orca.ico",
     supportLabel: "Uses the selected agent’s home",
     setup: {
       kind: "inherited",

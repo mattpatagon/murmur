@@ -405,11 +405,15 @@ test("upgrades populated SQLite v12 client constraints to bounded slugs", (): vo
     expect(database.query("SELECT client_name FROM messages").get()).toEqual({
       client_name: "cursor-agent",
     });
-    expect((): void => database.exec("UPDATE messages SET client_name = 'Cursor'")).toThrow();
-    expect((): void => database.exec("UPDATE broadcasts SET client_name = '2cursor'")).toThrow();
-    expect((): void =>
-      database.exec("UPDATE feedback_submissions SET client_name = 'cursor_agent'"),
-    ).toThrow();
+    expect((): void => {
+      database.exec("UPDATE messages SET client_name = 'Cursor'");
+    }).toThrow();
+    expect((): void => {
+      database.exec("UPDATE broadcasts SET client_name = '2cursor'");
+    }).toThrow();
+    expect((): void => {
+      database.exec("UPDATE feedback_submissions SET client_name = 'cursor_agent'");
+    }).toThrow();
   } finally {
     database.close();
   }

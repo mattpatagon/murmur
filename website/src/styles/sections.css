@@ -67,12 +67,6 @@
     font-size: 11px;
     line-height: 1.35;
   }
-  .client-logo-opencode {
-    padding: 9px 3px;
-  }
-  .client-logo-conductor {
-    padding: 3px 9px;
-  }
   .client-logo-orca {
     padding: 7px 4px;
     background: var(--color-night);
@@ -208,12 +202,6 @@
     width: 100%;
     height: 100%;
     object-fit: contain;
-  }
-  .setup-client-logo-opencode {
-    padding: 8px 2px;
-  }
-  .setup-client-logo-conductor {
-    padding: 3px 9px;
   }
   .setup-client-logo-orca {
     padding: 7px 3px;

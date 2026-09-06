@@ -1,6 +1,7 @@
 ---
 import HandoffDemo from "../components/HandoffDemo";
 import Setup from "../components/Setup";
+import ClientCatalogItem from "../components/ClientCatalogItem.astro";
 import { type AgentClient, CLIENTS } from "../data/clients";
 import Page from "../layouts/Page.astro";
 ---
@@ -32,13 +33,7 @@ import Page from "../layouts/Page.astro";
 </div>
 <ul class="client-names" aria-label="Supported agent clients">
   {CLIENTS.map((client: AgentClient) => (
-    <li key={client.id}>
-      <span class={`client-logo client-logo-${client.id}`} aria-hidden="true">
-        <img src={client.logoPath} alt="" width="36" height="36" loading="lazy" />
-      </span>
-      <span class="client-name">{client.name}</span>
-      <span class="client-support">{client.supportLabel}</span>
-    </li>
+    <ClientCatalogItem client={client} key={client.id} />
   ))}
 </ul>
 </div>
