@@ -220,8 +220,10 @@ function timeoutMatches(
   if (target === "images") return args[3] === "jq" && args[4] === "--raw-output";
   if (target === "source")
     return args[3] === "git" && args[4] === "cat-file" && args[6] === PRESERVED_SOURCE;
-  if (target === "registry-tags") return args[3] === "gcloud" && args[5] === "tags";
-  if (target === "registry-image") return args[3] === "gcloud" && args[6] === "images";
+  if (target === "registry-tags")
+    return args[3] === "gcloud" && args[5] === "tags" && args.includes("1001");
+  if (target === "registry-image")
+    return args[3] === "gcloud" && args[5] === "tags" && args.includes("2");
   return target === "ancestry" && args[3] === "git" && args[4] === "merge-base";
 }
 
@@ -273,7 +275,7 @@ async function driver(): Promise<void> {
   }
   if (command === "gcloud") {
     if (args[0] === "artifacts") {
-      const tags: boolean = args[1] === "tags";
+      const tags: boolean = args.includes("1001");
       const expected: readonly string[] = tags
         ? [
             "artifacts",
@@ -297,14 +299,22 @@ async function driver(): Promise<void> {
           ]
         : [
             "artifacts",
-            "docker",
-            "images",
-            "describe",
-            `${IMAGE_PREFIX}${PRESERVED_SOURCE}`,
+            "tags",
+            "list",
+            "--package",
+            "murmur",
+            "--repository",
+            "runtime",
+            "--location",
+            "us-central1",
             "--project",
             "test-project",
+            "--filter",
+            `name="${REGISTRY_PACKAGE}/tags/${PRESERVED_SOURCE}"`,
+            "--limit",
+            "2",
             "--format",
-            "json(image_summary.digest,image_summary.fully_qualified_digest)",
+            "json(name,version)",
             "--quiet",
           ];
       if (JSON.stringify(args) !== JSON.stringify(expected)) failDriver();
@@ -315,9 +325,7 @@ async function driver(): Promise<void> {
           version: `${REGISTRY_PACKAGE}/versions/${PRESERVED_DIGEST}`,
         },
       ]);
-      const defaultImage: string = JSON.stringify({
-        image_summary: { digest: PRESERVED_DIGEST, fully_qualified_digest: DIGEST_IMAGE },
-      });
+      const defaultImage: string = defaultTags;
       await writeOutput(
         process.stdout,
         tags ? (options.registryTags ?? defaultTags) : (options.registryImage ?? defaultImage),

@@ -1,5 +1,6 @@
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type {
+  ListResourcesRequest,
   ListResourcesResult,
   ListResourceTemplatesResult,
   ReadResourceRequest,
@@ -17,6 +18,7 @@ import {
   UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
+import { type GetAgentOutput, ListAgentsInputSchema } from "../domain/contracts.js";
 import { AgentId } from "../domain/value-objects.js";
 import { logSafeError } from "../safe-errors.js";
 import type { ProxyInboxOutput, ProxyMessageDto } from "./proxy-contracts.js";
@@ -82,10 +84,15 @@ export class E2eeProxyResources {
     return await result;
   }
 
-  private async listResources(): Promise<ListResourcesResult> {
+  private async listResources(request: ListResourcesRequest): Promise<ListResourcesResult> {
+    const cursor: string | undefined =
+      request.params === undefined ? undefined : request.params.cursor;
     const agents: Awaited<ReturnType<E2eeProxyOperations["listAgents"]>> =
-      await this.#operations.listAgents({ limit: 1_000, state: "active" });
+      await this.#operations.listAgents(
+        ListAgentsInputSchema.parse({ cursor, limit: 1_000, state: "active" }),
+      );
     return {
+      ...(agents.next_cursor === null ? {} : { nextCursor: agents.next_cursor }),
       resources: agents.agents.map(
         (agent: (typeof agents.agents)[number]): ListedResource => ({
           description: `End-to-end encrypted inbox for ${agent.agent_id}`,
@@ -158,13 +165,8 @@ export class E2eeProxyResources {
           `Inbox subscription capacity reached (${MAX_INBOX_SUBSCRIPTIONS_PER_SESSION} per session).`,
         );
       }
-      const agents: Awaited<ReturnType<E2eeProxyOperations["listAgents"]>> =
-        await this.#operations.listAgents({ limit: 1_000, state: "active" });
-      if (
-        !agents.agents.some(
-          (agent: (typeof agents.agents)[number]): boolean => agent.agent_id === agentId,
-        )
-      ) {
+      const found: GetAgentOutput = await this.#operations.getAgent({ agent_id: agentId });
+      if (found.agent.agent_id !== agentId || found.agent.state !== "active") {
         throw new McpError(
           ErrorCode.InvalidParams,
           `Unknown agent '${agentId}'. Register it first.`,
@@ -196,7 +198,8 @@ export class E2eeProxyResources {
   public registerHandlers(): void {
     this.#server.setRequestHandler(
       ListResourcesRequestSchema,
-      async (): Promise<ListResourcesResult> => await this.listResources(),
+      async (request: ListResourcesRequest): Promise<ListResourcesResult> =>
+        await this.listResources(request),
     );
     this.#server.setRequestHandler(
       ListResourceTemplatesRequestSchema,

@@ -63,6 +63,11 @@ import type {
   TenantSummary,
   TokenSummary,
 } from "../hosted/control-plane.js";
+import {
+  MAX_TOKEN_LIST_MATERIALIZATION_BYTES,
+  materializedToolResult,
+  tokenListRetainedBytes,
+} from "./bounded-tool-materialization.js";
 import { callE2eeAdminTool } from "./murmur-e2ee-admin-tools.js";
 import { toolResult } from "./murmur-tool-results.js";
 
@@ -112,16 +117,21 @@ export async function callTenantAdminTool(
     }
     case "list_access_tokens": {
       const input: ListTokensInput = ListTokensInputSchema.parse(argumentsValue);
-      const tokenPage: Page<TokenSummary> = await controlPlane.listTokens(
-        principal,
-        input.cursor ?? null,
-        input.limit ?? 100,
+      return await materializedToolResult(
+        MAX_TOKEN_LIST_MATERIALIZATION_BYTES,
+        async (): Promise<ListTokensOutput> => {
+          const tokenPage: Page<TokenSummary> = await controlPlane.listTokens(
+            principal,
+            input.cursor ?? null,
+            input.limit ?? 100,
+          );
+          return ListTokensOutputSchema.parse({
+            next_cursor: tokenPage.nextCursor,
+            tokens: tokenPage.items.map(toTokenSummaryDto),
+          });
+        },
+        tokenListRetainedBytes,
       );
-      const output: ListTokensOutput = ListTokensOutputSchema.parse({
-        next_cursor: tokenPage.nextCursor,
-        tokens: tokenPage.items.map(toTokenSummaryDto),
-      });
-      return toolResult(output);
     }
     case "revoke_access_token": {
       const input: RevokeTokenInput = RevokeTokenInputSchema.parse(argumentsValue);

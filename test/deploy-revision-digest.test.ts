@@ -75,14 +75,22 @@ describe.skipIf(!enabled)("Linux digest-only preserved revision provenance", ():
       ],
       [
         "artifacts",
-        "docker",
-        "images",
-        "describe",
-        `${IMAGE_PREFIX}${PRESERVED_SOURCE}`,
+        "tags",
+        "list",
+        "--package",
+        "murmur",
+        "--repository",
+        "runtime",
+        "--location",
+        "us-central1",
         "--project",
         "test-project",
+        "--filter",
+        `name="${REGISTRY_PACKAGE}/tags/${PRESERVED_SOURCE}"`,
+        "--limit",
+        "2",
         "--format",
-        "json(image_summary.digest,image_summary.fully_qualified_digest)",
+        "json(name,version)",
         "--quiet",
       ],
     ]);
@@ -181,23 +189,25 @@ describe.skipIf(!enabled)("Linux digest-only preserved revision provenance", ():
     PRIVATE_SENTINEL,
     "{}",
     "null",
-    "{}\n{}",
-    JSON.stringify({ image_summary: { digest: PRESERVED_DIGEST } }),
+    "[]",
+    "[]\n[]",
+    JSON.stringify([tagRecord, tagRecord]),
+    JSON.stringify([{ version: tagRecord.version }]),
+    JSON.stringify([
+      { ...tagRecord, version: `${REGISTRY_PACKAGE}/versions/sha256:${"d".repeat(64)}` },
+    ]),
+    JSON.stringify([{ ...tagRecord, name: `${REGISTRY_PACKAGE}/tags/${"d".repeat(40)}` }]),
+    JSON.stringify([
+      { ...tagRecord, name: tagRecord.name.replace("test-project", "other-project") },
+    ]),
+    JSON.stringify([{ ...tagRecord, version: tagRecord.version.replace("runtime", "other") }]),
+    JSON.stringify([{ ...tagRecord, extra: PRIVATE_SENTINEL }]),
+    JSON.stringify([{ ...tagRecord, name: `${tagRecord.name}\n` }]),
     JSON.stringify({
-      image_summary: { digest: `sha256:${"d".repeat(64)}`, fully_qualified_digest: DIGEST_IMAGE },
-    }),
-    JSON.stringify({
-      image_summary: { digest: PRESERVED_DIGEST, fully_qualified_digest: `${DIGEST_IMAGE}extra` },
-    }),
-    JSON.stringify({
-      image_summary: {
-        digest: PRESERVED_DIGEST,
-        fully_qualified_digest: DIGEST_IMAGE,
-        extra: PRIVATE_SENTINEL,
-      },
+      image_summary: { digest: PRESERVED_DIGEST, fully_qualified_digest: DIGEST_IMAGE },
     }),
   ]) {
-    test("retargeted or malformed exact-tag digest resolution cannot establish provenance", async (): Promise<void> => {
+    test("retargeted or malformed exact-tag metadata cannot establish provenance", async (): Promise<void> => {
       expectFailure(await runRevisionFixture({ inventory, registryImage }), bindingError);
     });
   }
@@ -206,9 +216,7 @@ describe.skipIf(!enabled)("Linux digest-only preserved revision provenance", ():
     expectFailure(
       await runRevisionFixture({
         inventory,
-        registryImage: JSON.stringify({
-          image_summary: { digest: PRESERVED_DIGEST, fully_qualified_digest: DIGEST_IMAGE },
-        }).padEnd(1_048_577, "\n"),
+        registryImage: JSON.stringify([tagRecord]).padEnd(1_048_577, "\n"),
       }),
       bindingError,
     );

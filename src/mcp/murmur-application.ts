@@ -1,4 +1,4 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type {
   CallToolRequest,
@@ -30,6 +30,7 @@ import {
   type EffectiveOrchestratorDto,
   toEffectiveOrchestratorDto,
 } from "../hosted/orchestration-contracts.js";
+import { MaterializationCapacityError } from "../materialization-budget.js";
 import { logSafeError } from "../safe-errors.js";
 import type { E2eeMessageStore, E2eeOrchestrationScope } from "../storage/e2ee-message-store.js";
 import type { MessageStore } from "../storage/message-store.js";
@@ -49,6 +50,7 @@ import {
   callOrchestrationTool,
   type OrchestrationToolContext,
 } from "./murmur-orchestration-tools.js";
+import { callSetupGuideTool } from "./murmur-setup-guide.js";
 import { toolsForPrincipal } from "./murmur-tool-definitions.js";
 import { toolError } from "./murmur-tool-results.js";
 import {
@@ -56,7 +58,10 @@ import {
   type MurmurUpgradeChecker,
 } from "./murmur-upgrade-checker.js";
 import { callUpgradeTool } from "./murmur-upgrade-tool.js";
-import { callSetupGuideTool } from "./murmur-setup-guide.js";
+import {
+  installProcessingAdmission,
+  RequestProcessingServer,
+} from "./request-processing-admission.js";
 
 const SERVER_VERSION: string = packageMetadata.version;
 
@@ -79,6 +84,7 @@ export type MurmurApplicationDependencies = {
   readonly principal?: HostedPrincipal | null;
   readonly revalidatePrincipal?: (() => Promise<boolean>) | undefined;
   readonly repositoryName: RepositoryName | null;
+  readonly reserveProcessingCapacity?: (() => (() => void) | null) | undefined;
   readonly store: MessageStore | null;
   readonly tenantOnboardingEnabled?: boolean;
   readonly upgradeChecker?: MurmurUpgradeChecker | undefined;
@@ -142,7 +148,7 @@ export class MurmurApplication {
     this.upgradeChecker = dependencies.upgradeChecker ?? defaultMurmurUpgradeChecker;
     this.tools = this.createTools();
     this.exposedToolNames = new Set<string>(this.tools.map((tool: Tool): string => tool.name));
-    this.server = new Server(
+    this.server = new RequestProcessingServer(
       { name: "murmur", version: SERVER_VERSION },
       {
         capabilities: {
@@ -152,6 +158,7 @@ export class MurmurApplication {
         instructions: this.serverInstructions(),
       },
     );
+    installProcessingAdmission(this.server, dependencies.reserveProcessingCapacity);
     this.humanApproval = new MurmurHumanApproval(this.server);
     const resourceStore: MessageStore | null =
       this.e2eeEntitlement !== null && this.e2eeEntitlement.state === "enforced"
@@ -359,6 +366,7 @@ export class MurmurApplication {
       }
       return toolError(new Error(`Unknown tool '${name}'`));
     } catch (error: unknown) {
+      if (error instanceof MaterializationCapacityError) throw error;
       return toolError(normalizePostgresStorageError(error));
     }
   }

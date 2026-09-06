@@ -16,6 +16,10 @@ import {
   renewPostgresSessionInTransaction,
 } from "./postgres-agent-lifecycle-store.js";
 import {
+  createPostgresTenantTransactionRunner,
+  type PostgresTenantTransactionRunner,
+} from "./postgres-message-operation.js";
+import {
   firstRow,
   type MessageRow,
   MessageRowSchema,
@@ -24,7 +28,6 @@ import {
 import {
   lockPostgresRecipientCommitOrder,
   requirePostgresAgents,
-  setPostgresTenantContext,
 } from "./postgres-message-transactions.js";
 
 function sameNullableValue(
@@ -93,12 +96,12 @@ export async function sendPostgresMessage(
   tenantId: TenantId,
   command: SendMessageCommand,
   now: Instant,
+  run: PostgresTenantTransactionRunner = createPostgresTenantTransactionRunner(database, tenantId),
 ): Promise<SendMessageResult> {
-  const provenance: MessageProvenance =
-    command.provenance === undefined ? ordinaryMessageProvenance() : command.provenance;
-  validateMessageProvenance(provenance);
-  return await database.begin(async (transaction: TransactionSql): Promise<SendMessageResult> => {
-    await setPostgresTenantContext(transaction, tenantId);
+  return await run(async (transaction: TransactionSql): Promise<SendMessageResult> => {
+    const provenance: MessageProvenance =
+      command.provenance === undefined ? ordinaryMessageProvenance() : command.provenance;
+    validateMessageProvenance(provenance);
     await requirePostgresAgents(
       transaction,
       tenantId,

@@ -35,6 +35,8 @@ import {
   SSE_KEEP_ALIVE_MS,
   TENANT_REGISTRATION_PATH,
 } from "./http/http-config.js";
+import { HttpMaterializationBudget } from "./http/http-materialization-budget.js";
+import { runHttpProcess } from "./http/http-process.js";
 import {
   authenticationCapacityResponse,
   bearerToken,
@@ -44,16 +46,14 @@ import {
   mcpRequestMetadata,
   originIsAllowed,
   parseRequestBody,
+  RequestBodyTimeoutError,
   RequestBodyTooLargeError,
   repositoryFromRequest,
   requestSessionId,
   streamCapacityResponse,
   unauthorizedResponse,
 } from "./http/http-request.js";
-import { runHttpProcess } from "./http/http-process.js";
 import { createHttpRequestHandler } from "./http/http-router.js";
-import { createPublicSetupHandler } from "./http/public-setup.js";
-import { configuredPublicDownloads } from "./http/public-distribution.js";
 import type { HttpServerDependencies, MurmurHttpServer } from "./http/http-server-contracts.js";
 import {
   cleanupObservabilityStartup,
@@ -63,10 +63,15 @@ import {
 } from "./http/http-server-resources.js";
 import type { HostedApplicationRequest } from "./http/murmur-application-factory.js";
 import { createHostedMurmurApplication } from "./http/murmur-application-factory.js";
+import { type NodeHttpServer, startNodeHttpServer } from "./http/node-http-server.js";
+import { configuredPublicDownloads } from "./http/public-distribution.js";
+import { createPublicSetupHandler } from "./http/public-setup.js";
 import type { RemoteSession } from "./http/remote-session.js";
 import { trackSessionResponse } from "./http/remote-stream-lifecycle.js";
+import { HttpRequestIdAdmission } from "./http/request-id-admission.js";
 import { responseWithFinish } from "./http/response-lifecycle.js";
 import { createTenantRegistrationHandler } from "./http/self-service-registration.js";
+import { type SessionAdmission, SessionAdmissionController } from "./http/session-admission.js";
 import {
   RemoteSessionInvalidator,
   type SessionAuthorizationEpoch,
@@ -81,6 +86,7 @@ import {
 import { logSafeError } from "./safe-errors.js";
 import { createStore } from "./storage/create-store.js";
 import type { MessageStore } from "./storage/message-store.js";
+
 export type { HttpServerDependencies, MurmurHttpServer } from "./http/http-server-contracts.js";
 export async function startHttpServer(
   environment: NodeJS.ProcessEnv = process.env,
@@ -90,13 +96,14 @@ export async function startHttpServer(
   const allowedOrigins: ReadonlySet<string> = config.allowedOrigins;
   const hostname: string = config.hostname;
   const maxRequestBytes: number = config.maxRequestBytes;
-  const maxSessions: number = config.maxSessions;
-  const maxSessionsPerTenant: number = config.maxSessionsPerTenant;
   const requestedPort: number = config.requestedPort;
   const sessionIdleMs: number = config.sessionIdleMs;
   const tenantRateLimitPerMinute: number = config.tenantRateLimitPerMinute;
   const timeSource: TimeSource = dependencies.timeSource ?? SYSTEM_TIME_SOURCE;
   const capacity: HttpCapacityController = new HttpCapacityController(config, timeSource);
+  const processingCapacity: HttpCapacityController = new HttpCapacityController(config, timeSource);
+  const materialization: HttpMaterializationBudget = new HttpMaterializationBudget();
+  const requestIds: HttpRequestIdAdmission = new HttpRequestIdAdmission();
   const store: MessageStore = await createStore(environment);
   const applicationFactory: (request: HostedApplicationRequest) => Promise<MurmurApplication> =
     dependencies.applicationFactory ?? createHostedMurmurApplication;
@@ -121,7 +128,10 @@ export async function startHttpServer(
     }
   }
   const sessions: Map<string, RemoteSession> = new Map<string, RemoteSession>();
-  const initializingByTenant: Map<string, number> = new Map<string, number>();
+  const sessionAdmission: SessionAdmissionController = new SessionAdmissionController(
+    sessions,
+    config,
+  );
   const invalidator: RemoteSessionInvalidator = new RemoteSessionInvalidator(sessions);
   const registrationControlPlane: HostedControlPlane | null = authenticator.tenantOnboardingEnabled
     ? authenticator.controlPlane
@@ -168,7 +178,6 @@ export async function startHttpServer(
     publicOrigin: config.oauthPublicOrigin,
     tenantRateLimitPerMinute,
   });
-  let initializingSessions: number = 0;
   let stopped: boolean = false;
   const expireIdleSessions: (now: number) => Promise<void> = async (now: number): Promise<void> => {
     const expired: [string, RemoteSession][] = Array.from(sessions.entries()).filter(
@@ -200,6 +209,7 @@ export async function startHttpServer(
         capacity,
         observation,
       );
+      if (request.signal.aborted) return jsonResponse(408, { error: "HTTP request cancelled" });
       if (authentication.kind === "capacity") return authenticationCapacityResponse();
       if (authentication.kind === "unavailable") {
         return jsonResponse(503, { error: "Authentication service unavailable" });
@@ -265,10 +275,13 @@ export async function startHttpServer(
           let parsedPostBody: unknown;
           if (request.method === "POST") {
             try {
-              parsedPostBody = await parseRequestBody(request, maxRequestBytes);
+              parsedPostBody = await parseRequestBody(request, maxRequestBytes, timeSource);
               observation.recordMcpRequest(mcpRequestMetadata(parsedPostBody));
             } catch (error: unknown) {
               observation.recordError(error);
+              if (error instanceof RequestBodyTimeoutError) {
+                return jsonResponse(408, { error: error.message });
+              }
               const message: string = error instanceof Error ? error.message : String(error);
               return jsonResponse(error instanceof RequestBodyTooLargeError ? 413 : 400, {
                 error: message,
@@ -286,9 +299,9 @@ export async function startHttpServer(
             observation.recordSessionLookup("found");
             observation.recordSession(sessionId);
             session.lastSeenAt = now;
-            const response: Response = await session.transport.handleRequest(
-              request,
-              parsedPostBody === undefined ? undefined : { parsedBody: parsedPostBody },
+            const response: Response = await materialization.handle(
+              async (): Promise<Response> =>
+                await requestIds.handle(session.transport, request, parsedPostBody),
             );
             return trackSessionResponse(
               response,
@@ -322,98 +335,90 @@ export async function startHttpServer(
               error: `Invalid Murmur context header: ${message}`,
             });
           }
-          if (sessions.size + initializingSessions >= maxSessions) {
-            observation.recordSessionCapacity("rejected", "global");
-            return jsonResponse(503, { error: "MCP session capacity reached" });
-          }
-          if (tenantId !== null) {
-            const establishedForTenant: number = Array.from(sessions.values()).filter(
-              (session: RemoteSession): boolean => session.tenantId === tenantId,
-            ).length;
-            const initializingForTenant: number = initializingByTenant.get(tenantId) ?? 0;
-            if (establishedForTenant + initializingForTenant >= maxSessionsPerTenant) {
-              observation.recordSessionCapacity("rejected", "tenant");
-              return jsonResponse(503, { error: "Tenant MCP session capacity reached" });
-            }
+          const admission: SessionAdmission = sessionAdmission.reserve(tenantId);
+          if (admission.kind === "rejected") {
+            observation.recordSessionCapacity("rejected", admission.scope);
+            return jsonResponse(503, {
+              error:
+                admission.scope === "global"
+                  ? "MCP session capacity reached"
+                  : "Tenant MCP session capacity reached",
+            });
           }
           observation.recordSessionCapacity(
             "allowed",
             tenantId === null ? "global" : "global_and_tenant",
           );
-
-          const transport: WebStandardStreamableHTTPServerTransport =
-            new WebStandardStreamableHTTPServerTransport({
-              keepAliveMs: SSE_KEEP_ALIVE_MS,
-              sessionIdGenerator: randomUUID,
-            });
           const initializationEpoch: SessionAuthorizationEpoch = invalidator.capture(
             tenantId,
             principal.tokenId,
           );
-          const application: MurmurApplication = await applicationFactory({
-            authenticator,
-            branchName,
-            client,
-            onTenantSuspended: async (changedTenantId: TenantId): Promise<void> =>
-              await invalidator.invalidateTenant(changedTenantId),
-            onTokenRevoked: async (tokenId: string): Promise<void> =>
-              await invalidator.invalidateToken(tokenId),
-            onRepositoryDivergence: (): void => recordRepositoryDivergence(observability),
-            principal,
-            repositoryName,
-            store,
-            token,
-          });
-          const session: RemoteSession = {
-            activeResponses: 0,
-            application,
-            lastSeenAt: now,
-            principalIdentity,
-            tenantId: principal.kind === "tenant" ? principal.tenantId.value : null,
-            tokenId: principal.tokenId,
-            transport,
-          };
-          initializingSessions += 1;
-          if (tenantId !== null) {
-            initializingByTenant.set(tenantId, (initializingByTenant.get(tenantId) ?? 0) + 1);
-          }
-          transport.onclose = (): void => {
-            const closedSessionId: string | undefined = transport.sessionId;
-            if (closedSessionId !== undefined) sessions.delete(closedSessionId);
-          };
           try {
-            await application.server.connect(transport);
-            const response: Response = await transport.handleRequest(request, {
-              parsedBody: parsedPostBody,
-            });
-            const initializedSessionId: string | undefined = transport.sessionId;
-            if (initializedSessionId === undefined) {
-              await application.close();
-            } else if (invalidator.changed(initializationEpoch)) {
-              await application.close();
-              return jsonResponse(409, {
-                error: "MCP session authorization changed during initialization; retry",
+            const transport: WebStandardStreamableHTTPServerTransport =
+              new WebStandardStreamableHTTPServerTransport({
+                keepAliveMs: SSE_KEEP_ALIVE_MS,
+                sessionIdGenerator: randomUUID,
               });
-            } else {
-              observation.recordSession(initializedSessionId);
-              observation.recordSessionLookup("found");
-              sessions.set(initializedSessionId, session);
-            }
-            return response;
-          } catch (error: unknown) {
+            const application: MurmurApplication = await applicationFactory({
+              authenticator,
+              branchName,
+              client,
+              onTenantSuspended: async (changedTenantId: TenantId): Promise<void> =>
+                await invalidator.invalidateTenant(changedTenantId),
+              onTokenRevoked: async (tokenId: string): Promise<void> =>
+                await invalidator.invalidateToken(tokenId),
+              onRepositoryDivergence: (): void => recordRepositoryDivergence(observability),
+              principal,
+              repositoryName,
+              reserveProcessingCapacity: (): (() => void) | null =>
+                processingCapacity.reserveRequest(principalIdentity, tenantId),
+              store,
+              token,
+            });
+            const session: RemoteSession = {
+              activeResponses: 0,
+              application,
+              lastSeenAt: now,
+              principalIdentity,
+              tenantId: principal.kind === "tenant" ? principal.tenantId.value : null,
+              tokenId: principal.tokenId,
+              transport,
+            };
+            transport.onclose = (): void => {
+              const closedSessionId: string | undefined = transport.sessionId;
+              if (closedSessionId !== undefined) sessions.delete(closedSessionId);
+            };
             try {
-              await application.close();
-            } catch (closeError: unknown) {
-              logSafeError("Murmur failed-session shutdown failed", closeError);
+              await application.server.connect(transport);
+              const response: Response = await materialization.handle(
+                async (): Promise<Response> =>
+                  await requestIds.handle(transport, request, parsedPostBody),
+              );
+              const initializedSessionId: string | undefined = transport.sessionId;
+              if (initializedSessionId === undefined) {
+                await application.close();
+              } else if (invalidator.changed(initializationEpoch)) {
+                await application.close();
+                return jsonResponse(409, {
+                  error: "MCP session authorization changed during initialization; retry",
+                });
+              } else {
+                observation.recordSession(initializedSessionId);
+                observation.recordSessionLookup("found");
+                sessions.set(initializedSessionId, session);
+              }
+              return response;
+            } catch (error: unknown) {
+              try {
+                await application.close();
+              } catch (closeError: unknown) {
+                logSafeError("Murmur failed-session shutdown failed", closeError);
+              }
+              throw error;
             }
-            throw error;
           } finally {
-            initializingSessions -= 1;
-            if (tenantId !== null) {
-              const remaining: number = (initializingByTenant.get(tenantId) ?? 1) - 1;
-              if (remaining === 0) initializingByTenant.delete(tenantId);
-              else initializingByTenant.set(tenantId, remaining);
-            }
+            invalidator.release(initializationEpoch);
+            admission.release();
           }
         })();
         const capacityTrackedResponse: Response = responseWithFinish(
@@ -426,9 +431,9 @@ export async function startHttpServer(
         if (!responseHandedOff) releaseResponseCapacity();
       }
     };
-  let bunServer: Bun.Server<undefined>;
+  let httpServer: NodeHttpServer;
   try {
-    bunServer = Bun.serve({
+    httpServer = await startNodeHttpServer({
       fetch: createHttpRequestHandler(
         observability,
         handleMcpRequest,
@@ -439,6 +444,7 @@ export async function startHttpServer(
         createPublicSetupHandler({ allowedOrigins, capacity, time: timeSource }),
       ),
       hostname,
+      maxRequestBytes,
       port: requestedPort,
     });
   } catch (error: unknown) {
@@ -446,10 +452,10 @@ export async function startHttpServer(
     await cleanupServerStartup(authenticator, store, observability, null);
     throw error;
   }
-  const boundPort: number | undefined = bunServer.port;
+  const boundPort: number | undefined = httpServer.port;
   if (boundPort === undefined) {
     capacity.stop();
-    await cleanupServerStartup(authenticator, store, observability, bunServer);
+    await cleanupServerStartup(authenticator, store, observability, httpServer);
     throw new Error("The HTTP server did not bind a TCP port");
   }
   const port: number = boundPort;
@@ -470,7 +476,7 @@ export async function startHttpServer(
       connectorAuthorizationCodes.clear();
       const activeSessions: [string, RemoteSession][] = Array.from(sessions.entries());
       await shutdownHttpResources(
-        bunServer,
+        httpServer,
         async (): Promise<void> =>
           await invalidator.close(activeSessions, "Murmur active-session shutdown failed"),
         authenticator,

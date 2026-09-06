@@ -27,10 +27,8 @@ type ImageRecord = {
   readonly spec: { readonly containers: { readonly image: string }[] };
 };
 type ArtifactRecord = {
-  readonly image_summary: {
-    readonly digest: string;
-    readonly fully_qualified_digest: string;
-  };
+  readonly name: string;
+  readonly version: string;
 };
 export type StreamRevisionImage =
   | { readonly kind: "tagged" }
@@ -86,12 +84,9 @@ const ImageSchema: z.ZodType<ImageRecord> = z.strictObject({
   }),
 });
 const DigestSchema: z.ZodString = z.string().regex(/^sha256:[0-9a-f]{64}(?![\s\S])/u);
-const ArtifactSchema: z.ZodType<ArtifactRecord> = z.strictObject({
-  image_summary: z.strictObject({
-    digest: DigestSchema,
-    fully_qualified_digest: z.string().max(512),
-  }),
-});
+const ArtifactSchema: z.ZodType<ArtifactRecord[]> = z
+  .array(z.strictObject({ name: z.string().max(512), version: z.string().max(512) }))
+  .length(1);
 
 const ResourceSchema: z.ZodType<ResourceRecord> = z.strictObject({
   type: z.literal("cloud_run_revision"),
@@ -176,21 +171,29 @@ export function streamRevisionArguments(
   ];
 }
 
-function streamImageName(config: StreamLogConfiguration): string {
-  return `${config.region}-docker.pkg.dev/${config.project}/${config.repository}/${config.service}`;
+function streamPackageName(config: StreamLogConfiguration): string {
+  return `projects/${config.project}/locations/${config.region}/repositories/${config.repository}/packages/${config.service}`;
 }
 
 export function streamArtifactArguments(config: StreamLogConfiguration): string[] {
   return [
     "artifacts",
-    "docker",
-    "images",
-    "describe",
-    `${streamImageName(config)}:${config.expectedSha}`,
+    "tags",
+    "list",
+    "--package",
+    config.service,
+    "--repository",
+    config.repository,
+    "--location",
+    config.region,
     "--project",
     config.project,
+    "--filter",
+    `name="${streamPackageName(config)}/tags/${config.expectedSha}"`,
+    "--limit",
+    "2",
     "--format",
-    "json(image_summary.digest,image_summary.fully_qualified_digest)",
+    "json(name,version)",
     "--quiet",
     "--verbosity=error",
   ];
@@ -202,10 +205,12 @@ export function validateStreamArtifact(
   digest: string,
 ): void {
   const parsed: ReturnType<typeof ArtifactSchema.safeParse> = ArtifactSchema.safeParse(value);
-  requireStreamLog(parsed.success);
+  requireStreamLog(parsed.success && DigestSchema.safeParse(digest).success);
+  const artifact: ArtifactRecord | undefined = parsed.data[0];
+  requireStreamLog(artifact !== undefined);
   requireStreamLog(
-    parsed.data.image_summary.digest === digest &&
-      parsed.data.image_summary.fully_qualified_digest === `${streamImageName(config)}@${digest}`,
+    artifact.name === `${streamPackageName(config)}/tags/${config.expectedSha}` &&
+      artifact.version === `${streamPackageName(config)}/versions/${digest}`,
   );
 }
 

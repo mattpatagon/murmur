@@ -1,6 +1,5 @@
 import type { Sql, TransactionSql } from "postgres";
 import { z } from "zod";
-
 import {
   type MarkMessagesReadInput,
   MarkMessagesReadInputSchema,
@@ -22,6 +21,16 @@ import {
   type GetInboxSummaryOutput,
   GetInboxSummaryOutputSchema,
 } from "../e2ee/wire-tools.js";
+import {
+  type MaterializationReservation,
+  reserveMaterializationBytes,
+} from "../materialization-budget.js";
+import {
+  ENCRYPTED_PAGE_JSON_MULTIPLIER,
+  INBOX_PAGE_ROW_OVERHEAD_BYTES,
+  MAX_INBOX_PAGE_BYTES,
+  parsePostgresInboxPage,
+} from "./inbox-page-budget.js";
 import {
   postgresAgentInTransaction,
   renewPostgresSessionInTransaction,
@@ -98,33 +107,68 @@ export async function getPostgresEncryptedMessages(
         now,
       );
       const threadId: string | null = input.thread_id === undefined ? null : input.thread_id;
-      const raw: unknown = await transaction`
-      SELECT tenant_sequence, envelope_json::text AS envelope_json,
-        sender_chain_json::text AS sender_chain_json,
-        CASE WHEN read_at IS NULL THEN NULL ELSE
-          to_char(read_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+      const reservation: MaterializationReservation =
+        reserveMaterializationBytes(MAX_INBOX_PAGE_BYTES);
+      try {
+        const raw: unknown = await transaction`
+      WITH candidates AS MATERIALIZED (
+        SELECT tenant_sequence,
+          ${ENCRYPTED_PAGE_JSON_MULTIPLIER}::bigint * (
+            octet_length(envelope_json::text) + octet_length(sender_chain_json::text)
+          ) + ${INBOX_PAGE_ROW_OVERHEAD_BYTES}::bigint AS estimated_bytes
+        FROM murmur.e2ee_messages
+        WHERE tenant_id = ${tenantId.value}::uuid
+          AND recipient_id = ${input.agent_id}
+          AND recipient_generation = ${agent.generation.value}
+          AND tenant_sequence > ${input.after_sequence}
+          AND expires_at > ${now.toISOString()}::timestamptz
+          AND (${input.unread_only} = false OR read_at IS NULL)
+          AND (${threadId}::text IS NULL OR thread_id = ${threadId})
+        ORDER BY tenant_sequence ASC
+        LIMIT ${input.limit}
+      ), budget AS (
+        SELECT COALESCE(SUM(estimated_bytes), 0)::bigint AS estimated_page_bytes FROM candidates
+      )
+      SELECT budget.estimated_page_bytes, message.tenant_sequence,
+        message.envelope_json::text AS envelope_json,
+        message.sender_chain_json::text AS sender_chain_json,
+        CASE WHEN message.read_at IS NULL THEN NULL ELSE
+          to_char(message.read_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
         END AS read_at
-      FROM murmur.e2ee_messages
-      WHERE tenant_id = ${tenantId.value}::uuid
-        AND recipient_id = ${input.agent_id}
-        AND recipient_generation = ${agent.generation.value}
-        AND tenant_sequence > ${input.after_sequence}
-        AND expires_at > ${now.toISOString()}::timestamptz
-        AND (${input.unread_only} = false OR read_at IS NULL)
-        AND (${threadId}::text IS NULL OR thread_id = ${threadId})
-      ORDER BY tenant_sequence ASC
-      LIMIT ${input.limit}
+      FROM budget
+      LEFT JOIN candidates ON budget.estimated_page_bytes <= ${MAX_INBOX_PAGE_BYTES}
+      LEFT JOIN murmur.e2ee_messages AS message
+        ON message.tenant_id = ${tenantId.value}::uuid
+        AND message.tenant_sequence = candidates.tenant_sequence
+      WHERE budget.estimated_page_bytes > ${MAX_INBOX_PAGE_BYTES}
+        OR message.tenant_sequence IS NOT NULL
+      ORDER BY message.tenant_sequence ASC
     `;
-      const rows: PostgresE2eeMessageRow[] = z.array(PostgresE2eeMessageRowSchema).parse(raw);
-      const messages: EncryptedMessageDto[] = rows.map(
-        (row: PostgresE2eeMessageRow): EncryptedMessageDto => postgresEncryptedMessageFromRow(row),
-      );
-      const summary: PostgresE2eeSummaryRow = await summaryRow(transaction, tenantId, agent, now);
-      return EncryptedInboxOutputSchema.parse({
-        agent_id: input.agent_id,
-        inbox_version: summary.version,
-        messages,
-      });
+        const {
+          estimatedBytes,
+          rows,
+        }: {
+          readonly estimatedBytes: number;
+          readonly rows: PostgresE2eeMessageRow[];
+        } = parsePostgresInboxPage(raw, PostgresE2eeMessageRowSchema, {
+          kind: "encrypted",
+          limit: input.limit,
+        });
+        const messages: EncryptedMessageDto[] = rows.map(
+          (row: PostgresE2eeMessageRow): EncryptedMessageDto =>
+            postgresEncryptedMessageFromRow(row),
+        );
+        reservation.settle(estimatedBytes);
+        const summary: PostgresE2eeSummaryRow = await summaryRow(transaction, tenantId, agent, now);
+        return EncryptedInboxOutputSchema.parse({
+          agent_id: input.agent_id,
+          inbox_version: summary.version,
+          messages,
+        });
+      } catch (error: unknown) {
+        reservation.fail();
+        throw error;
+      }
     },
   );
 }

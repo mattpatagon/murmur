@@ -1,5 +1,5 @@
-import type { AgentGeneration } from "../domain/lifecycle-values.js";
 import type { SubmitFeedbackCommand, SubmitFeedbackResult } from "../domain/feedback-models.js";
+import type { AgentGeneration } from "../domain/lifecycle-values.js";
 import type {
   Agent,
   BroadcastMessageCommand,
@@ -33,6 +33,11 @@ import type { AgentId, Instant, Sequence, TenantId } from "../domain/value-objec
 
 export type Awaitable<T> = Promise<T> | T;
 
+export type InboxReadResult = {
+  readonly messages: readonly Message[];
+  readonly inboxVersion: Sequence;
+};
+
 export type InboxUpdateHandler = (sequence: Sequence) => Promise<void>;
 
 export interface InboxSubscription {
@@ -50,6 +55,7 @@ export interface MessageStore {
   sendMessage(command: SendMessageCommand): Awaitable<SendMessageResult>;
   submitFeedback(command: SubmitFeedbackCommand): Awaitable<SubmitFeedbackResult>;
   getMessages(query: GetMessagesQuery): Awaitable<readonly Message[]>;
+  getMessagesWithVersion(query: GetMessagesQuery): Awaitable<InboxReadResult>;
   markMessagesRead(command: MarkMessagesReadCommand): Awaitable<MarkMessagesReadResult>;
   postNotice(command: PostNoticeCommand): Awaitable<PostNoticeResult>;
   listNotices(query: ListNoticesQuery): Awaitable<ListNoticesResult>;

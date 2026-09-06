@@ -43,9 +43,11 @@ and authenticated `/mcp` operations occur separately after the user follows the 
 
 The endpoint accepts JSON MCP requests through `POST`; other methods return `405`, and other
 media types return `415`. Requests follow the configured origin policy. Bodies are limited to
-8,192 bytes with a five-second read deadline; malformed, oversized, or stalled bodies return a
-fixed `400` response. Responses have a 30-second deadline and release request capacity on
-completion, cancellation, or failure.
+8,192 bytes with a five-second application read deadline; malformed or stalled bodies reaching
+that reader return a fixed `400` response. The [native HTTP listener](node-http-transport.md)
+rejects declared or streamed byte overflow with `413` before application parsing; its shared ingress
+capacity and outer upload deadline can return `503` and `408`. Responses have a 30-second deadline
+and release request capacity on completion, cancellation, or failure.
 
 Each process permits at most 600 setup requests per minute, with `429` and `Retry-After: 60` when
 that limit is reached. Setup shares the global request-capacity gate, including its per-principal

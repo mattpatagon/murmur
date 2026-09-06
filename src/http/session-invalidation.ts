@@ -3,37 +3,33 @@ import { logSafeError } from "../safe-errors.js";
 import type { RemoteSession } from "./remote-session.js";
 
 export type SessionAuthorizationEpoch = {
-  readonly tenantEpoch: number | null;
   readonly tenantId: string | null;
-  readonly tokenEpoch: number;
   readonly tokenId: string;
 };
 
 export class RemoteSessionInvalidator {
   readonly #sessions: Map<string, RemoteSession>;
-  readonly #tenantEpochs: Map<string, number> = new Map<string, number>();
-  readonly #tokenEpochs: Map<string, number> = new Map<string, number>();
+  readonly #pending: Set<SessionAuthorizationEpoch> = new Set<SessionAuthorizationEpoch>();
+  readonly #invalidated: WeakSet<SessionAuthorizationEpoch> =
+    new WeakSet<SessionAuthorizationEpoch>();
 
   public constructor(sessions: Map<string, RemoteSession>) {
     this.#sessions = sessions;
   }
 
   public capture(tenantId: string | null, tokenId: string): SessionAuthorizationEpoch {
-    return {
-      tenantEpoch: tenantId === null ? null : this.#epoch(this.#tenantEpochs, tenantId),
-      tenantId,
-      tokenEpoch: this.#epoch(this.#tokenEpochs, tokenId),
-      tokenId,
-    };
+    const captured: SessionAuthorizationEpoch = { tenantId, tokenId };
+    this.#pending.add(captured);
+    return captured;
   }
 
   public changed(captured: SessionAuthorizationEpoch): boolean {
-    return (
-      this.#epoch(this.#tokenEpochs, captured.tokenId) !== captured.tokenEpoch ||
-      (captured.tenantId !== null &&
-        captured.tenantEpoch !== null &&
-        this.#epoch(this.#tenantEpochs, captured.tenantId) !== captured.tenantEpoch)
-    );
+    return this.#invalidated.has(captured);
+  }
+
+  public release(captured: SessionAuthorizationEpoch): void {
+    this.#pending.delete(captured);
+    this.#invalidated.delete(captured);
   }
 
   public async close(matches: readonly [string, RemoteSession][], context: string): Promise<void> {
@@ -51,7 +47,9 @@ export class RemoteSessionInvalidator {
   }
 
   public async invalidateTenant(tenantId: TenantId): Promise<void> {
-    this.#advance(this.#tenantEpochs, tenantId.value);
+    for (const captured of this.#pending) {
+      if (captured.tenantId === tenantId.value) this.#invalidated.add(captured);
+    }
     this.#schedule(
       Array.from(this.#sessions.entries()).filter(
         (entry: [string, RemoteSession]): boolean => entry[1].tenantId === tenantId.value,
@@ -61,7 +59,9 @@ export class RemoteSessionInvalidator {
   }
 
   public async invalidateToken(tokenId: string): Promise<void> {
-    this.#advance(this.#tokenEpochs, tokenId);
+    for (const captured of this.#pending) {
+      if (captured.tokenId === tokenId) this.#invalidated.add(captured);
+    }
     this.#schedule(
       Array.from(this.#sessions.entries()).filter(
         (entry: [string, RemoteSession]): boolean => entry[1].tokenId === tokenId,
@@ -70,15 +70,8 @@ export class RemoteSessionInvalidator {
     );
   }
 
-  #advance(epochs: Map<string, number>, key: string): void {
-    epochs.set(key, this.#epoch(epochs, key) + 1);
-  }
-
-  #epoch(epochs: ReadonlyMap<string, number>, key: string): number {
-    return epochs.get(key) ?? 0;
-  }
-
   #schedule(matches: readonly [string, RemoteSession][], context: string): void {
+    if (matches.length === 0) return;
     matches.forEach((entry: [string, RemoteSession]): void => {
       this.#sessions.delete(entry[0]);
     });

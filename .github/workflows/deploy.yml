@@ -25,6 +25,7 @@ env:
 jobs:
   deploy:
     name: Test, migrate, and deploy
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment:
@@ -148,9 +149,11 @@ jobs:
             --update-env-vars MURMUR_AUTH_MODE=legacy,MURMUR_ALLOW_BOOTSTRAP=0,MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_CONCURRENT_AUTHENTICATIONS=4,MURMUR_MAX_STREAM_LIFETIME_MS=3300000,MURMUR_PUBLIC_ORIGIN=https://api.usemurmur.dev,MURMUR_RELEASE_REVISION="$GITHUB_SHA" \
             --set-secrets MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:"$RUNTIME_DATABASE_SECRET_VERSION",MURMUR_API_TOKEN=MURMUR_API_TOKEN:latest,/etc/murmur/secrets/database-ca.pem=MURMUR_DATABASE_CA:latest \
             --concurrency 80 \
+            --cpu 1 \
+            --max 1 \
             --max-instances 1 \
             --memory 512Mi \
-            --port 8080 \
+            --port 8080 --no-use-http2 \
             --timeout 3600 \
             --quiet
           curl --fail --silent --show-error "$PRODUCTION_URL/health" >/dev/null
@@ -249,9 +252,11 @@ jobs:
             --update-env-vars MURMUR_AUTH_MODE="$auth_mode",MURMUR_ALLOW_BOOTSTRAP="$allow_bootstrap",MURMUR_DATABASE_CA_PATH=/etc/murmur/secrets/database-ca.pem,MURMUR_DATABASE_TLS_INSECURE=0,MURMUR_MAX_CONCURRENT_AUTHENTICATIONS=4,MURMUR_MAX_STREAM_LIFETIME_MS=3300000,MURMUR_PUBLIC_ORIGIN=https://api.usemurmur.dev,MURMUR_RELEASE_REVISION="$GITHUB_SHA" \
             --set-secrets "$secret_mapping" \
             --concurrency 80 \
+            --cpu 1 \
+            --max 1 \
             --max-instances 1 \
             --memory 512Mi \
-            --port 8080 \
+            --port 8080 --no-use-http2 \
             --timeout 3600 \
             --quiet
           unset secret_mapping

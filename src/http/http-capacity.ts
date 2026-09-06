@@ -1,5 +1,7 @@
 import type { HttpServerConfig } from "./http-config.js";
 
+const MAX_RATE_WINDOWS: number = 65_536;
+
 export type TimeSource = {
   now(): number;
   schedule(milliseconds: number, wake: () => void): () => void;
@@ -59,24 +61,28 @@ export class HttpCapacityController {
     identity: string,
     limit: number = this.config.rateLimitPerMinute,
   ): boolean {
+    this.pruneRateWindows();
     const now: number = this.time.now();
     const existing: { count: number; startedAt: number } | undefined =
       this.rateWindows.get(identity);
     if (existing === undefined || now - existing.startedAt >= 60_000) {
+      if (existing === undefined && this.rateWindows.size >= MAX_RATE_WINDOWS) return false;
+      // Reinsert renewed windows so expiry cleanup can stop at the first live entry.
+      this.rateWindows.delete(identity);
       this.rateWindows.set(identity, { count: 1, startedAt: now });
       return true;
     }
+    if (existing.count >= limit) return false;
     existing.count += 1;
-    return existing.count <= limit;
+    return true;
   }
 
   public pruneRateWindows(): void {
     const now: number = this.time.now();
-    Array.from(this.rateWindows.entries()).forEach(
-      (entry: [string, { count: number; startedAt: number }]): void => {
-        if (now - entry[1].startedAt >= 120_000) this.rateWindows.delete(entry[0]);
-      },
-    );
+    for (const [identity, window] of this.rateWindows) {
+      if (now - window.startedAt < 120_000) break;
+      this.rateWindows.delete(identity);
+    }
   }
 
   public reserveRequest(principalIdentity: string, tenantId: string | null): (() => void) | null {

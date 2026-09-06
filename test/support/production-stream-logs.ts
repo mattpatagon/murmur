@@ -113,14 +113,15 @@ export class LogFixture implements StreamLogRuntime {
   };
   public releaseValue: unknown = { revision: SHA, version: CONFIG.expectedVersion };
   public releaseCalls: number = 0;
-  public artifact: unknown = {
-    image_summary: {
-      digest: `sha256:${"b".repeat(64)}`,
-      fully_qualified_digest: `${CONFIG.region}-docker.pkg.dev/${CONFIG.project}/${CONFIG.repository}/murmur@sha256:${"b".repeat(64)}`,
+  public artifact: unknown = [
+    {
+      name: `projects/${CONFIG.project}/locations/${CONFIG.region}/repositories/${CONFIG.repository}/packages/murmur/tags/${SHA}`,
+      version: `projects/${CONFIG.project}/locations/${CONFIG.region}/repositories/${CONFIG.repository}/packages/murmur/versions/sha256:${"b".repeat(64)}`,
     },
-  };
+  ];
   public readonly artifactReplies: string[] = [];
   public artifactFailure: boolean = false;
+  public artifactRegistryOnly: boolean = false;
   public artifactMilliseconds: number = 0;
   public initial: unknown = [applicationLog(true)];
   public replacement: unknown = [applicationLog(false)];
@@ -159,6 +160,8 @@ export class LogFixture implements StreamLogRuntime {
       if (arguments_[0] === "artifacts") {
         this.elapsed += this.artifactMilliseconds;
         if (this.artifactFailure) throw new Error("private-registry-access-sentinel");
+        if (this.artifactRegistryOnly && arguments_[1] !== "tags")
+          throw new Error("private-container-analysis-access-sentinel");
         const reply: string | undefined = this.artifactReplies.shift();
         return reply === undefined ? JSON.stringify(this.artifact) : reply;
       }

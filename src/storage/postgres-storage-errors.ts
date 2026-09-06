@@ -1,21 +1,28 @@
 import {
   AgentCapacityError,
   FeedbackCapacityError,
+  HostedStorageCapacityError,
   NoticeCapacityError,
   StorageCorruptionError,
 } from "../domain/errors.js";
 
-const SAFE_E2EE_DATABASE_MESSAGES: ReadonlySet<string> = new Set<string>([
+const SAFE_DATABASE_MESSAGES: ReadonlySet<string> = new Set<string>([
   "agent E2E identity has active encryption work",
+  "cannot revoke the last active operator token; another non-expiring operator is required",
   "E2E enforcement requires a positive trust-policy version",
   "expected E2E root does not match current identity",
   "identity reset reason must contain 10 to 500 characters",
   "plaintext message writes are disabled for this tenant",
   "tenant administrator credential rejected",
+  "tenant access-token quota exceeded",
   "tenant E2E enforcement prerequisites are incomplete",
   "tenant E2E rollback is unavailable while ciphertext is retained",
   "tenant E2E state changed before transition",
   "tenant E2E transition is invalid from the current state",
+  "tenant orchestrator-policy quota exceeded",
+  "tenant retained-broadcast quota exceeded",
+  "tenant retained-message quota exceeded",
+  "tenant unavailable",
   "unknown tenant E2E transition action",
 ]);
 
@@ -28,6 +35,9 @@ function stringProperty(error: unknown, property: string): string | null {
 export function normalizePostgresStorageError(error: unknown): unknown {
   const code: string | null = stringProperty(error, "code");
   const message: string | null = stringProperty(error, "message");
+  if (code === "54000" && message === "hosted retained-storage capacity reached") {
+    return new HostedStorageCapacityError();
+  }
   if (
     code === "54000" &&
     (message === "tenant agent quota exceeded" ||
@@ -45,7 +55,7 @@ export function normalizePostgresStorageError(error: unknown): unknown {
     return new StorageCorruptionError("tenant resource accounting", error);
   }
   const constraint: string | null = stringProperty(error, "constraint_name");
-  if (code !== null && message !== null && SAFE_E2EE_DATABASE_MESSAGES.has(message)) {
+  if (code !== null && message !== null && SAFE_DATABASE_MESSAGES.has(message)) {
     return new Error(message);
   }
   if (
@@ -64,5 +74,5 @@ export function normalizePostgresStorageError(error: unknown): unknown {
   ) {
     return new StorageCorruptionError("agent lifecycle data", error);
   }
-  return error;
+  return code === null ? error : new Error("Storage operation failed. Retry the request.");
 }

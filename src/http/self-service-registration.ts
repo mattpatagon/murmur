@@ -22,6 +22,7 @@ import {
   jsonResponse,
   originIsAllowed,
   parseRequestBody,
+  RequestBodyTimeoutError,
   RequestBodyTooLargeError,
 } from "./http-request.js";
 import { responseWithFinish } from "./response-lifecycle.js";
@@ -103,6 +104,9 @@ async function registrationInput(
     return parsed.success ? parsed.data : invalidRegistrationResponse(parsed.error);
   } catch (error: unknown) {
     observation.recordError(error);
+    if (error instanceof RequestBodyTimeoutError) {
+      return jsonResponse(408, { error: error.message });
+    }
     return error instanceof RequestBodyTooLargeError
       ? jsonResponse(413, { error: `Tenant registration body exceeds ${maxBodyBytes} bytes` })
       : jsonResponse(400, { error: "Tenant registration body must be valid JSON" });

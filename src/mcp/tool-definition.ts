@@ -1,6 +1,7 @@
 import type { Tool, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
-import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
+import type { z } from "zod";
+
+import { toolSchemaMetadata } from "./tool-schema-metadata.js";
 
 export function toolDefinition<Input, Output>(
   name: string,
@@ -10,18 +11,16 @@ export function toolDefinition<Input, Output>(
   outputSchema: z.ZodType<Output>,
   annotations: ToolAnnotations,
 ): Tool {
-  const generatedInput: unknown = z.toJSONSchema(inputSchema);
-  const generatedOutput: unknown = z.toJSONSchema(outputSchema);
-  const validatedInput: Tool["inputSchema"] = ToolSchema.shape.inputSchema.parse(generatedInput);
-  const validatedOutput: NonNullable<Tool["outputSchema"]> = ToolSchema.shape.outputSchema
-    .unwrap()
-    .parse(generatedOutput);
+  const metadata: ReturnType<typeof toolSchemaMetadata> = toolSchemaMetadata(
+    inputSchema,
+    outputSchema,
+  );
   return {
-    annotations,
+    annotations: structuredClone(annotations),
     description,
-    inputSchema: validatedInput,
+    inputSchema: metadata.inputSchema,
     name,
-    outputSchema: validatedOutput,
+    outputSchema: metadata.outputSchema,
     title,
   };
 }

@@ -11,8 +11,12 @@ import {
 import type { SubmitFeedbackCommand, SubmitFeedbackResult } from "../domain/feedback-models.js";
 import type { AgentClient, AgentId, BranchName, RepositoryName } from "../domain/value-objects.js";
 import type { MessageStore } from "../storage/message-store.js";
-import { requiredDataContext, type RequiredDataContext } from "./murmur-data-tool-helpers.js";
-import { toolResult } from "./murmur-tool-results.js";
+import {
+  feedbackRetainedBytes,
+  MAX_FEEDBACK_MATERIALIZATION_BYTES,
+  materializedToolResult,
+} from "./bounded-tool-materialization.js";
+import { type RequiredDataContext, requiredDataContext } from "./murmur-data-tool-helpers.js";
 
 const FEEDBACK_TOOL_NAMES: ReadonlySet<string> = new Set<string>(["submit_feedback"]);
 
@@ -35,15 +39,20 @@ export async function callFeedbackTool(
     "Feedback",
   );
   const parsed: SubmitFeedbackCommand = submitFeedbackCommand(input, submissionContext);
-  const command: SubmitFeedbackCommand = {
-    ...parsed,
-    reporterId: await authorizedReporterId(input.reporter_id),
-  };
-  const result: SubmitFeedbackResult = await store.submitFeedback(command);
-  const output: SubmitFeedbackOutput = SubmitFeedbackOutputSchema.parse({
-    duplicate: result.duplicate,
-    status: "stored",
-    submission: toFeedbackSubmissionDto(result.submission),
-  });
-  return toolResult(output);
+  return await materializedToolResult(
+    MAX_FEEDBACK_MATERIALIZATION_BYTES,
+    async (): Promise<SubmitFeedbackOutput> => {
+      const command: SubmitFeedbackCommand = {
+        ...parsed,
+        reporterId: await authorizedReporterId(input.reporter_id),
+      };
+      const result: SubmitFeedbackResult = await store.submitFeedback(command);
+      return SubmitFeedbackOutputSchema.parse({
+        duplicate: result.duplicate,
+        status: "stored",
+        submission: toFeedbackSubmissionDto(result.submission),
+      });
+    },
+    feedbackRetainedBytes,
+  );
 }
