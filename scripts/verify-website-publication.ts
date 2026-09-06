@@ -49,7 +49,7 @@ export async function readPublicationResponse(response: Response): Promise<unkno
   let size: number = 0;
   try {
     while (true) {
-      const next: ReadableStreamReadResult<Uint8Array> = await reader.read();
+      const next: Awaited<ReturnType<typeof reader.read>> = await reader.read();
       if (next.done) break;
       if (size + next.value.byteLength > MAXIMUM_BYTES)
         throw new Error("Publication response too large");
