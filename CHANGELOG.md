@@ -13,6 +13,10 @@ All notable changes to Murmur are documented in this file.
 
 - Remove the separate tarball-installation verification gate. Hosted package downloads and artifact integrity validation remain available.
 
+### Fixed
+
+- Allow up to 60 seconds for website publication to reach the custom domain before verifying the exact release revision.
+
 ## [0.13.1.0] - 2026-09-06
 
 ### Added
