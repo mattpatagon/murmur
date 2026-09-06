@@ -309,7 +309,11 @@ export function streamObservationArguments(
   kind: "initial" | "replacement" | "platform",
 ): string[] {
   const lower: string = new Date(Date.parse(result.startedAt) - 30_000).toISOString();
-  const upper: string = new Date(Date.parse(result.endedAt) + 30_000).toISOString();
+  // Cleanup begins after endedAt and may induce retryable 503 admission pressure.
+  const upper: string =
+    kind === "platform"
+      ? result.endedAt
+      : new Date(Date.parse(result.endedAt) + 30_000).toISOString();
   const window: string = `${scope(context, context.revision)} AND timestamp>="${lower}" AND timestamp<="${upper}"`;
   if (kind === "platform") {
     return loggingArguments(

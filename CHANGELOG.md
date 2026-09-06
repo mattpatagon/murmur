@@ -20,6 +20,14 @@ All notable changes to Murmur are documented in this file.
   byte-for-byte during builds and production smoke tests. Deployment checks also enforce UTF-8
   Markdown, `noindex`, the existing security headers and the authored Markdown-backed 404 page.
 
+## [0.15.1.2] - 2026-09-06
+
+### Fixed
+
+- End the production observer's platform-error window when its real-window observation ends, so
+  the separately verified adversarial cleanup cannot make an expected, bounded 503 retry look like
+  a stream-rotation failure. Platform failures during the observation still fail closed.
+
 ## [0.15.1.1] - 2026-09-06
 
 ### Fixed
