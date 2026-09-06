@@ -129,6 +129,16 @@ MCP changes are additive when possible. Preserve existing tool names, required f
 meanings, idempotency behavior, resource URIs, and message retention semantics. A breaking change
 requires an explicit compatibility plan, versioned contract, migration path, and release note.
 
+### v0.15 client and operator checklist
+
+The harness-client expansion replaces the closed three-value constraint with the bounded client
+identifier used at every wire boundary. It follows the staged PostgreSQL pattern: add the
+replacement constraints as `NOT VALID`, validate each affected table separately, then swap them
+into the stable names. Apply the complete ordered migration set before configurations begin sending
+new identifiers such as `opencode`, `cursor`, or `pi`. SQLite upgrades the same invariant
+transactionally. Older binaries reject new client identifiers, so drain them before enabling the
+new setup targets; use a forward fix rather than rolling back after new values have been stored.
+
 ### v0.14 client and operator checklist
 
 - Send one JSON-RPC message per authenticated HTTP POST. All arrays are rejected with HTTP 400,
@@ -163,14 +173,6 @@ constraints into the stable names. Apply all five migrations in order. If valida
 five-second lock timeout, leave the recorded migrations and constraints unchanged and rerun the
 same pending migration after the conflicting workload releases the table; do not drop or rename a
 constraint manually.
-
-The harness-client expansion replaces that closed three-value constraint with the bounded client
-identifier used at every wire boundary. It follows the same staged PostgreSQL pattern: add the
-replacement constraints as `NOT VALID`, validate each affected table separately, then swap them
-into the stable names. Apply the complete ordered migration set before configurations begin sending
-new identifiers such as `opencode`, `cursor`, or `pi`. SQLite upgrades the same invariant
-transactionally. Older binaries reject new client identifiers, so drain them before enabling the
-new setup targets; use a forward fix rather than rolling back after new values have been stored.
 
 The v0.6 lifecycle expansion backfills existing agents and messages into generation 1 and creates a
 60-minute compatibility lease for agents seen during the preceding hour. Apply its migrations before
