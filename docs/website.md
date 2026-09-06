@@ -180,3 +180,7 @@ rollback action. Verify the public routes and 404 again, then revert the faulty 
 through a reviewed pull request. Rerunning the workflow on the unchanged faulty commit would
 publish it again. Rotating the Cloudflare token requires updating the GitHub secret and proving
 a new production workflow succeeds; no website source change is required.
+
+Publication verification allows up to 60 seconds for the custom domain to serve the exact new
+revision after Wrangler completes its upload. It retries stale successful responses and transient
+network failures within that deadline, then verifies public routes, headers, and the real 404.
