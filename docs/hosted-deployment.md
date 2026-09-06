@@ -412,7 +412,7 @@ It requires successful same-session stream reconnection, a new notification and 
 inbox delivery, then checks the corresponding server completion events and platform failures. The
 55-minute window cannot be shortened through environment configuration. The job is bounded to 70
 minutes, including setup, targeted credential revocation, tenant suspension, and log-ingestion waits.
-Cleanup binds the worker to its own tenant's existing personal identity, verifies revoked credentials
+The observer binds its worker to its own tenant's existing personal identity, verifies revoked credentials
 return 401, and suspends only its derived tenant; retained rows are not deleted. Session DELETEs retry
 503 at most twice with one-second waits inside the 20-second deadline; only 200, 401, or 404 confirms
 closure. Hosted PostgreSQL CI exercises setup and cleanup. Cloud authentication is refreshed before
