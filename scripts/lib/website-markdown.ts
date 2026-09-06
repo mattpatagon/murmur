@@ -3,25 +3,48 @@ import { join } from "node:path";
 
 export type MarkdownAlternate = {
   readonly htmlPath: string;
+  readonly publicRoute: string;
   readonly rawPath: string;
   readonly sourceName: string;
 };
 
 export const MARKDOWN_ALTERNATES: readonly MarkdownAlternate[] = [
-  { htmlPath: "index.html", rawPath: "index.md", sourceName: "index.md" },
   {
-    htmlPath: "how-it-works/index.html",
+    htmlPath: "index.html",
+    publicRoute: "/",
+    rawPath: "index.md",
+    sourceName: "index.md",
+  },
+  {
+    htmlPath: "how-it-works.html",
+    publicRoute: "/how-it-works",
     rawPath: "how-it-works.md",
     sourceName: "how-it-works.md",
   },
   {
-    htmlPath: "get-started/index.html",
+    htmlPath: "get-started.html",
+    publicRoute: "/get-started",
     rawPath: "get-started.md",
     sourceName: "get-started.md",
   },
-  { htmlPath: "security/index.html", rawPath: "security.md", sourceName: "security.md" },
-  { htmlPath: "license/index.html", rawPath: "license.md", sourceName: "license.md" },
-  { htmlPath: "404.html", rawPath: "404.html.md", sourceName: "404.md" },
+  {
+    htmlPath: "security.html",
+    publicRoute: "/security",
+    rawPath: "security.md",
+    sourceName: "security.md",
+  },
+  {
+    htmlPath: "license.html",
+    publicRoute: "/license",
+    rawPath: "license.md",
+    sourceName: "license.md",
+  },
+  {
+    htmlPath: "404.html",
+    publicRoute: "/404.html",
+    rawPath: "404.html.md",
+    sourceName: "404.md",
+  },
 ];
 
 const MAXIMUM_MARKDOWN_BYTES: number = 512 * 1024;
@@ -58,6 +81,22 @@ export function markdownPathForHtml(htmlPath: string): string | null {
     if (alternate.htmlPath === htmlPath) return alternate.rawPath;
   }
   return null;
+}
+
+export function publicRouteForHtml(htmlPath: string): string | null {
+  for (const alternate of MARKDOWN_ALTERNATES) {
+    if (alternate.htmlPath === htmlPath) return alternate.publicRoute;
+  }
+  return null;
+}
+
+export function websiteArtifactPath(
+  publicPath: string,
+  files: ReadonlyMap<string, Uint8Array>,
+): string | null {
+  if (files.has(publicPath)) return publicPath;
+  const htmlPath: string = publicPath === "" ? "index.html" : `${publicPath}.html`;
+  return files.has(htmlPath) ? htmlPath : null;
 }
 
 export function readWebsiteMarkdownSources(directory: string): ReadonlyMap<string, Uint8Array> {

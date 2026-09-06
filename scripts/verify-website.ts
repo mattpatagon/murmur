@@ -9,17 +9,19 @@ import { compareText } from "./lib/deterministic-order.js";
 import {
   auditWebsiteMarkdown,
   markdownPathForHtml,
+  publicRouteForHtml,
   readWebsiteMarkdownSources,
+  websiteArtifactPath,
 } from "./lib/website-markdown.js";
 import { auditWebsiteSitemaps, type SitemapAudit } from "./lib/website-sitemaps.js";
 
 const DEFAULT_ORIGIN: string = "https://usemurmur.dev";
 const REQUIRED_PAGES: readonly string[] = [
   "index.html",
-  "how-it-works/index.html",
-  "get-started/index.html",
-  "security/index.html",
-  "license/index.html",
+  "how-it-works.html",
+  "get-started.html",
+  "security.html",
+  "license.html",
   "404.html",
 ];
 const MAXIMUM_FILES: number = 2_000;
@@ -106,8 +108,8 @@ function auditVersionMarker(
 }
 
 function pagePath(path: string): string {
-  if (path === "index.html") return "/";
-  return `/${path.endsWith("/index.html") ? path.slice(0, -10) : path}`;
+  const publicRoute: string | null = publicRouteForHtml(path);
+  return publicRoute ?? `/${path}`;
 }
 
 function readText(files: ReadonlyMap<string, Uint8Array>, path: string): string {
@@ -265,11 +267,12 @@ function localTarget(
     errors.push(`${source}: invalid URL encoding`);
     return null;
   }
-  if (!files.has(path)) path = `${path}${path.endsWith("/") || path === "" ? "" : "/"}index.html`;
-  if (!files.has(path)) {
+  const artifactPath: string | null = websiteArtifactPath(path, files);
+  if (artifactPath === null) {
     errors.push(`${source}: missing internal target ${target.pathname}`);
     return null;
   }
+  path = artifactPath;
   return { hash, path };
 }
 

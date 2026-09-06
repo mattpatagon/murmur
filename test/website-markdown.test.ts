@@ -6,6 +6,7 @@ import {
   auditWebsiteMarkdown,
   MARKDOWN_ALTERNATES,
   markdownPathForHtml,
+  publicRouteForHtml,
 } from "../scripts/lib/website-markdown.js";
 
 const MARKDOWN_PAGE: string = [
@@ -43,9 +44,16 @@ function markdownArtifacts(): Map<string, Uint8Array> {
 }
 
 describe("website Markdown publication", (): void => {
+  test("uses clean HTML routes whose Markdown source is the literal .md suffix", (): void => {
+    expect(publicRouteForHtml("index.html")).toBe("/");
+    expect(publicRouteForHtml("how-it-works.html")).toBe("/how-it-works");
+    expect(markdownPathForHtml("how-it-works.html")).toBe("how-it-works.md");
+    expect(publicRouteForHtml("how-it-works/index.html")).toBeNull();
+  });
+
   test("maps only the bounded HTML page set to Markdown alternates", (): void => {
     expect(markdownPathForHtml("index.html")).toBe("index.md");
-    expect(markdownPathForHtml("unregistered/index.html")).toBeNull();
+    expect(markdownPathForHtml("unregistered.html")).toBeNull();
   });
 
   test("the Markdown license page contains the canonical repository license", (): void => {

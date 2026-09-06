@@ -17,18 +17,18 @@ import { MARKDOWN_ALTERNATES } from "../scripts/lib/website-markdown.js";
 const ORIGIN: string = "https://usemurmur.dev";
 const PAGE_ROUTES: ReadonlyMap<string, string> = new Map<string, string>([
   ["index.html", "/"],
-  ["how-it-works/index.html", "/how-it-works/"],
-  ["get-started/index.html", "/get-started/"],
-  ["security/index.html", "/security/"],
-  ["license/index.html", "/license/"],
+  ["how-it-works.html", "/how-it-works"],
+  ["get-started.html", "/get-started"],
+  ["security.html", "/security"],
+  ["license.html", "/license"],
   ["404.html", "/404.html"],
 ]);
 const MARKDOWN_ROUTES: ReadonlyMap<string, string> = new Map<string, string>([
   ["/", "/index.md"],
-  ["/how-it-works/", "/how-it-works.md"],
-  ["/get-started/", "/get-started.md"],
-  ["/security/", "/security.md"],
-  ["/license/", "/license.md"],
+  ["/how-it-works", "/how-it-works.md"],
+  ["/get-started", "/get-started.md"],
+  ["/security", "/security.md"],
+  ["/license", "/license.md"],
   ["/404.html", "/404.html.md"],
 ]);
 const MARKDOWN_PAGE: string = [
@@ -58,7 +58,7 @@ function pageHtml(route: string, body: string = ""): string {
     ${route === "/404.html" ? '<meta name="robots" content="noindex">' : ""}
     <link rel="stylesheet" href="/assets/site.css">
     </head><body><main id="main"><h1>Independent agents. Shared context.</h1>
-    <a href="/get-started/#connect">Connect your agents</a><section id="connect">Setup</section>
+    <a href="/get-started#connect">Connect your agents</a><section id="connect">Setup</section>
     ${body}</main></body></html>`;
 }
 
@@ -110,10 +110,8 @@ describe("website artifact verification", (): void => {
 
   test("requires the license page even when no navigation link points to it", async (): Promise<void> => {
     const files: Map<string, Uint8Array> = completeWebsite();
-    files.delete("license/index.html");
-    expect((await auditWebsite(files)).errors).toContain(
-      "Missing required page: license/index.html",
-    );
+    files.delete("license.html");
+    expect((await auditWebsite(files)).errors).toContain("Missing required page: license.html");
   });
 
   test("requires every raw Markdown alternate and its exact HTML discovery link", async (): Promise<void> => {
@@ -153,24 +151,22 @@ describe("website artifact verification", (): void => {
 
   test("finds missing required pages, linked assets, CSS fonts, and anchors", async (): Promise<void> => {
     const files: Map<string, Uint8Array> = completeWebsite();
-    files.delete("security/index.html");
+    files.delete("security.html");
     files.delete("assets/font.woff2");
     files.set(
       "index.html",
       bytes(
         pageHtml(
           "/",
-          // biome-ignore lint/security/noSecrets: Static broken-link HTML exercises missing page assets and fragments.
-          '<a href="/get-started/#absent">Broken</a>' +
-            '<script src="/assets/missing.js"></script>',
+          '<a href="/get-started#absent">Broken</a>' + '<script src="/assets/missing.js"></script>',
         ),
       ),
     );
     const audit: WebsiteAudit = await auditWebsite(files);
-    expect(audit.errors).toContain("Missing required page: security/index.html");
+    expect(audit.errors).toContain("Missing required page: security.html");
     expect(audit.errors).toContain("assets/site.css: missing internal target /assets/font.woff2");
     expect(audit.errors).toContain("index.html: missing internal target /assets/missing.js");
-    expect(audit.errors).toContain("index.html: missing anchor in get-started/index.html");
+    expect(audit.errors).toContain("index.html: missing anchor in get-started.html");
   });
 
   test("rejects unusable metadata, duplicate headings, and an indexable error page", async (): Promise<void> => {
@@ -228,7 +224,7 @@ describe("website artifact verification", (): void => {
     files.set("sitemap.xml", bytes(`<urlset><url><loc>${ORIGIN}/</loc></url></urlset>`));
     const audit: WebsiteAudit = await auditWebsite(files);
     expect(audit.errors).toContain("robots.txt must advertise the public sitemap");
-    expect(audit.errors).toContain("get-started/index.html: missing from sitemap");
+    expect(audit.errors).toContain("get-started.html: missing from sitemap");
     expect(audit.errors).toContain(
       "Cloudflare _headers must include X-Content-Type-Options: nosniff",
     );
@@ -289,7 +285,7 @@ describe("website artifact verification", (): void => {
     files.set("robots.txt", bytes(`Sitemap: ${ORIGIN}/sitemap-index.xml\n`));
     const audit: WebsiteAudit = await auditWebsite(files);
     expect(audit.errors).toContain("index.html: missing from sitemap");
-    expect(audit.errors).toContain("license/index.html: missing from sitemap");
+    expect(audit.errors).toContain("license.html: missing from sitemap");
   });
 
   test("follows reachable child sitemaps independently of their filename", async (): Promise<void> => {

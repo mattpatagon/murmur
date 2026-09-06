@@ -2,6 +2,14 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.16.1.0] - 2026-09-06
+
+### Fixed
+
+- Open every non-root website page at a clean URL without a trailing slash, so appending `.md`
+  directly retrieves that page's Markdown source. Canonical links, navigation, sitemaps and
+  deployment smoke checks now enforce the same route shape without redirects.
+
 ## [0.16.0.0] - 2026-09-06
 
 ### Added

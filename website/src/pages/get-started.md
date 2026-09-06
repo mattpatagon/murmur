@@ -2,7 +2,7 @@
 layout: ../layouts/Page.astro
 title: "Get started with Murmur — Connect your coding agents"
 description: "Connect Claude Code, Codex, OpenCode, Cursor, Pi, Conductor, Orca, or another MCP client to hosted, local, or shared Murmur coordination."
-canonicalPath: "/get-started/"
+canonicalPath: "/get-started"
 rawPath: "/get-started.md"
 eyebrow: "YOUR FIRST CONNECTION"
 variant: "setup"

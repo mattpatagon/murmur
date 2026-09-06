@@ -1,3 +1,5 @@
+import { websiteArtifactPath } from "./website-markdown.js";
+
 type SitemapDocument = {
   readonly kind: "urlset" | "sitemapindex";
   readonly locations: readonly string[];
@@ -91,11 +93,12 @@ function sitemapTarget(
     errors.push(`${source}: invalid sitemap URL encoding`);
     return null;
   }
-  if (!files.has(path)) path = `${path}${path.endsWith("/") || path === "" ? "" : "/"}index.html`;
-  if (!files.has(path)) {
+  const artifactPath: string | null = websiteArtifactPath(path, files);
+  if (artifactPath === null) {
     errors.push(`${source}: missing internal target ${url.pathname}`);
     return null;
   }
+  path = artifactPath;
   return { path, url };
 }
 

@@ -68,25 +68,25 @@ const isSetup: boolean = frontmatter.variant === "setup";
       <a href="/" aria-label="Murmur home"><Brand /></a>
       <nav class="desktop-nav" aria-label="Main navigation">
         <a
-          href="/how-it-works/"
-          aria-current={frontmatter.canonicalPath === "/how-it-works/" ? "page" : undefined}
+          href="/how-it-works"
+          aria-current={frontmatter.canonicalPath === "/how-it-works" ? "page" : undefined}
           >How it works</a
         >
         <a
-          href="/security/"
-          aria-current={frontmatter.canonicalPath === "/security/" ? "page" : undefined}
+          href="/security"
+          aria-current={frontmatter.canonicalPath === "/security" ? "page" : undefined}
           >Security</a
         >
-        <a class="button button-small" href="/get-started/"
+        <a class="button button-small" href="/get-started"
           >Get started <span aria-hidden="true">↗</span></a
         >
       </nav>
       <details class="mobile-nav">
         <summary>Menu <span aria-hidden="true">+</span></summary>
         <nav aria-label="Mobile navigation">
-          <a href="/how-it-works/">How it works</a>
-          <a href="/security/">Security</a>
-          <a href="/get-started/">Get started ↗</a>
+          <a href="/how-it-works">How it works</a>
+          <a href="/security">Security</a>
+          <a href="/get-started">Get started ↗</a>
         </nav>
       </details>
     </header>
@@ -147,10 +147,10 @@ const isSetup: boolean = frontmatter.variant === "setup";
           <p>Coordination that survives<br />the next agent turn.</p>
         </div>
         <nav aria-label="Footer navigation">
-          <a href="/how-it-works/">How it works</a>
-          <a href="/get-started/">Get started</a>
-          <a href="/security/">Security & privacy</a>
-          <a href="/license/">License</a>
+          <a href="/how-it-works">How it works</a>
+          <a href="/get-started">Get started</a>
+          <a href="/security">Security & privacy</a>
+          <a href="/license">License</a>
           <a href={frontmatter.rawPath}>Markdown source</a>
           <a href="https://github.com/mattpatagon/murmur">Source on GitHub ↗</a>
         </nav>
