@@ -13,7 +13,7 @@ const PackageManifestSchema: z.ZodObject<{
   dependencies: z.ZodRecord<z.ZodString, z.ZodString>;
   devDependencies: z.ZodRecord<z.ZodString, z.ZodString>;
   engines: z.ZodObject<{ bun: z.ZodString }>;
-  license: z.ZodLiteral<"Elastic-2.0">;
+  license: z.ZodLiteral<"MIT">;
   optionalDependencies: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodString>>;
   overrides: z.ZodRecord<z.ZodString, z.ZodString>;
   packageManager: z.ZodString;
@@ -23,7 +23,7 @@ const PackageManifestSchema: z.ZodObject<{
   dependencies: z.record(z.string(), z.string()),
   devDependencies: z.record(z.string(), z.string()),
   engines: z.object({ bun: z.string() }),
-  license: z.literal("Elastic-2.0"),
+  license: z.literal("MIT"),
   optionalDependencies: z.record(z.string(), z.string()).default({}),
   overrides: z.record(z.string(), z.string()),
   packageManager: z.string(),
@@ -256,7 +256,7 @@ function main(): void {
       return;
     }
     process.stdout.write(
-      "Dependency policy passed: exact versions, synchronized Bun pins, ELv2 metadata, and 72-hour package quarantine.\n",
+      "Dependency policy passed: exact versions, synchronized Bun pins, MIT metadata, and 72-hour package quarantine.\n",
     );
   } catch (error: unknown) {
     const detail: string = error instanceof Error ? error.message : String(error);

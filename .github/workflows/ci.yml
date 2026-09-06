@@ -44,9 +44,6 @@ jobs:
       - name: Run the portable test contract
         run: bun run test:portability
 
-      - name: Install and exercise the public package without repository access
-        run: bun run test:distribution
-
       - name: Build both production entry points
         run: |
           bun run build

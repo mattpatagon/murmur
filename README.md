@@ -419,8 +419,4 @@ Dependencies are exact-pinned, installs use the frozen Bun lockfile, and
 
 ## License
 
-Murmur is source-available under the Elastic License 2.0. ELv2 permits use,
-copying, distribution, and modification subject to its limitations, including
-the restriction on offering a substantial set of Murmur's functionality as a
-hosted or managed service. It is not an OSI-approved open-source license. Read
-the complete [LICENSE](LICENSE) before using or redistributing the software.
+Murmur is open source under the [MIT License](LICENSE).

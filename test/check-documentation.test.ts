@@ -52,6 +52,15 @@ describe("documentation policy", (): void => {
     expect(errors).toContain("README.md links to missing repository file: docs/missing.md");
   });
 
+  test("rejects an altered MIT grant with its heading and copyright intact", (): void => {
+    const files: Map<string, string> = completeRepository();
+    const license: string = readFileSync("LICENSE", "utf8");
+    files.set("LICENSE", license.replace("free of charge", "for a fee"));
+    expect(auditDocumentation(files)).toContain(
+      "LICENSE must match the approved MIT license text byte-for-byte",
+    );
+  });
+
   test("rejects version, license, and Claude contract drift", (): void => {
     const files: Map<string, string> = completeRepository();
     files.set("VERSION", "9.9.9.9\n");
@@ -59,9 +68,7 @@ describe("documentation policy", (): void => {
     files.set("CLAUDE.md", "# Claude\n");
     const errors: readonly string[] = auditDocumentation(files);
     expect(errors.some((error: string): boolean => error.startsWith("VERSION"))).toBe(true);
-    expect(errors).toContain(
-      "LICENSE must match the canonical Elastic License 2.0 text byte-for-byte",
-    );
+    expect(errors).toContain("LICENSE must match the approved MIT license text byte-for-byte");
     expect(errors).toContain("CLAUDE.md must import the authoritative AGENTS.md contract");
   });
 });

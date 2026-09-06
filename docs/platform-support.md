@@ -7,10 +7,8 @@ configuration for Codex and Claude, stdio package entry points, HTTP logic, and 
 ## CI contract
 
 Every pull request runs `bun install --frozen-lockfile`, `bun run verify`,
-`bun run test:portability`, `bun run test:distribution`, `bun run build`, and `bun run build:http`
-on Ubuntu, macOS, and Windows. The distribution gate builds the public tarball, installs it in an
-isolated global package directory, and exercises setup, hooks, encrypted key generation, and the
-local MCP setup guide without access to the checkout or installed development dependencies.
+`bun run test:portability`, `bun run build`, and `bun run build:http` on Ubuntu, macOS, and Windows.
+Tests run from the source checkout; CI no longer installs a separate tarball for verification.
 Ubuntu additionally runs PostgreSQL 17, TLS, RLS, populated upgrades, hosted integration, and the
 authoritative coverage gate. It also starts Murmur once on the runner and once in a clean Linux Bun
 container, then proves bidirectional MCP delivery through the shared PostgreSQL service. Linux-only

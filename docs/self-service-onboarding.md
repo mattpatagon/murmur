@@ -48,7 +48,7 @@ access. Load only the worker secret using the printed environment command, then 
 `murmur setup --user`. Setup upgrades the same-origin `/setup/mcp` connection to authenticated
 `/mcp` under the existing `murmur` name; it also installs the hooks. Restart your host, then call
 `get_setup_guide` to complete the machine-wide coordination instructions. The full instructions are
-bundled in the MCP, including hooks and machine-wide instructions, so the private repository is
+bundled in the MCP, including hooks and machine-wide instructions, so a source checkout is
 never needed. Existing-token users can skip signup. All available tenant features are accessible
 without a payment flag, subject to role boundaries and service capacity.
 

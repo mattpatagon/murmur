@@ -103,7 +103,7 @@ export function createPublicDownloadHandler(
               "",
               "murmur signup --slug YOUR_ORGANIZATION --name 'Your Organization'",
               "With your credential in MURMUR_API_TOKEN, run murmur setup --user and restart your agent host.",
-              "The source repository is private; no GitHub account or repository access is required.",
+              "MIT-licensed source: https://github.com/mattpatagon/murmur. No GitHub account or source checkout is required.",
               "",
             ].join("\n"),
         {

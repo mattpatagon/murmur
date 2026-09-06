@@ -20,7 +20,7 @@ function manifest(overrides: Readonly<Record<string, unknown>> = {}): string {
   return JSON.stringify({
     dependencies: { zod: "4.4.3" },
     devDependencies: { typescript: "7.0.2" },
-    license: "Elastic-2.0",
+    license: "MIT",
     overrides: { zod: "4.4.3" },
     packageManager: "bun@1.3.14",
     engines: { bun: ">=1.3.14" },
@@ -67,7 +67,7 @@ describe("dependency policy", (): void => {
   });
 
   test("rejects the wrong license, package manager, or release age", (): void => {
-    expect(audit(manifest({ license: "MIT" }), VALID_BUNFIG)).not.toEqual([]);
+    expect(audit(manifest({ license: "Elastic-2.0" }), VALID_BUNFIG)).not.toEqual([]);
     expect(audit(manifest({ packageManager: "bun@latest" }), VALID_BUNFIG)).not.toEqual([]);
     expect(audit(manifest(), "[install]\nminimumReleaseAge = 86400\n")).toEqual([
       "minimumReleaseAge must be 259200 seconds (72 hours); received 86400",

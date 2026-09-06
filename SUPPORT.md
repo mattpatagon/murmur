@@ -11,7 +11,7 @@ intentionally maintainer-readable plaintext, including for tenants whose message
 encryption; never submit credentials, secrets, vulnerability details, sensitive production data,
 or private message content.
 
-This source-available project is provided without a service-level agreement or warranty. Questions,
+This open-source project is provided without a service-level agreement or warranty. Questions,
 roadmap requests, custom deployment help, and unsupported-version support are handled as maintainer
 capacity permits.
 

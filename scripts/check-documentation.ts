@@ -37,11 +37,11 @@ const PackageVersionSchema: z.ZodObject<{ version: z.ZodString }> = z.object({
   version: z.string().regex(/^\d+\.\d+\.\d+\.\d+$/u),
 });
 
-// Elastic publishes ELv2 as fixed license text. Pinning the complete file prevents a recognizable
-// heading and URL from disguising a modified grant or limitation.
-const ELASTIC_LICENSE_2_0_SHA256: string =
+// Pin the complete MIT license and copyright notice so a recognizable heading cannot
+// disguise a modified permission grant or warranty disclaimer.
+const MIT_LICENSE_SHA256: string =
   // biome-ignore lint/security/noSecrets: This is a public SHA-256 integrity digest.
-  "48255018b41fc0e965b1115af7e6779bc218bb8a6747d561da800d5022622aa2";
+  "96771ebbdf820dcc9dbf6b79312b6cd0bfd16dd93a7f4d06f110cfc4e51ae846";
 
 function linkTarget(rawTarget: string): string | null {
   if (
@@ -103,8 +103,8 @@ export function auditDocumentation(files: ReadonlyMap<string, string>): readonly
   const license: string | undefined = files.get("LICENSE");
   if (license !== undefined) {
     const licenseSha256: string = createHash("sha256").update(license, "utf8").digest("hex");
-    if (licenseSha256 !== ELASTIC_LICENSE_2_0_SHA256) {
-      errors.push("LICENSE must match the canonical Elastic License 2.0 text byte-for-byte");
+    if (licenseSha256 !== MIT_LICENSE_SHA256) {
+      errors.push("LICENSE must match the approved MIT license text byte-for-byte");
     }
   }
 
