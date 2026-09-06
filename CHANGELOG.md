@@ -2,6 +2,24 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.16.0.0] - 2026-09-06
+
+### Added
+
+- Read every institutional website page from an authored Markdown file, and retrieve the exact
+  source by using its `.md` alternate URL. Rendered pages advertise and visibly link to those
+  bounded, non-indexed sources; the root uses `/index.md` and the error page uses `/404.html.md`.
+- Explain Murmur through the launch narrative: machine contention, merge races, priority drift,
+  the human coordination burden, peer-first communication, and optional human-granted
+  orchestration. Setup, deployment, security and product boundaries remain complete without
+  JavaScript.
+
+### Changed
+
+- Fail website source checks if an institutional page is not Markdown, and verify every raw source
+  byte-for-byte during builds and production smoke tests. Deployment checks also enforce UTF-8
+  Markdown, `noindex`, the existing security headers and the authored Markdown-backed 404 page.
+
 ## [0.15.1.1] - 2026-09-06
 
 ### Fixed
