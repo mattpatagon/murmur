@@ -414,6 +414,7 @@ Dependencies are exact-pinned, installs use the frozen Bun lockfile, and
 - [Observability](docs/observability.md)
 - [Upgrade policy](docs/upgrading.md)
 - [Platform support](docs/platform-support.md)
+- [Public distribution](docs/public-distribution.md)
 - [Release history](CHANGELOG.md)
 - [Roadmap and completed work](TODOS.md)
 
