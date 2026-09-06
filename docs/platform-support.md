@@ -12,7 +12,10 @@ Tests run from the source checkout; CI no longer installs a separate tarball for
 Ubuntu also runs `bun run test` for the environment-independent contributor suite.
 Ubuntu additionally runs PostgreSQL 17, TLS, RLS, populated upgrades, hosted integration, and the
 authoritative coverage gate. It also starts Murmur once on the runner and once in a clean Linux Bun
-container, then proves bidirectional MCP delivery through the shared PostgreSQL service. Linux-only
+container, then proves bidirectional MCP delivery through the shared PostgreSQL service. The same
+job also runs `bun run test:cloud` from two isolated frozen source installations against that
+disposable database, before the production workflow repeats the shared-database check. Source
+installation preparation and non-overwrite checks run in the portable suite on every OS. Linux-only
 deployment scripts are separately exercised by CI and the production workflow. The Linux gate also
 runs revision-preservation regressions with Bash and jq against synthetic command responses; these
 tests never contact a cloud account and are not a shell dependency of portable test gates.

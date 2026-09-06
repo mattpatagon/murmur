@@ -37,13 +37,12 @@ import {
   deferredSignal,
   installMurmur,
   notificationTimeout,
-  packMurmur,
   repositoryName,
   waitForMessageCommitLockWaiters,
 } from "./support/cloud-mcp-harness.js";
 
 test.skipIf(cloudDatabaseUrl === undefined)(
-  "agents installed in isolated machine roots communicate through one Postgres URL",
+  "agents installed from isolated frozen sources communicate through one Postgres URL",
   async (): Promise<void> => {
     const databaseUrl: string | undefined = cloudDatabaseUrl;
     if (databaseUrl === undefined) throw new Error("MURMUR_TEST_DATABASE_URL is required");
@@ -53,11 +52,10 @@ test.skipIf(cloudDatabaseUrl === undefined)(
     const machineName: string = `cloud-machine-${uniqueSuffix}`;
     const portabilityRoot: string = mkdtempSync(join(tmpdir(), "murmur-portability-"));
     try {
-      const packageArchive: string = packMurmur(join(portabilityRoot, "package"));
-      const senderMachineRoot: string = join(portabilityRoot, "laptop-a", "bun-home");
-      const receiverMachineRoot: string = join(portabilityRoot, "vm-b", "bun-home");
-      const senderBinaryDirectory: string = installMurmur(packageArchive, senderMachineRoot);
-      const receiverBinaryDirectory: string = installMurmur(packageArchive, receiverMachineRoot);
+      const senderMachineRoot: string = join(portabilityRoot, "laptop-a", "installation");
+      const receiverMachineRoot: string = join(portabilityRoot, "vm-b", "installation");
+      const senderInstallation: string = installMurmur(senderMachineRoot);
+      const receiverInstallation: string = installMurmur(receiverMachineRoot);
       const senderWorkspace: string = join(portabilityRoot, "laptop-a", "workspace one");
       const receiverWorkspace: string = join(portabilityRoot, "vm-b", "different-worktree");
       mkdirSync(senderWorkspace, { recursive: true });
@@ -66,14 +64,14 @@ test.skipIf(cloudDatabaseUrl === undefined)(
       const sender: ClientHarness = await connectClient(
         "claude-like-host",
         databaseUrl,
-        senderBinaryDirectory,
+        senderInstallation,
         senderWorkspace,
       );
       try {
         const receiver: ClientHarness = await connectClient(
           "codex-like-host",
           databaseUrl,
-          receiverBinaryDirectory,
+          receiverInstallation,
           receiverWorkspace,
         );
         try {

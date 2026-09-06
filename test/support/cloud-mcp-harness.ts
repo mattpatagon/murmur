@@ -1,6 +1,5 @@
 import { type SpawnSyncReturns, spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync } from "node:fs";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import process from "node:process";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -13,6 +12,7 @@ import type { z } from "zod";
 import { databaseUrlForDocker } from "../../scripts/require-cross-platform-test.js";
 import { FOUNDING_TENANT_ID } from "../../src/domain/value-objects.js";
 import { POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED } from "../../src/storage/postgres-message-store.js";
+import { prepareCloudSourceInstallation } from "./cloud-source-installation.js";
 
 export const cloudDatabaseUrl: string | undefined = process.env["MURMUR_TEST_DATABASE_URL"];
 export const dockerImage: string | undefined = process.env["MURMUR_TEST_DOCKER_IMAGE"];
@@ -60,6 +60,7 @@ function runCommand(
     cwd,
     encoding: "utf8",
     env: environment,
+    timeout: 45_000,
   });
   if (result.error !== undefined) throw result.error;
   if (result.status !== 0) {
@@ -70,29 +71,10 @@ function runCommand(
   return result.stdout.trim();
 }
 
-export function packMurmur(packageDirectory: string): string {
-  mkdirSync(packageDirectory, { recursive: true });
-  runCommand(
-    process.execPath,
-    ["pm", "pack", "--destination", packageDirectory, "--ignore-scripts"],
-    PROJECT_ROOT,
-  );
-  const archives: string[] = readdirSync(packageDirectory).filter((fileName: string): boolean =>
-    fileName.endsWith(".tgz"),
-  );
-  const archiveName: string | undefined = archives[0];
-  if (archiveName === undefined) throw new Error("Murmur package archive was not created");
-  return join(packageDirectory, archiveName);
-}
-
-export function installMurmur(packageArchive: string, machineRoot: string): string {
-  mkdirSync(machineRoot, { recursive: true });
-  const environment: NodeJS.ProcessEnv = {
-    ...process.env,
-    BUN_INSTALL: machineRoot,
-  };
-  runCommand(process.execPath, ["install", "--global", packageArchive], machineRoot, environment);
-  return join(machineRoot, "bin");
+export function installMurmur(machineRoot: string): string {
+  prepareCloudSourceInstallation(PROJECT_ROOT, machineRoot);
+  runCommand(process.execPath, ["install", "--frozen-lockfile", "--production"], machineRoot);
+  return machineRoot;
 }
 
 function hostChildEnvironment(databaseUrl: string): Record<string, string> {
@@ -113,29 +95,18 @@ function hostChildEnvironment(databaseUrl: string): Record<string, string> {
   return environment;
 }
 
-function cloudChildEnvironment(
-  databaseUrl: string,
-  binaryDirectory: string,
-): Record<string, string> {
-  const environment: Record<string, string> = hostChildEnvironment(databaseUrl);
-  const hostPath: string = environment["PATH"] ?? "";
-  environment["PATH"] =
-    `${binaryDirectory}${delimiter}${dirname(process.execPath)}${delimiter}${hostPath}`;
-  return environment;
-}
-
 export async function connectClient(
   name: string,
   databaseUrl: string,
-  binaryDirectory: string,
+  installationDirectory: string,
   workspace: string,
 ): Promise<ClientHarness> {
   const client: Client = new Client({ name, version: "1.0.0" }, { capabilities: {} });
   const transport: StdioClientTransport = new StdioClientTransport({
-    args: [],
-    command: "murmur-mcp",
+    args: [join(installationDirectory, "src", "server.ts")],
+    command: process.execPath,
     cwd: workspace,
-    env: cloudChildEnvironment(databaseUrl, binaryDirectory),
+    env: hostChildEnvironment(databaseUrl),
     stderr: "inherit",
   });
   await client.connect(transport);
