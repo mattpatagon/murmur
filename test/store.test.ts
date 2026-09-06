@@ -444,7 +444,21 @@ test("upgrades a SQLite v3 database for broadcast delivery", (): void => {
 
 test("rejects malformed domain identifiers before storage", (): void => {
   expect(AgentClient.parse("connector").value).toBe("connector");
-  expect((): AgentClient => AgentClient.parse("cursor")).toThrow();
+  expect(AgentClient.parse("cursor").value).toBe("cursor");
+  expect(AgentClient.parse("open-code-2").value).toBe("open-code-2");
+  const invalidClients: readonly string[] = [
+    "",
+    "2cursor",
+    "Cursor",
+    "cursor\n",
+    "cursor ",
+    "cursor_agent",
+    "cursor/agent",
+    "a".repeat(33),
+  ];
+  for (const invalid of invalidClients) {
+    expect((): AgentClient => AgentClient.parse(invalid)).toThrow();
+  }
   expect((): AgentId => AgentId.parse("space is not allowed")).toThrow();
   expect((): BranchName => BranchName.parse("")).toThrow();
   expect((): MessageId => MessageId.parse("not-a-uuid")).toThrow();

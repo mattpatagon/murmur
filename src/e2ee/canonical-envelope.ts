@@ -1,3 +1,4 @@
+import { AgentClientNameSchema } from "../domain/client-provenance.js";
 import { BinaryReader, BinaryWriter } from "./encoding.js";
 import { paddedInnerLength } from "./padding.js";
 import {
@@ -34,6 +35,9 @@ function validateHeader(header: EnvelopeHeader): void {
   }
   if (!Number.isSafeInteger(header.paddedLength) || header.paddedLength < 0) {
     throw new Error("Padded length must be a nonnegative safe integer");
+  }
+  if (header.client !== null && !AgentClientNameSchema.safeParse(header.client).success) {
+    throw new Error("Envelope client is invalid");
   }
   const isOrchestration: boolean = header.messageKind === "orchestration_request";
   if (

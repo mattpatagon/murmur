@@ -18,6 +18,7 @@ import {
   MessageContent,
   Sequence,
 } from "../src/domain/value-objects.js";
+import { migrateSqliteClientNames } from "../src/storage/sqlite-client-name-migration.js";
 import { migrateSqliteDatabase } from "../src/storage/sqlite-message-migrations.js";
 import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
 import { baseMessageCommand, MutableClock } from "./support/store-fixture.js";
@@ -314,7 +315,7 @@ test("upgrades a populated SQLite v8 database with bounded E2E tables and usage"
       if (versionRow === null || typeof versionRow !== "object") {
         throw new Error("Expected SQLite schema version row");
       }
-      expect(Number(Reflect.get(versionRow, "user_version"))).toBe(12);
+      expect(Number(Reflect.get(versionRow, "user_version"))).toBe(13);
       for (const table of ["messages", "broadcasts", "feedback_submissions"]) {
         const schemaRow: unknown = database
           .query<unknown, [string]>(
@@ -325,7 +326,9 @@ test("upgrades a populated SQLite v8 database with bounded E2E tables and usage"
           throw new Error("Expected upgraded SQLite table schema");
         }
         const sql: unknown = Reflect.get(schemaRow, "sql");
-        expect(typeof sql === "string" ? sql : "").toContain("'connector'");
+        const schema: string = typeof sql === "string" ? sql : "";
+        expect(schema).toContain("length(client_name) BETWEEN 1 AND 32");
+        expect(schema).toContain("client_name NOT GLOB '*[^a-z0-9-]*'");
       }
       const usageRow: unknown = database
         .query<unknown, []>(`
@@ -354,7 +357,65 @@ test("upgrades a populated SQLite v8 database with bounded E2E tables and usage"
   }
 });
 
-test("SQLite v12 migration rolls back invalid data and restores foreign keys", (): void => {
+test("upgrades populated SQLite v12 client constraints to bounded slugs", (): void => {
+  const database: Database = new Database(":memory:", { create: true });
+  try {
+    migrateSqliteDatabase(database);
+    database.exec("PRAGMA foreign_keys = OFF");
+    migrateSqliteClientNames(database);
+    database.exec(`
+      PRAGMA user_version = 12;
+      INSERT INTO agents(agent_id, display_name, metadata_json, created_at, last_seen_at) VALUES
+        ('slug-sender', 'Slug sender', '{}', '2026-09-06T00:00:00.000Z', '2026-09-06T00:00:00.000Z'),
+        ('slug-recipient', 'Slug recipient', '{}', '2026-09-06T00:00:00.000Z', '2026-09-06T00:00:00.000Z');
+      INSERT INTO broadcasts(
+        broadcast_id, thread_id, sender_id, content, repository_name, branch_name, client_name,
+        created_at, expires_at
+      ) VALUES (
+        '60000000-0000-4000-8000-000000000001', 'slug-broadcast', 'slug-sender', 'body',
+        'owner/repository', 'migration', 'connector', '2026-09-06T00:00:00.000Z',
+        '2026-10-06T00:00:00.000Z'
+      );
+      INSERT INTO messages(
+        message_id, thread_id, sender_id, recipient_id, content, client_name, created_at, expires_at
+      ) VALUES (
+        '60000000-0000-4000-8000-000000000002', 'slug-message', 'slug-sender',
+        'slug-recipient', 'body', 'connector', '2026-09-06T00:00:00.000Z',
+        '2026-10-06T00:00:00.000Z'
+      );
+      INSERT INTO feedback_submissions(
+        feedback_id, submission_type, reporter_id, reporter_generation, repository_name,
+        branch_name, client_name, title, description, created_at
+      ) VALUES (
+        '60000000-0000-4000-8000-000000000003', 'issue', 'slug-sender', 1,
+        'owner/repository', 'migration', 'connector', 'Title', 'Description',
+        '2026-09-06T00:00:00.000Z'
+      );
+      PRAGMA foreign_keys = ON;
+    `);
+
+    migrateSqliteDatabase(database);
+    expect(database.query("PRAGMA user_version").get()).toEqual({ user_version: 13 });
+    database.exec(`
+      UPDATE messages SET client_name = 'cursor-agent' WHERE thread_id = 'slug-message';
+      UPDATE broadcasts SET client_name = 'cursor-agent' WHERE thread_id = 'slug-broadcast';
+      UPDATE feedback_submissions SET client_name = 'cursor-agent'
+      WHERE feedback_id = '60000000-0000-4000-8000-000000000003';
+    `);
+    expect(database.query("SELECT client_name FROM messages").get()).toEqual({
+      client_name: "cursor-agent",
+    });
+    expect((): void => database.exec("UPDATE messages SET client_name = 'Cursor'")).toThrow();
+    expect((): void => database.exec("UPDATE broadcasts SET client_name = '2cursor'")).toThrow();
+    expect((): void =>
+      database.exec("UPDATE feedback_submissions SET client_name = 'cursor_agent'"),
+    ).toThrow();
+  } finally {
+    database.close();
+  }
+});
+
+test("SQLite client migrations roll back invalid data and restore foreign keys", (): void => {
   const database: Database = new Database(":memory:", { create: true });
   try {
     migrateSqliteDatabase(database);

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { type AgentClientName, AgentClientNameSchema } from "../domain/client-provenance.js";
 import { StorageCorruptionError } from "../domain/errors.js";
 import {
   FeedbackDescription,
@@ -19,7 +20,7 @@ import {
 
 export type FeedbackRow = {
   readonly branch_name: string;
-  readonly client_name: string;
+  readonly client_name: AgentClientName;
   readonly created_at: string;
   readonly description: string;
   readonly feedback_id: string;
@@ -38,7 +39,7 @@ const SafeIntegerSchema: z.ZodType<number> = z
 
 export const FeedbackRowSchema: z.ZodType<FeedbackRow> = z.strictObject({
   branch_name: z.string(),
-  client_name: z.string(),
+  client_name: AgentClientNameSchema,
   created_at: z.string(),
   description: z.string(),
   feedback_id: z.string(),

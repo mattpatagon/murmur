@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { type AgentClientName, AgentClientNameSchema } from "./client-provenance.js";
 import { AgentGeneration, SessionKey, SessionKeyInputSchema } from "./lifecycle-values.js";
 import type { Message } from "./models.js";
 import { MessageKindSchema, SenderAuthoritySchema } from "./orchestration.js";
@@ -62,11 +63,6 @@ const RepositoryNameTextSchema: z.ZodString = z
   .max(500)
   .regex(/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/u);
 const BranchNameTextSchema: z.ZodString = z.string().trim().min(1).max(500);
-const AgentClientTextSchema: z.ZodEnum<{
-  claude: "claude";
-  codex: "codex";
-  connector: "connector";
-}> = z.enum(["claude", "codex", "connector"]);
 const MachineNameTextSchema: z.ZodString = z
   .string()
   .trim()
@@ -99,13 +95,13 @@ export type BroadcastAudienceDto = {
 
 export type MessageContextDto = {
   readonly branch?: string | undefined;
-  readonly client?: "claude" | "codex" | "connector" | undefined;
+  readonly client?: AgentClientName | undefined;
   readonly repository?: string | undefined;
 };
 
 export const MessageContextDtoSchema: z.ZodType<MessageContextDto> = z.strictObject({
   branch: BranchNameTextSchema.optional(),
-  client: AgentClientTextSchema.optional(),
+  client: AgentClientNameSchema.optional(),
   repository: RepositoryNameTextSchema.optional(),
 });
 

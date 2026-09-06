@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { type AgentClientName, AgentClientNameSchema } from "../domain/client-provenance.js";
 import { StorageCorruptionError } from "../domain/errors.js";
 import {
   AgentCloseReasonSchema,
@@ -46,7 +47,7 @@ export type AgentRow = {
 export type MessageRow = {
   readonly branch_name: string | null;
   readonly broadcast_id: string | null;
-  readonly client_name: string | null;
+  readonly client_name: AgentClientName | null;
   readonly content: string;
   readonly created_at: string;
   readonly expires_at: string;
@@ -69,7 +70,7 @@ export type BroadcastRow = {
   readonly audience_repository_name: string | null;
   readonly branch_name: string;
   readonly broadcast_id: string;
-  readonly client_name: "claude" | "codex" | "connector";
+  readonly client_name: AgentClientName;
   readonly content: string;
   readonly created_at: string;
   readonly expires_at: string;
@@ -139,7 +140,7 @@ export const AgentRowSchema: z.ZodType<AgentRow> = z.strictObject({
 export const MessageRowSchema: z.ZodType<MessageRow> = z.strictObject({
   branch_name: z.string().nullable(),
   broadcast_id: z.string().nullable(),
-  client_name: z.string().nullable(),
+  client_name: AgentClientNameSchema.nullable(),
   content: z.string(),
   created_at: z.string(),
   expires_at: z.string(),
@@ -162,7 +163,7 @@ export const BroadcastRowSchema: z.ZodType<BroadcastRow> = z.strictObject({
   audience_repository_name: z.string().nullable(),
   branch_name: z.string(),
   broadcast_id: z.string(),
-  client_name: z.enum(["claude", "codex", "connector"]),
+  client_name: AgentClientNameSchema,
   content: z.string(),
   created_at: z.string(),
   expires_at: z.string(),

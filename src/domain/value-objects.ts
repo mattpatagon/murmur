@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { z } from "zod";
 
+import { type AgentClientName, AgentClientNameSchema } from "./client-provenance.js";
+
 const AgentIdValueSchema: z.ZodString = z
   .string()
   .trim()
@@ -27,11 +29,6 @@ const RepositoryNameValueSchema: z.ZodString = z
     "Use a slash-separated repository path such as owner/repository",
   );
 const BranchNameValueSchema: z.ZodString = z.string().trim().min(1).max(500);
-const AgentClientValueSchema: z.ZodEnum<{
-  claude: "claude";
-  codex: "codex";
-  connector: "connector";
-}> = z.enum(["claude", "codex", "connector"]);
 const MachineNameValueSchema: z.ZodString = z
   .string()
   .trim()
@@ -257,14 +254,14 @@ export class BranchName {
 }
 
 export class AgentClient {
-  public readonly value: "claude" | "codex" | "connector";
+  public readonly value: AgentClientName;
 
-  private constructor(value: "claude" | "codex" | "connector") {
+  private constructor(value: AgentClientName) {
     this.value = value;
   }
 
   public static parse(input: unknown): AgentClient {
-    const value: "claude" | "codex" | "connector" = AgentClientValueSchema.parse(input);
+    const value: AgentClientName = AgentClientNameSchema.parse(input);
     return new AgentClient(value);
   }
 

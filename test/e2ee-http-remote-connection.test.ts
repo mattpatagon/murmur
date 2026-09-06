@@ -8,7 +8,7 @@ import type { E2eeCapabilityOutput } from "../src/e2ee/wire-tools.js";
 
 const CONFIG: E2eeHttpRemoteClientConfig = {
   branch: "feature/e2ee",
-  client: "codex",
+  client: "opencode",
   endpoint: "http://127.0.0.1:1/mcp",
   repository: "mattpatagon/murmur",
   token: "test-access-token",
@@ -22,6 +22,10 @@ const CAPABILITY: E2eeCapabilityOutput = {
   tenant_id: "11111111-1111-4111-8111-111111111111",
   wire_version: 1,
 };
+
+test("rejects a noncanonical client before connecting", async (): Promise<void> => {
+  await expect(E2eeHttpRemoteClient.connect({ ...CONFIG, client: "OpenCode" })).rejects.toThrow();
+});
 
 function toolOutput(output: Record<string, unknown>): Record<string, unknown> {
   return {
@@ -79,7 +83,7 @@ test("connects over bounded Streamable HTTP with authenticated project context",
     expect(callHeaders.get("authorization")).toBe("Bearer test-access-token");
     expect(callHeaders.get("x-murmur-repository")).toBe("mattpatagon/murmur");
     expect(callHeaders.get("x-murmur-branch")).toBe("feature/e2ee");
-    expect(callHeaders.get("x-murmur-client")).toBe("codex");
+    expect(callHeaders.get("x-murmur-client")).toBe("opencode");
     expect(callHeaders.get("mcp-session-id")).toBe("bounded-session");
     expect(callHeaders.get("mcp-protocol-version")).toBe("2025-11-25");
   } finally {

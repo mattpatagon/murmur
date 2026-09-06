@@ -36,7 +36,7 @@ migration_url="$(MURMUR_BASE_DATABASE_URL="$admin_url" \
 mkdir -p "$work_directory/supabase/migrations"
 for migration in supabase/migrations/*.sql; do
   migration_name="${migration##*/}"
-  if [[ "$migration_name" != 20260902175*.sql ]]; then
+  if [[ "$migration_name" != 20260902175*.sql && "$migration_name" != 2026090604000*.sql ]]; then
     cp "$migration" "$work_directory/supabase/migrations/$migration_name"
   fi
 done
@@ -162,7 +162,98 @@ update murmur.broadcasts set client_name = 'connector'
 where thread_id = 'connector-migration-broadcast';
 update murmur.feedback_submissions set client_name = 'connector'
 where feedback_id = '52000000-0000-4000-8000-000000000003';
-rollback;
+commit;
 SQL
 
-echo 'Populated connector migration lock-timeout and retry fixture passed'
+slug_expansion='20260906040000_allow_client_slugs.sql'
+cp "supabase/migrations/$slug_expansion" "$work_directory/supabase/migrations/$slug_expansion"
+bunx supabase db push --workdir "$work_directory" \
+  --db-url "$migration_url" --include-all --yes
+
+unvalidated_slug="$(psql "$migration_url" --tuples-only --no-align --set ON_ERROR_STOP=1 \
+  --command "select count(*) from pg_catalog.pg_constraint where conname like '%_slug' and not convalidated")"
+if [ "$unvalidated_slug" != '3' ]; then
+  echo "Client slug constraint expansion was not independently staged: $unvalidated_slug" >&2
+  exit 1
+fi
+
+slug_validation='20260906040001_validate_message_client_slug.sql'
+cp "supabase/migrations/$slug_validation" "$work_directory/supabase/migrations/$slug_validation"
+slug_lock_ready="$work_directory/slug-message-lock-ready"
+slug_lock_output="$work_directory/slug-message-lock-output"
+slug_lock_control="$work_directory/slug-message-lock-control"
+mkfifo "$slug_lock_control"
+psql "$migration_url" --set ON_ERROR_STOP=1 <"$slug_lock_control" >"$slug_lock_output" 2>&1 &
+slug_locker_pid=$!
+exec 4>"$slug_lock_control"
+printf '%s\n' \
+  'begin;' \
+  'lock table murmur.messages in access exclusive mode;' \
+  "\\o $slug_lock_ready" \
+  "select 'ready';" \
+  '\o' >&4
+timeout 3s bash -c 'while [ ! -s "$1" ]; do :; done' slug-lock "$slug_lock_ready"
+failed_slug_push="$work_directory/failed-slug-push"
+if bunx supabase db push --workdir "$work_directory" \
+  --db-url "$migration_url" --include-all --yes >"$failed_slug_push" 2>&1; then
+  echo 'Client slug validation unexpectedly ignored its conflicting table lock' >&2
+  exit 1
+fi
+if ! grep -q 'lock timeout' "$failed_slug_push"; then
+  echo 'Client slug validation did not report its bounded lock timeout' >&2
+  exit 1
+fi
+printf '%s\n' 'commit;' '\q' >&4
+exec 4>&-
+wait "$slug_locker_pid"
+bunx supabase db push --workdir "$work_directory" \
+  --db-url "$migration_url" --include-all --yes
+
+for migration in \
+  '20260906040002_validate_broadcast_client_slug.sql' \
+  '20260906040003_validate_feedback_client_slug.sql' \
+  '20260906040004_finalize_client_slug_constraints.sql'; do
+  cp "supabase/migrations/$migration" "$work_directory/supabase/migrations/$migration"
+  bunx supabase db push --workdir "$work_directory" \
+    --db-url "$migration_url" --include-all --yes
+done
+
+slug_constraint_state="$(psql "$migration_url" --tuples-only --no-align --set ON_ERROR_STOP=1 \
+  --command "select count(*) filter (where conname in ('messages_client_name_allowed', 'broadcasts_client_name_allowed', 'feedback_submissions_client_known') and convalidated) || '|' || count(*) filter (where conname like '%_slug') from pg_catalog.pg_constraint")"
+if [ "$slug_constraint_state" != '3|0' ]; then
+  echo "Client slug constraints were not finalized safely: $slug_constraint_state" >&2
+  exit 1
+fi
+
+psql "$migration_url" --set ON_ERROR_STOP=1 <<'SQL'
+begin;
+set local murmur.tenant_id = '00000000-0000-4000-8000-000000000001';
+update murmur.messages set client_name = 'cursor-agent'
+where thread_id = 'connector-migration-message';
+update murmur.broadcasts set client_name = 'cursor-agent'
+where thread_id = 'connector-migration-broadcast';
+update murmur.feedback_submissions set client_name = 'cursor-agent'
+where feedback_id = '52000000-0000-4000-8000-000000000003';
+commit;
+SQL
+
+if psql "$migration_url" --set ON_ERROR_STOP=1 \
+  --command "begin; set local murmur.tenant_id = '00000000-0000-4000-8000-000000000001'; update murmur.messages set client_name = 'Cursor' where thread_id = 'connector-migration-message'; rollback;" \
+  >/dev/null 2>&1; then
+  echo 'Message client constraint accepted an uppercase slug' >&2
+  exit 1
+fi
+if psql "$migration_url" --set ON_ERROR_STOP=1 \
+  --command "begin; set local murmur.tenant_id = '00000000-0000-4000-8000-000000000001'; update murmur.broadcasts set client_name = 'cursor/agent' where thread_id = 'connector-migration-broadcast'; rollback;" \
+  >/dev/null 2>&1; then
+  echo 'Broadcast client constraint accepted punctuation outside the slug alphabet' >&2
+  exit 1
+fi
+if psql "$migration_url" --set ON_ERROR_STOP=1 \
+  --command "begin; set local murmur.tenant_id = '00000000-0000-4000-8000-000000000001'; update murmur.feedback_submissions set client_name = repeat('a', 33) where feedback_id = '52000000-0000-4000-8000-000000000003'; rollback;" \
+  >/dev/null 2>&1; then
+  echo 'Feedback client constraint accepted an overlong slug' >&2
+  exit 1
+fi
+
+echo 'Populated connector and client slug migration lock-timeout fixtures passed'

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { type AgentClientName, AgentClientNameSchema } from "./client-provenance.js";
 import {
   type MessageContextDto,
   MessageContextDtoSchema,
@@ -19,7 +20,7 @@ const AgentIdTextSchema: z.ZodString = z.string().min(1).max(200);
 const InstantTextSchema: z.ZodISODateTime = z.iso.datetime({ offset: true });
 const RequiredFeedbackContextSchema: z.ZodType<RequiredFeedbackContext> = z.strictObject({
   branch: z.string().trim().min(1).max(500),
-  client: z.enum(["claude", "codex", "connector"]),
+  client: AgentClientNameSchema,
   repository: z
     .string()
     .min(3)
@@ -49,7 +50,7 @@ export const SubmitFeedbackInputSchema: z.ZodType<SubmitFeedbackInput> = z.stric
 
 export type RequiredFeedbackContext = {
   readonly branch: string;
-  readonly client: "claude" | "codex" | "connector";
+  readonly client: AgentClientName;
   readonly repository: string;
 };
 

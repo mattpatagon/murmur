@@ -282,6 +282,18 @@ test("uses fixed canonical buckets and a stable outer-header vector", async (): 
   sodium.memzero(digest);
 });
 
+test("rejects a noncanonical client before signing an envelope", async (): Promise<void> => {
+  const keys: Awaited<ReturnType<typeof envelopeKeys>> = await envelopeKeys();
+  await expect(
+    encryptEnvelope(
+      { ...baseHeaderInput(), client: "Cursor" },
+      "invalid client",
+      keys.sender.privateKey,
+      keys.recipient.publicKey,
+    ),
+  ).rejects.toThrow("Envelope client is invalid");
+});
+
 test("round trips empty, bucket-adjacent, Unicode, and maximum tool payloads", async (): Promise<void> => {
   const keys: Awaited<ReturnType<typeof envelopeKeys>> = await envelopeKeys();
   const payloads: readonly string[] = [
@@ -365,7 +377,7 @@ test("rejects valid-looking relabeling of every mutable signed header field", as
   const relabeled: readonly EnvelopeHeader[] = [
     { ...header, branchName: "feature/rebound" },
     { ...header, broadcastId: "40000000-0000-4000-8000-000000000001" },
-    { ...header, client: "claude" },
+    { ...header, client: "cursor-agent" },
     { ...header, createdAt: "2026-08-10T17:00:01.000Z" },
     { ...header, expiresAt: "2026-09-09T17:00:01.000Z" },
     { ...header, idempotencyKey: "send-rebound" },

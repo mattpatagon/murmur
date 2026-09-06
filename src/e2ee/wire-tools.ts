@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { type AgentClientName, AgentClientNameSchema } from "../domain/client-provenance.js";
 import { SessionKeyInputSchema } from "../domain/lifecycle-values.js";
 import { type SenderAuthority, SenderAuthoritySchema } from "../domain/orchestration.js";
 
@@ -39,7 +40,7 @@ export type E2eeEntitlementState = "enforced" | "off" | "provisioning";
 
 export type E2eeMessageContextDto = {
   readonly branch: string;
-  readonly client: "claude" | "codex" | "connector";
+  readonly client: AgentClientName;
   readonly repository: string;
 };
 
@@ -202,7 +203,7 @@ export type GetInboxSummaryOutput = {
 
 export const E2eeMessageContextDtoSchema: z.ZodType<E2eeMessageContextDto> = z.strictObject({
   branch: z.string().min(1).max(500),
-  client: z.enum(["claude", "codex", "connector"]),
+  client: AgentClientNameSchema,
   repository: RepositoryNameSchema,
 });
 export const E2eeCapabilityInputSchema: z.ZodType<Record<string, never>> = z.strictObject({});

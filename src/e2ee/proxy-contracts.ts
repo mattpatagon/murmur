@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { AgentClientNameSchema } from "../domain/client-provenance.js";
 import type { MessageContextDto } from "../domain/contracts.js";
 import {
   type EffectiveOrchestratorDto,
@@ -96,7 +97,7 @@ export type ProxyBroadcastOutput = Record<string, unknown> & {
 
 const MessageContextSchema: z.ZodType<MessageContextDto> = z.strictObject({
   branch: z.string().min(1).max(500).optional(),
-  client: z.enum(["claude", "codex", "connector"]).optional(),
+  client: AgentClientNameSchema.optional(),
   repository: z
     .string()
     .min(3)
