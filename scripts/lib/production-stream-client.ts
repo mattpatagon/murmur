@@ -204,14 +204,23 @@ export class ProductionStreamClient {
             const headers: Headers = productionStreamHeaders(this.token);
             headers.set("mcp-session-id", session);
             headers.set("mcp-protocol-version", LATEST_PROTOCOL_VERSION);
-            const response: Response = await this.runtime.fetch(this.endpoint, {
-              method: "DELETE",
-              headers,
-              redirect: "error",
-              signal,
-            });
-            if (response.body !== null) await response.body.cancel();
-            requireProductionStream([200, 401, 404].includes(response.status));
+            for (let attempt: number = 0; attempt < 3; attempt += 1) {
+              signal.throwIfAborted();
+              const response: Response = await this.runtime.fetch(this.endpoint, {
+                method: "DELETE",
+                headers,
+                redirect: "error",
+                signal,
+              });
+              if (response.body !== null) await response.body.cancel();
+              if (response.status === 503 && attempt < 2) {
+                // Revoked credentials lose queued admission; concurrent closes can hit its bound.
+                await this.runtime.clock.sleep(1_000, signal);
+                continue;
+              }
+              requireProductionStream([200, 401, 404].includes(response.status));
+              return;
+            }
           },
           20_000,
           outerSignal,

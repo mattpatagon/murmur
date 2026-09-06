@@ -170,6 +170,9 @@ function fixture(options: Options = {}): Fixture {
         }
         expect(operator).toBe(false);
         if (name === "create_access_token") {
+          // Explicit identities must already exist in this tenant, as PostgreSQL enforces.
+          if (admin === null || input["personal_id"] !== admin.personal_id)
+            throw new Error("The personal identity is unavailable in this tenant");
           events.push("mint-worker");
           const material: HostedTokenSecret = generateTokenSecret("mur");
           worker = {

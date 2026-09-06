@@ -1,3 +1,4 @@
+import type { Server } from "bun";
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 
@@ -217,4 +218,41 @@ test("aborting a JSON body scope cancels a pending reader rather than leaving it
   );
   expect(canceled).toBe(true);
   expect(body.locked).toBe(false);
+});
+
+test("closing a native fetch SSE connection observes terminal abort without false cleanup failure", async (): Promise<void> => {
+  const server: Server<undefined> = Bun.serve<undefined>({
+    hostname: "127.0.0.1",
+    port: 0,
+    idleTimeout: 0,
+    fetch: (): Response =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start: (controller: ReadableStreamDefaultController<Uint8Array>): void => {
+            controller.enqueue(new TextEncoder().encode(": connected\n\n"));
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      ),
+  });
+  const endpoint: URL = new URL("/mcp", server.url);
+  const bounded: ProductionStreamFetch = new ProductionStreamFetch(endpoint, fetch);
+  try {
+    await streamDeadline(async (): Promise<void> => {
+      const response: Response = await bounded.fetch(endpoint, { method: "GET" });
+      if (response.body === null) throw new Error("Missing test SSE body");
+      const reader: ReadableStreamDefaultReader<Uint8Array> = response.body.getReader();
+      try {
+        expect((await reader.read()).done).toBe(false);
+        await bounded.close();
+        await expect(reader.read()).rejects.toThrow("Production stream verification failed");
+      } finally {
+        reader.releaseLock();
+      }
+    }, 5_000);
+  } finally {
+    // Retain the original assertion failure while always closing the owned loopback server.
+    await Promise.allSettled([bounded.close()]);
+    await server.stop(true);
+  }
 });

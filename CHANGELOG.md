@@ -2,6 +2,16 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.15.1.1] - 2026-09-06
+
+### Fixed
+
+- Provision the production stream observer with its own tenant's existing personal identity,
+  preserving the API's rejection of unrelated or nonexistent identities.
+- Retry temporary authentication-capacity rejections during observer session cleanup, within
+  fixed attempt and time limits. Revoked credentials still require a confirmed terminal response;
+  hosted PostgreSQL CI now exercises the observer's real SDK setup and cleanup.
+
 ## [0.15.1.0] - 2026-09-06
 
 ### Fixed

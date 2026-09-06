@@ -31,6 +31,7 @@ import {
   verifyHostedOrchestration,
 } from "./scenarios/hosted-orchestration.js";
 import { verifyHostedOrchestrationRollback } from "./scenarios/hosted-orchestration-rollback.js";
+import { verifyHostedProductionStreamFixture } from "./scenarios/hosted-production-stream-fixture.js";
 import { verifyHostedTenantLifecycle } from "./scenarios/hosted-tenant-lifecycle.js";
 import { verifyHostedTenantMessaging } from "./scenarios/hosted-tenant-messaging.js";
 import {
@@ -354,6 +355,8 @@ test.skipIf(
         error: "Registration secret was already used with different tenant details",
       });
 
+      await verifyHostedProductionStreamFixture(server, operatorToken);
+
       const backupOperator: IssuedOperatorTokenOutput = await callTool(
         server.mcpUrl,
         operatorToken,
@@ -466,5 +469,6 @@ test.skipIf(
       await server.stop();
     }
   },
-  120_000,
+  // Preserve 120 seconds for existing scenarios, 275 for observer stages, plus settlement headroom.
+  420_000,
 );
