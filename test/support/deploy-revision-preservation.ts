@@ -14,6 +14,10 @@ export const REVISION_FLOOR: string = "d89d405db3bc470bfe375abe7dfd474738b82607"
 export const DEPLOY_HEAD: string = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 export const PRESERVED_SOURCE: string = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 export const IMAGE_PREFIX: string = "us-central1-docker.pkg.dev/test-project/runtime/murmur:";
+export const PRESERVED_DIGEST: string = `sha256:${"c".repeat(64)}`;
+export const DIGEST_IMAGE: string = `${IMAGE_PREFIX.slice(0, -1)}@${PRESERVED_DIGEST}`;
+export const REGISTRY_PACKAGE: string =
+  "projects/test-project/locations/us-central1/repositories/runtime/packages/murmur";
 export const PRIVATE_SENTINEL: string = "PRIVATE_REVISION_DIAGNOSTIC_MUST_NOT_ESCAPE";
 // biome-ignore lint/security/noSecrets: This is GNU head's fixed byte-count option, not credential material.
 const CAPTURE_BYTE_OPTION: string = "--bytes=1048577";
@@ -25,6 +29,9 @@ export type RevisionFixtureOptions = {
   readonly missingCommit?: string | undefined;
   readonly ancestryFailure?: "floor" | "head" | undefined;
   readonly failGcloud?: boolean | undefined;
+  readonly registryTags?: string | undefined;
+  readonly registryImage?: string | undefined;
+  readonly failRegistry?: "tags" | "image" | undefined;
   readonly timeoutTarget?:
     | "history"
     | "cloud"
@@ -33,6 +40,8 @@ export type RevisionFixtureOptions = {
     | "images"
     | "source"
     | "ancestry"
+    | "registry-tags"
+    | "registry-image"
     | undefined;
   readonly missingTool?: "gcloud" | "git" | "jq" | "head" | "timeout" | undefined;
 };
@@ -43,8 +52,21 @@ const OptionsSchema: z.ZodType<RevisionFixtureOptions> = z.strictObject({
   missingCommit: z.string().optional(),
   ancestryFailure: z.enum(["floor", "head"]).optional(),
   failGcloud: z.boolean().optional(),
+  registryTags: z.string().max(1_100_000).optional(),
+  registryImage: z.string().max(1_100_000).optional(),
+  failRegistry: z.enum(["tags", "image"]).optional(),
   timeoutTarget: z
-    .enum(["history", "cloud", "capture", "metadata", "images", "source", "ancestry"])
+    .enum([
+      "history",
+      "cloud",
+      "capture",
+      "metadata",
+      "images",
+      "source",
+      "ancestry",
+      "registry-tags",
+      "registry-image",
+    ])
     .optional(),
   missingTool: z.enum(["gcloud", "git", "jq", "head", "timeout"]).optional(),
 });
@@ -198,6 +220,8 @@ function timeoutMatches(
   if (target === "images") return args[3] === "jq" && args[4] === "--raw-output";
   if (target === "source")
     return args[3] === "git" && args[4] === "cat-file" && args[6] === PRESERVED_SOURCE;
+  if (target === "registry-tags") return args[3] === "gcloud" && args[5] === "tags";
+  if (target === "registry-image") return args[3] === "gcloud" && args[6] === "images";
   return target === "ancestry" && args[3] === "git" && args[4] === "merge-base";
 }
 
@@ -248,6 +272,58 @@ async function driver(): Promise<void> {
     process.exit(child.status ?? 98);
   }
   if (command === "gcloud") {
+    if (args[0] === "artifacts") {
+      const tags: boolean = args[1] === "tags";
+      const expected: readonly string[] = tags
+        ? [
+            "artifacts",
+            "tags",
+            "list",
+            "--package",
+            "murmur",
+            "--repository",
+            "runtime",
+            "--location",
+            "us-central1",
+            "--project",
+            "test-project",
+            "--filter",
+            `version="${REGISTRY_PACKAGE}/versions/${PRESERVED_DIGEST}"`,
+            "--limit",
+            "1001",
+            "--format",
+            "json(name,version)",
+            "--quiet",
+          ]
+        : [
+            "artifacts",
+            "docker",
+            "images",
+            "describe",
+            `${IMAGE_PREFIX}${PRESERVED_SOURCE}`,
+            "--project",
+            "test-project",
+            "--format",
+            "json(image_summary.digest,image_summary.fully_qualified_digest)",
+            "--quiet",
+          ];
+      if (JSON.stringify(args) !== JSON.stringify(expected)) failDriver();
+      if (options.failRegistry === (tags ? "tags" : "image")) failDriver(9);
+      const defaultTags: string = JSON.stringify([
+        {
+          name: `${REGISTRY_PACKAGE}/tags/${PRESERVED_SOURCE}`,
+          version: `${REGISTRY_PACKAGE}/versions/${PRESERVED_DIGEST}`,
+        },
+      ]);
+      const defaultImage: string = JSON.stringify({
+        image_summary: { digest: PRESERVED_DIGEST, fully_qualified_digest: DIGEST_IMAGE },
+      });
+      await writeOutput(
+        process.stdout,
+        tags ? (options.registryTags ?? defaultTags) : (options.registryImage ?? defaultImage),
+      );
+      return;
+    }
     if (
       JSON.stringify(args) !==
       JSON.stringify([

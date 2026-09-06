@@ -35,6 +35,8 @@ All notable changes to Murmur are documented in this file.
 
 - Preserve compatible Cloud Run revisions and retained database rows during deployment, with
   source checks before migrations and no bypass of writer-drain safety for contraction.
+- Verify digest-only Cloud Run image provenance through bounded registry metadata and exact
+  source-tag binding during preservation preflight and production stream observation.
 
 ### For contributors
 

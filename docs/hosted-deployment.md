@@ -177,8 +177,12 @@ from durable state instead of assuming the previous attempt finished.
 Automatic preservation accepts only declared images from the configured artifact repository whose
 source commits descend from v0.13.0.0 (`d89d405`) and are ancestors of the deployment commit. It uses
 full local Git history and rejects unknown provenance, unrelated images, and oversized revision
-inventories before migrations. This checks declared source compatibility, not a cryptographic image
-attestation; the build identity and artifact registry remain trusted deployment boundaries.
+inventories before migrations. Digest-only images require one unambiguous full source-SHA tag from
+a bounded tag lookup filtered to that exact registry version, followed by a source-tag lookup that must
+resolve to the deployed digest. Every returned tag must belong to that version and package; 1,001 returned tags exceed the bound.
+Missing, ambiguous, truncated, or mismatched metadata stops the
+deployment. This verifies source compatibility through the trusted build identity and artifact
+registry; it is not an independent cryptographic image attestation.
 
 Older upgrades require a separately verified writer-drain procedure. The workflow does not delete
 retained revisions or bypass contraction safety to accommodate them. When contraction is required,
@@ -378,7 +382,8 @@ gh workflow run production-smoke.yml --ref main -f real_window=true
 
 The opt-in mode shares the deployment concurrency group, checks the exact deployed source revision
 and existing Cloud Logging read access before provisioning, and observes one disposable tenant's
-SDK session. It requires successful same-session stream reconnection, a new notification and durable
+SDK session. For a digest-only image, it resolves the expected source tag in the configured artifact
+repository and requires that digest to match the deployed image before and after observation. It requires successful same-session stream reconnection, a new notification and durable
 inbox delivery, then checks the corresponding server completion events and platform failures. The
 55-minute window cannot be shortened through environment configuration. The job is bounded to 70
 minutes, including setup, targeted credential revocation, tenant suspension, and log-ingestion waits.
