@@ -46,7 +46,7 @@ jobs:
         run: bun run website:check
 
       - name: Exercise the artifact validation contract
-        run: bun test test/website.test.ts test/website-identity.test.ts website/test
+        run: bun test test/website.test.ts test/website-identity.test.ts test/website-publication.test.ts website/test
 
       - name: Build the static website
         run: bun run website:build
@@ -112,20 +112,7 @@ jobs:
           website_origin="${WEBSITE_SITE_URL%/}"
           website_headers="$RUNNER_TEMP/murmur-website-headers.txt"
           website_body="$RUNNER_TEMP/murmur-website-body.txt"
-          website_version="$RUNNER_TEMP/murmur-website-version.json"
-          curl --fail --silent --show-error --max-time 20 --max-filesize 4096 \
-            --retry 3 --retry-max-time 60 --output "$website_version" \
-            "$website_origin/version.json?revision=$GITHUB_SHA"
-          WEBSITE_VERSION_FILE="$website_version" bun -e '
-            const file = process.env.WEBSITE_VERSION_FILE;
-            const expected = process.env.WEBSITE_REVISION;
-            if (file === undefined || expected === undefined) process.exit(1);
-            const body = await Bun.file(file).json();
-            if (typeof body !== "object" || body === null || body.revision !== expected) {
-              console.error("The public website is not serving the deployed Git revision.");
-              process.exit(1);
-            }
-          '
+          timeout 65s bun run scripts/verify-website-publication.ts
           for website_path in / /how-it-works/ /get-started/ /security/ /license/ /robots.txt; do
             curl --fail --silent --show-error --max-time 20 --retry 3 --retry-max-time 60 \
               --max-filesize 1048576 --dump-header "$website_headers" \

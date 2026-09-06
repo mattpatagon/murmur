@@ -28,7 +28,7 @@ mode with `murmur setup --user --e2ee`, and restart active Codex and Claude sess
 checkouts should fetch and review the returned revision before updating their own pinned checkout.
 
 Public packages use the hosted `/downloads/` endpoint and contain bundled clients and license
-notices; installation does not require access to the private Git repository. Call `get_setup_guide`
+notices; installation does not require a Git checkout. Call `get_setup_guide`
 after reconnecting for complete installation, hook, and feature instructions.
 
 Administrative mutations now require form elicitation with explicit human consent. Keep an owner

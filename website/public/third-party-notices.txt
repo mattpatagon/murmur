@@ -1,7 +1,7 @@
 Murmur institutional website — third-party notices
 
 The website includes third-party font and software assets. Their license terms
-are reproduced below; Murmur's Elastic License 2.0 does not replace these terms.
+are reproduced below; Murmur's MIT License does not replace these terms.
 Package names, versions, and license paths identify the reviewed provenance.
 License text is copied verbatim from the installed, lockfile-pinned packages.
 

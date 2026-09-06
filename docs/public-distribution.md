@@ -1,7 +1,9 @@
 # Public distribution
 
-The source repository remains private. Public installation uses a package built into the existing
-hosted service, so users need no GitHub account, repository credential, registry account, or UI.
+Murmur is open source under the [MIT License](../LICENSE). The source is hosted at
+[github.com/mattpatagon/murmur](https://github.com/mattpatagon/murmur). Public installation uses a
+package built into the hosted service, so users need no GitHub account, repository credential,
+registry account, or UI.
 Begin with the anonymous setup MCP, before creating an organization or obtaining a token:
 
 ```text
@@ -57,7 +59,7 @@ The package contains exactly four minified JavaScript entry bundles (`murmur`, `
 `murmur-e2ee-proxy`, `murmur-mcp`), a package manifest, a short README, the complete Murmur license,
 and third-party license notices. Dependencies are bundled. No source tree, source maps, tests,
 credentials, repository configuration, install script, or development dependencies are distributed.
-Executable JavaScript remains inspectable; private repository access is not granted by installation.
+The full source tree is available in the repository linked above.
 
 The runtime retains Murmur's four-part product version. The distribution manifest converts it to
 standard package semver (`1.2.3.4` becomes `1.2.3-build.4`) and records the original product version
@@ -87,12 +89,10 @@ allows 120 downloads per minute, and ends a stream after 30 seconds. Saturation 
 with `Retry-After: 60`. Streams release their slots after completion, cancellation, or deadline.
 Download logs use one fixed route label and never record supplied paths or credentials.
 
-`bun run test:distribution` builds and installs the artifact in temporary directories, then tests
-CLI help, both hosts' setup, hook loading, the encryption proxy dependency graph, native encrypted
-key generation, and local SQLite MCP registration plus the setup guide. CI runs it on Linux,
-macOS, and Windows; it requires no hosted account or database.
+CI verifies the source checkout with `bun run verify`, `bun run test:portability`, and production
+builds on Linux, macOS, and Windows. The separate tarball-installation verification gate has been
+removed. Artifact validation and download endpoint tests remain part of the source test suite.
 
 After deployment, verify that a credential-free MCP client can initialize `/setup/mcp`, discover
 only `get_setup_guide`, and read the guide. Also verify `/install`, `/version`, and the canonical
-download, then install the downloaded tarball in an isolated directory. Confirm that its embedded
-source revision matches `/version` before announcing the release.
+download. Confirm that the deployed source revision matches `/version` before announcing the release.

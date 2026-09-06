@@ -6,9 +6,10 @@ and uses Astro for static HTML, React for the setup selector and handoff demonst
 TypeScript, and Tailwind CSS. It has no tenant session, credential form, or database access.
 
 The website targets `https://usemurmur.dev` on Cloudflare Pages. The hosted messaging API remains
-on Cloud Run at `https://api.usemurmur.dev`; website publication does not replace API deployment. The source
-repository is private. Public onboarding must work without a GitHub account or repository access.
-Murmur is source-available under the Elastic License 2.0, not an open-source license.
+on Cloud Run at `https://api.usemurmur.dev`; website publication does not replace API deployment.
+Murmur is open source under the MIT License, with source at
+[github.com/mattpatagon/murmur](https://github.com/mattpatagon/murmur). Public onboarding must work
+without a GitHub account or source checkout.
 
 ## Local development
 
@@ -27,7 +28,7 @@ The Astro build writes `website/dist/`. `website:test` audits that existing buil
 changing a page or asset. The website uses an isolated `website/package.json`, `website/bun.lock`,
 and `website/bunfig.toml`. Its Astro checker needs TypeScript's JavaScript API, so the website pins
 TypeScript 6.0.3 while the MCP runtime retains TypeScript 7.0.2. Both packages pin the same Bun
-release, exact dependency versions, ELv2 metadata, and the 72-hour minimum release age. The root
+release, exact dependency versions, MIT metadata, and the 72-hour minimum release age. The root
 dependency gate validates both packages and their workflow pins. Website tooling is not included
 in the API image or public MCP executable distribution.
 The website scripts run Astro with `bun --bun`; development, checking, building, and previewing
@@ -168,7 +169,7 @@ font and browser assets. It preserves the complete SIL OFL 1.1 notices for DM Sa
 Mono and the installed MIT notices for React, React DOM, Scheduler, Tailwind CSS, Astro, the Astro
 React integration, and Vite core. Identical license files are grouped without dropping their
 package names or versions. Refresh the notice text and provenance from the installed licenses
-when upgrading these packages; keep Murmur's ELv2 terms separate from their licenses.
+when upgrading these packages; keep Murmur's MIT terms separate from their licenses.
 
 For a custom domain, attach it in Cloudflare Pages, verify DNS/TLS, set `WEBSITE_SITE_URL` to its
 HTTPS origin, and rerun the Website workflow on `main`. Confirm canonical URLs, social previews,
@@ -179,3 +180,7 @@ rollback action. Verify the public routes and 404 again, then revert the faulty 
 through a reviewed pull request. Rerunning the workflow on the unchanged faulty commit would
 publish it again. Rotating the Cloudflare token requires updating the GitHub secret and proving
 a new production workflow succeeds; no website source change is required.
+
+Publication verification allows up to 60 seconds for the custom domain to serve the exact new
+revision after Wrangler completes its upload. It retries stale successful responses and transient
+network failures within that deadline, then verifies public routes, headers, and the real 404.

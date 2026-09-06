@@ -63,7 +63,7 @@ export async function buildDistribution(
     Object.keys(built.metafile.inputs),
   );
   files["package/README.md"] =
-    "# Murmur\n\nRun `murmur setup --user` to configure Codex and Claude Code. Connect an MCP client to `murmur-mcp` and call `get_setup_guide` for complete setup, hooks, and feature instructions. Requires Bun 1.3.14 or newer.\n\nThis package contains executable bundles; the source repository remains private. See LICENSE and THIRD_PARTY_NOTICES.txt.\n";
+    "# Murmur\n\nRun `murmur setup --user` to configure Codex and Claude Code. Connect an MCP client to `murmur-mcp` and call `get_setup_guide` for complete setup, hooks, and feature instructions. Requires Bun 1.3.14 or newer.\n\nMurmur is open source under the MIT License. Source: https://github.com/mattpatagon/murmur. This package contains executable bundles. See LICENSE and THIRD_PARTY_NOTICES.txt.\n";
   const archive: Bun.Archive = new Bun.Archive(files, { compress: "gzip", level: 9 });
   const blob: Blob = await archive.blob();
   const bytes: Uint8Array = new Uint8Array(await blob.arrayBuffer());

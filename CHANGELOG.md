@@ -2,6 +2,21 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.13.2.0] - 2026-09-06
+
+### Changed
+
+- Use, modify, redistribute, and host Murmur under the MIT License. Package metadata, contribution terms, and setup guidance now reflect the open-source license.
+- Find the MIT license and public source links on the institutional website, including its FAQ, footer, and complete license page.
+
+### Removed
+
+- Remove the separate tarball-installation verification gate. Hosted package downloads and artifact integrity validation remain available.
+
+### Fixed
+
+- Allow up to 60 seconds for website publication to reach the custom domain before verifying the exact release revision.
+
 ## [0.13.1.0] - 2026-09-06
 
 ### Added

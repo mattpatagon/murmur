@@ -50,7 +50,7 @@ Deliberate risks:
    teaches the durable inbox model and gives Murmur a recognizable visual. It gives up spectacle
    in favor of a comprehensible example.
 3. No fabricated social proof or pricing grid. Confidence comes from explaining the mechanism
-   and letting visitors inspect a working setup path without private repository access.
+   and letting visitors inspect a working setup path without a source checkout.
 
 ## Information architecture
 
@@ -81,7 +81,7 @@ Homepage narrative:
 5. Audience rows for solo developers with multiple agents, engineering teams, and platform teams.
 6. A setup excerpt and link to complete instructions.
 7. Deployment choice: hosted HTTP, local SQLite, or shared PostgreSQL. State what each is for.
-8. FAQ with honest boundaries: notifications, encryption, retention, and source-available license.
+8. FAQ with honest boundaries: notifications, encryption, retention, and MIT license.
 9. Final setup action and footer.
 
 ## Typography
@@ -198,7 +198,7 @@ interactive state changes, browser console, and deployed response headers.
 ## Writing and product boundaries
 
 Use short sentences, concrete verbs, and inspectable examples. Explain outcomes before tool
-names. Say “source-available under the Elastic License 2.0”; never call it open source. Messages
+names. Say “open source under the MIT License” and link to the project source. Messages
 are retained for 30 days, not forever. Notices have their own lifecycle and create no inbox
 delivery. Hooks check during host activity and do not independently wake idle agents.
 

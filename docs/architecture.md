@@ -105,7 +105,7 @@ The interactive terminal administration client supplies the same consent flow wi
 
 The MCP's `get_setup_guide` returns bundled, bounded instructions and the actual connection's tool
 list without fetching repository content. Public client packages are built from the reviewed
-revision and served by the hosted deployment; the source repository need not be public.
+revision and served by the hosted deployment; installation does not require a source checkout.
 
 Local stdio skips hosted authentication and HTTP admission but uses the same MCP application and
 MessageStore contract. Context is detected from Git or explicit environment values. Context a
