@@ -3,27 +3,79 @@
     outline-color: var(--color-accent);
   }
   .compatibility {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(180px, 0.55fr) minmax(0, 2fr);
     gap: 30px;
-    align-items: center;
-    justify-content: space-between;
+    align-items: start;
     padding-block: 28px;
     border-block: 1px solid var(--color-line);
   }
-  .compatibility > p {
+  .compatibility-heading p {
     font-size: 13px;
+    font-weight: 600;
+  }
+  .compatibility-heading span {
+    display: block;
+    margin-top: 8px;
+    color: var(--color-muted);
+    font-size: 11px;
+    line-height: 1.5;
   }
   .client-names {
-    display: flex;
-    gap: 48px;
-    align-items: center;
-    font-size: 17px;
-    font-weight: 500;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 24px 18px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
   }
-  .client-names span {
-    display: inline-flex;
+  .client-names li {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    column-gap: 10px;
     align-items: center;
-    gap: 9px;
+    min-width: 0;
+  }
+  .client-logo {
+    display: grid;
+    grid-row: 1 / 3;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    padding: 5px;
+    overflow: hidden;
+    border: 1px solid var(--color-line);
+    border-radius: 7px;
+    background: #fff;
+  }
+  .client-logo img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .client-name {
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .client-support {
+    color: var(--color-muted);
+    font-size: 9px;
+    line-height: 1.35;
+  }
+  .client-logo-opencode {
+    padding: 9px 3px;
+  }
+  .client-logo-conductor {
+    padding: 3px 9px;
+  }
+  .client-logo-orca {
+    padding: 7px 4px;
+    background: var(--color-night);
   }
   .section {
     padding-block: 96px;
@@ -112,21 +164,57 @@
     overflow: hidden;
   }
   .client-selector {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     border-bottom: 1px solid var(--color-line);
-    padding-inline: 12px;
     background: var(--color-paper);
   }
   .client-selector button {
-    flex: 1;
-    font-size: 13px;
-    padding: 16px 8px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    min-width: 0;
+    min-height: 60px;
+    padding: 9px 10px;
+    border-right: 1px solid var(--color-line);
     border-bottom: 2px solid transparent;
-    min-height: 50px;
+    font-size: 11px;
+    text-align: left;
+  }
+  .client-selector button:nth-child(4n) {
+    border-right: 0;
   }
   .client-selector button[aria-pressed="true"] {
     border-bottom-color: var(--color-ink);
     font-weight: 600;
+    background: #eeeee5;
+  }
+  .setup-client-logo {
+    display: grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    padding: 5px;
+    border: 1px solid var(--color-line);
+    border-radius: 6px;
+    background: #fff;
+  }
+  .setup-client-logo img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .setup-client-logo-opencode {
+    padding: 8px 2px;
+  }
+  .setup-client-logo-conductor {
+    padding: 3px 9px;
+  }
+  .setup-client-logo-orca {
+    padding: 7px 3px;
+    background: var(--color-night);
   }
   .command-label {
     display: flex;
@@ -166,10 +254,50 @@
     margin: 0;
     padding: 8px 20px 0;
   }
+  .setup-tier {
+    display: inline-block;
+    margin: 0 20px 8px;
+    padding: 4px 7px;
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    color: var(--color-muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
   .setup-note {
     font-size: 12px;
     margin: 0;
     padding: 0 20px 20px;
+  }
+  .inherited-setup {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    align-items: center;
+    gap: 14px;
+    min-height: 112px;
+    margin: 8px 20px 0;
+    padding: 20px;
+    border-radius: 6px;
+    background: var(--color-night);
+    color: var(--color-paper);
+  }
+  .inherited-setup img {
+    display: block;
+    width: 48px;
+    height: 48px;
+    padding: 7px;
+    object-fit: contain;
+    border-radius: 7px;
+    background: #fff;
+  }
+  .inherited-setup .inherited-logo-orca {
+    background: var(--color-night);
+  }
+  .inherited-setup strong {
+    font-size: 14px;
+    font-weight: 500;
   }
   .setup-split .copy-feedback,
   .setup-split .setup-note {

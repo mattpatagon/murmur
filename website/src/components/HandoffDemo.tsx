@@ -1,5 +1,7 @@
 import { type Dispatch, type ReactElement, type SetStateAction, useState } from "react";
 
+import { type AgentClient, getClient } from "../data/clients";
+
 type DemoStep = {
   readonly action: string;
   readonly status: string;
@@ -27,6 +29,8 @@ export default function HandoffDemo(): ReactElement {
   const [step, setStep]: [number, Dispatch<SetStateAction<number>>] = useState(0);
   const current: DemoStep | undefined = steps[step];
   if (current === undefined) throw new Error("Unknown demo step");
+  const sender: AgentClient = getClient("claude-code");
+  const recipient: AgentClient = getClient("codex");
 
   function advance(): void {
     setStep((previous: number): number => (previous + 1) % steps.length);
@@ -39,9 +43,11 @@ export default function HandoffDemo(): ReactElement {
         <span className="demo-label">DEMO</span>
       </div>
       <div className="agent-line">
-        <span className="agent-avatar">C</span>
+        <span className="agent-avatar">
+          <img src={sender.logoPath} alt="" width="24" height="24" />
+        </span>
         <div>
-          <strong>Claude Code</strong>
+          <strong>{sender.name}</strong>
           <span className="mono">feature / authentication</span>
         </div>
         <span className="agent-state">● Working</span>
@@ -64,9 +70,11 @@ export default function HandoffDemo(): ReactElement {
         <span className="route-dots" aria-hidden="true" />
       </div>
       <div className="agent-line recipient">
-        <span className="agent-avatar">X</span>
+        <span className="agent-avatar">
+          <img src={recipient.logoPath} alt="" width="24" height="24" />
+        </span>
         <div>
-          <strong>Codex</strong>
+          <strong>{recipient.name}</strong>
           <span className="mono">feature / login-screen</span>
         </div>
         <span className="agent-state">{step === 2 ? "● Back online" : "○ Away"}</span>

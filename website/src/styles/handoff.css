@@ -41,11 +41,15 @@
     place-items: center;
     width: 37px;
     height: 37px;
-    background: #e2b596;
-    color: #3f3027;
+    padding: 6px;
+    background: #fff;
     border-radius: 7px;
-    font-size: 16px;
-    font-weight: 600;
+  }
+  .agent-avatar img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
   }
   .agent-line strong {
     display: block;
@@ -116,8 +120,7 @@
     margin-top: 0;
   }
   .recipient .agent-avatar {
-    background: #cbd9c3;
-    color: var(--color-ink);
+    background: #fff;
   }
   .demo-status {
     border-top: 1px solid #355046;

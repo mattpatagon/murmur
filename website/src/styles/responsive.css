@@ -34,8 +34,7 @@
     gap: 40px;
   }
   .client-names {
-    gap: 24px;
-    font-size: 15px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .prose-layout {
     grid-template-columns: minmax(0, 1fr) 180px;
@@ -59,8 +58,7 @@
     width: 100%;
   }
   .compatibility {
-    align-items: flex-start;
-    flex-direction: column;
+    grid-template-columns: 1fr;
     gap: 18px;
   }
   .section-heading,
@@ -123,9 +121,7 @@
     font-size: 11px;
   }
   .client-names {
-    gap: 20px;
-    flex-wrap: wrap;
-    font-size: 14px;
+    gap: 18px 12px;
   }
   .section {
     padding-block: 48px;
@@ -179,10 +175,16 @@
     padding: 16px;
   }
   .client-selector {
-    padding-inline: 4px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .client-selector button {
     font-size: 11px;
+  }
+  .client-selector button:nth-child(4n) {
+    border-right: 1px solid var(--color-line);
+  }
+  .client-selector button:nth-child(2n) {
+    border-right: 0;
   }
 }
 

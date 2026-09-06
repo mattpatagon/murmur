@@ -43,6 +43,12 @@ The default rendered HTML contains useful setup instructions and a readable hand
 before React hydrates. No external font host, analytics service, or authenticated API call is
 required to read the site.
 
+The client catalog shows only vendor-provided marks for Claude Code, Codex, OpenCode, Cursor, Pi,
+Conductor, and Orca. The vendored asset provenance file records each primary source and SHA-256.
+Conductor and Orca are described as environments that inherit the selected agent's Murmur setup;
+Pi identifies its third-party adapter from Pi's official package catalog. The Murmur favicon is a separate local
+brand asset and must remain linked from every page.
+
 ## Build configuration
 
 | Variable | Location | Meaning |
@@ -146,9 +152,9 @@ transformation policy, and production smoke checks reject injected Cloudflare an
 ## Verification and maintenance
 
 The artifact verifier checks required pages, document language, title and description, canonical
-and Open Graph URLs, social image references, one main landmark and h1, duplicate IDs, internal
-links and fragments, linked HTML/CSS assets, the component and renderer bundles referenced by
-Astro's React islands, robots configuration, and the Pages header artifact. It validates the
+and Open Graph URLs, social image and favicon references, one main landmark and h1, duplicate IDs,
+internal links and fragments, linked HTML/CSS and client-logo assets, the component and renderer
+bundles referenced by Astro's React islands, robots configuration, and the Pages header artifact. It validates the
 bounded `/version.json` against the expected revision. Sitemap coverage counts only pages reachable
 from the advertised root sitemap or its child indexes; orphan sitemap files cannot satisfy it.
 The sitemap traversal rejects malformed XML, cycles, external origins, and excessive depth,
@@ -165,7 +171,7 @@ when the visual system or interaction contract changes.
 
 The public license page links to
 [third-party-notices.txt](../website/public/third-party-notices.txt), which accompanies the deployed
-font and browser assets. It preserves the complete SIL OFL 1.1 notices for DM Sans and IBM Plex
+font, browser, and official client-identification assets. It preserves the complete SIL OFL 1.1 notices for DM Sans and IBM Plex
 Mono and the installed MIT notices for React, React DOM, Scheduler, Tailwind CSS, Astro, the Astro
 React integration, and Vite core. Identical license files are grouped without dropping their
 package names or versions. Refresh the notice text and provenance from the installed licenses

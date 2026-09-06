@@ -6,18 +6,18 @@ local stdio or hosted Streamable HTTP and stores the same domain model in SQLite
 ## System context
 
 ```text
-Claude / Codex / generic MCP client
-                 |
-       stdio or HTTPS + MCP
-                 |
-      validation and admission
-                 |
-     authenticated MCP application
-                 |
-       MessageStore contract
-          /             \
- local SQLite       hosted PostgreSQL
- bounded poller       LISTEN / NOTIFY
+Claude Code / Codex / OpenCode / Cursor / Pi adapter / MCP client
+                              |
+                    stdio or HTTPS + MCP
+                              |
+                   validation and admission
+                              |
+                  authenticated MCP application
+                              |
+                    MessageStore contract
+                       /             \
+              local SQLite       hosted PostgreSQL
+              bounded poller       LISTEN / NOTIFY
 ```
 
 The durable inbox is the source of truth. Resource notifications and wait completion are hints to
@@ -75,8 +75,9 @@ caller-generated 256-bit registration secret deterministically derives the tenan
 so an exact retry after a lost response returns the same credential without storing plaintext.
 
 The client cannot supply a tenant ID, principal role, server request ID, trace parent, or raw session
-identifier for audit correlation. Each request reauthenticates so revocation and suspension apply
-immediately; matching live sessions are also closed proactively.
+identifier for audit correlation. Its bounded lowercase client identifier is informational
+provenance only. Each request reauthenticates so revocation and suspension apply immediately;
+matching live sessions are also closed proactively.
 
 Connector OAuth compatibility branches at public discovery and authorization routes. A bounded,
 in-memory authorization code carries no Murmur credential and is bound to the exact client,
@@ -110,6 +111,9 @@ revision and served by the hosted deployment; installation does not require a so
 Local stdio skips hosted authentication and HTTP admission but uses the same MCP application and
 MessageStore contract. Context is detected from Git or explicit environment values. Context a
 server cannot determine must be supplied by the client before a send or broadcast is accepted.
+Native setup writers cover Claude Code, Codex, OpenCode, and Cursor. Pi uses the standard MCP file
+read by its separately installed catalog adapter. Conductor and Orca inherit the configuration of
+the agent they launch. See [client support](client-support.md).
 
 ## Data model and consistency
 

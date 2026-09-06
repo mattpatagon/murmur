@@ -29,9 +29,12 @@ bun install --global https://api.usemurmur.dev/downloads/murmur.tgz
 Run `murmur signup --slug YOUR_ORGANIZATION --name 'Your Organization'` in a private terminal,
 following its instructions to preserve the owner credential and load the everyday worker token.
 With that tenant credential in `MURMUR_API_TOKEN`, run
-`murmur setup --user` to configure Codex and Claude Code. Restart the host to activate the hooks.
-Setup automatically upgrades the same-origin anonymous `/setup/mcp` entry to `/mcp` under the
-same `murmur` name. Conflicting endpoints still require explicit `--replace` after inspection.
+`murmur setup --user` to configure Claude Code, Codex, OpenCode, Cursor, and the shared MCP file for
+Pi's separately installed catalog adapter. Restart the host; Claude Code and Codex also activate
+the lifecycle hooks. Setup automatically upgrades a same-origin anonymous `/setup/mcp` entry to
+`/mcp` under the same `murmur` name. Conflicting endpoints still require explicit `--replace` after
+inspection. Use one or more client flags to limit which hosts change. See
+[client support](client-support.md).
 The public `GET /install` endpoint provides these bootstrap instructions without authentication.
 
 ## Public setup MCP boundary

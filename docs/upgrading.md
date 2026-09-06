@@ -24,8 +24,10 @@ or transport details. Production sets
 version and revision from the same release.
 
 Follow the returned install command exactly. Then run `murmur setup --user`, or preserve encrypted
-mode with `murmur setup --user --e2ee`, and restart active Codex and Claude sessions. Repository
-checkouts should fetch and review the returned revision before updating their own pinned checkout.
+mode with `murmur setup --user --e2ee`, and restart active Claude Code, Codex, OpenCode, Cursor, and
+Pi sessions. Conductor and Orca users restart the configured agent inside that environment.
+Repository checkouts should fetch and review the returned revision before updating their own pinned
+checkout.
 
 Public packages use the hosted `/downloads/` endpoint and contain bundled clients and license
 notices; installation does not require a Git checkout. Call `get_setup_guide`
@@ -120,6 +122,14 @@ constraints into the stable names. Apply all five migrations in order. If valida
 five-second lock timeout, leave the recorded migrations and constraints unchanged and rerun the
 same pending migration after the conflicting workload releases the table; do not drop or rename a
 constraint manually.
+
+The harness-client expansion replaces that closed three-value constraint with the bounded client
+identifier used at every wire boundary. It follows the same staged PostgreSQL pattern: add the
+replacement constraints as `NOT VALID`, validate each affected table separately, then swap them
+into the stable names. Apply the complete ordered migration set before configurations begin sending
+new identifiers such as `opencode`, `cursor`, or `pi`. SQLite upgrades the same invariant
+transactionally. Older binaries reject new client identifiers, so drain them before enabling the
+new setup targets; use a forward fix rather than rolling back after new values have been stored.
 
 The v0.6 lifecycle expansion backfills existing agents and messages into generation 1 and creates a
 60-minute compatibility lease for agents seen during the preceding hour. Apply its migrations before

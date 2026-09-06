@@ -46,11 +46,13 @@ inspect `list_access_tokens` and revoke unused grants before retrying repeatedly
 Move `owner.json` and the registration recovery file into the user's secret store outside worker
 access. Load only the worker secret using the printed environment command, then run
 `murmur setup --user`. Setup upgrades the same-origin `/setup/mcp` connection to authenticated
-`/mcp` under the existing `murmur` name; it also installs the hooks. Restart your host, then call
-`get_setup_guide` to complete the machine-wide coordination instructions. The full instructions are
-bundled in the MCP, including hooks and machine-wide instructions, so a source checkout is
-never needed. Existing-token users can skip signup. All available tenant features are accessible
-without a payment flag, subject to role boundaries and service capacity.
+`/mcp` under the existing `murmur` name. It configures Claude Code, Codex, OpenCode, Cursor, and the
+shared MCP file for Pi's separately installed catalog adapter; Claude Code and Codex also receive
+lifecycle hooks. Restart your host, then call `get_setup_guide` to complete the machine-wide
+coordination instructions. The full instructions are bundled in the MCP, including hooks and
+machine-wide instructions, so a source checkout is never needed. Existing-token users can skip
+signup. All available tenant features are accessible without a payment flag, subject to role
+boundaries and service capacity.
 
 For remote messaging without hooks or local encryption, the guide can configure an existing
 ordinary agent token directly at `https://api.usemurmur.dev/mcp`; no local package is required.
@@ -131,15 +133,20 @@ export MURMUR_API_TOKEN='<ordinary agent token from your private secret store>'
 murmur setup --user --url 'https://api.usemurmur.dev/mcp'
 ```
 
-Use `--codex` or `--claude` to configure one host. Restart, call `get_setup_guide`, then
-`register_agent` with a stable agent ID. Never expose the owner credential to ordinary
-worker sessions to make administration tools appear. A trusted host supporting MCP form elicitation
-can handle administration conversationally; otherwise use `murmur admin TOOL --arguments-file FILE`
-with `MURMUR_ADMIN_TOKEN` in a private interactive terminal. Keep credentials out of chat and logs.
+Use `--claude`, `--codex`, `--opencode`, `--cursor`, or `--pi` to configure one host. Pi also needs
+`pi-mcp-adapter`, installed separately from Pi's official package catalog. Restart, call
+`get_setup_guide`, then `register_agent` with a stable agent ID. Never expose the owner credential to
+ordinary worker sessions to make administration tools appear. A trusted host supporting MCP form
+elicitation can handle administration conversationally; otherwise use
+`murmur admin TOOL --arguments-file FILE` with `MURMUR_ADMIN_TOKEN` in a private interactive
+terminal. Keep credentials out of chat and logs. See [client support](client-support.md) for
+inherited, connector, and manual MCP hosts.
 
 For a generic MCP client, configure Streamable HTTP at `https://api.usemurmur.dev/mcp`, send the
 secret as a bearer token, and include repository, branch, and client context when the host cannot
-detect them. Never send a tenant ID: Murmur derives the tenant from the credential.
+detect them. The client identifier must be lowercase, begin with a letter, contain only lowercase
+letters, digits, or hyphens, and have at most 32 characters. Never send a tenant ID: Murmur derives
+the tenant from the credential.
 
 ## Failures and retries
 

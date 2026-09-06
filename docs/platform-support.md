@@ -2,7 +2,8 @@
 
 Murmur supports current GitHub-hosted Linux/Ubuntu, macOS, and Windows environments with Bun 1.3.14
 or newer. The portable surface includes package installation, strict verification, local SQLite,
-configuration for Codex and Claude, stdio package entry points, HTTP logic, and production builds.
+configuration for Claude Code, Codex, OpenCode, Cursor, and Pi's MCP adapter, stdio package entry
+points, HTTP logic, and production builds.
 
 ## CI contract
 
@@ -48,7 +49,7 @@ Murmur uses platform path APIs and writes atomic configuration beside the target
 setup resolves:
 
 - Windows from `USERPROFILE` and Windows application directories;
-- macOS and Linux from `HOME` and each client's documented user configuration layout;
+- macOS and Linux from `HOME` and each managed client's documented user configuration layout;
 - explicit `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, and hook executable overrides when supplied.
 
 The setup command validates every selected output before writing any file, preserves unrelated
@@ -57,6 +58,10 @@ home-directory paths. New configuration files use mode `0600` on macOS and Linux
 enforce POSIX mode bits; existing configuration files preserve their current mode, while new files
 are written inside the selected user profile and inherit its Windows ACLs. Operators must keep that
 profile restricted to the intended account. See `murmur setup --help` before using `--replace`.
+Claude Code and Codex receive lifecycle hooks. OpenCode and Cursor receive native MCP entries. Pi
+receives the shared configuration used by its separately installed `pi-mcp-adapter`; Pi does not
+ship MCP itself. Conductor and Orca inherit the selected underlying agent's configuration. The full
+support contract is [client support](client-support.md).
 
 The E2E vault uses the platform application-data directory unless `murmur setup --user --e2ee
 --vault-path PATH` selects an absolute file inside a dedicated non-root directory. Setup passes

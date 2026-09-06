@@ -232,6 +232,25 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ========================================================================
+Compatible client brand assets
+
+The website self-hosts unmodified brand assets from the product owners named
+below. They are used only to identify compatible agent clients. Product names,
+logos, and trademarks remain the property of their respective owners. Their
+inclusion does not imply endorsement of Murmur.
+
+Retrieved 2026-09-06. Exact SHA-256 checksums and the official press-kit links
+are recorded in public/client-logos/PROVENANCE.md and checksums.sha256.
+
+Claude Code: https://claude.ai/favicon.ico
+Codex (OpenAI mark): https://raw.githubusercontent.com/openai/codex/main/codex-rs/skills/src/assets/samples/openai-docs/assets/openai-small.svg
+OpenCode: https://opencode.ai/docs/_astro/logo-light.B0yzR0O5.svg
+Cursor: https://cursor.com/marketing-static/favicon-light.svg
+Pi: https://pi.dev/logo-auto.svg
+Conductor: https://www.conductor.build/brandkit/conductor-letter-dark.svg
+Orca: https://www.onorca.dev/logo.svg
+
+========================================================================
 tailwindcss 4.3.3 (MIT)
 Provenance: website/node_modules/tailwindcss/LICENSE
 
