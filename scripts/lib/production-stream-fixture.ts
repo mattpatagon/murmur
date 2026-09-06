@@ -57,7 +57,7 @@ export class ProductionStreamFixture {
   );
   private readonly unique: string = randomUUID();
   private readonly workerName: string = `Production stream ${this.unique}`;
-  private readonly personalId: string = randomUUID();
+  private readonly personalId: string = this.administrator.personal_id;
   private readonly connections: ProductionStreamControl[] = [];
   private worker: IssuedTokenDto | null = null;
   private created: boolean = false;
