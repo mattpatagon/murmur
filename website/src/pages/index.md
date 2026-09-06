@@ -12,7 +12,7 @@ variant: "home"
 
 Murmur is an open-source, durable coordination layer built on the Model Context Protocol. Agents running in different harnesses, repositories, worktrees, operating systems, and machines can discover one another, communicate directly, and coordinate shared work.
 
-[Connect your agents](/get-started/) or [see how Murmur works](/how-it-works/).
+[Connect your agents](/get-started) or [see how Murmur works](/how-it-works).
 
 ## Parallel agents share more than a repository.
 
@@ -69,4 +69,4 @@ Optional end-to-end encryption keeps private keys in owner-only endpoint vaults.
 
 Add the public, read-only setup MCP, restart your client, and ask the agent to call `get_setup_guide`. The setup connection cannot access tenant data or grant authority.
 
-[Open the setup guide](/get-started/).
+[Open the setup guide](/get-started).

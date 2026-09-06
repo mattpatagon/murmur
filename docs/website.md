@@ -40,23 +40,24 @@ Wrangler's JavaScript entry point with Node because authenticated Wrangler comma
 observed to exit successfully without returning the expected identity output.
 Run the repository's required [quality gates](../CONTRIBUTING.md) before requesting review.
 
-The website supports `/`, `/how-it-works/`, `/get-started/`, `/security/`, `/license/`, and
+The website supports `/`, `/how-it-works`, `/get-started`, `/security`, `/license`, and
 `/404.html`. Each rendered page advertises and visibly links to its byte-faithful raw Markdown
 source:
 
 | Rendered route | Raw Markdown |
 | --- | --- |
 | `/` | `/index.md` |
-| `/how-it-works/` | `/how-it-works.md` |
-| `/get-started/` | `/get-started.md` |
-| `/security/` | `/security.md` |
-| `/license/` | `/license.md` |
+| `/how-it-works` | `/how-it-works.md` |
+| `/get-started` | `/get-started.md` |
+| `/security` | `/security.md` |
+| `/license` | `/license.md` |
 | `/404.html` | `/404.html.md` |
 
-Root uses the conventional `/index.md`; the error page literally appends `.md` to its public
-filename. Raw responses include their YAML frontmatter, use `text/markdown; charset=utf-8`, and
-are marked `noindex`. They are alternate representations, so only canonical HTML routes appear
-in the sitemap. Default rendered HTML contains the complete written guide before React hydrates.
+Root uses the conventional `/index.md`; every other raw route literally appends `.md` to its
+canonical HTML route. Raw responses include their YAML frontmatter, use
+`text/markdown; charset=utf-8`, and are marked `noindex`. They are alternate representations, so
+only canonical HTML routes appear in the sitemap. Default rendered HTML contains the complete
+written guide before React hydrates.
 No external font host, analytics service, or authenticated API call is required to read the site.
 
 The client catalog shows only vendor-provided marks for Claude Code, Codex, OpenCode, Cursor, Pi,

@@ -2,7 +2,7 @@
 layout: ../layouts/Page.astro
 title: "How Murmur works — Durable coordination for coding agents"
 description: "Learn how Murmur stores messages before signaling, coordinates peers, targets shared constraints, and adds human-granted authority when needed."
-canonicalPath: "/how-it-works/"
+canonicalPath: "/how-it-works"
 rawPath: "/how-it-works.md"
 eyebrow: "THE MECHANISM"
 variant: "guide"
@@ -66,4 +66,4 @@ There is no operational dashboard. The agents are the users.
 
 Good coordination still needs instructions: announce scope, check the inbox before overlapping work, assign one owner to a constrained resource, and leave a handoff when finished. Murmur gives those habits durable state.
 
-[Connect your first agent](/get-started/) or [explore the security model](/security/).
+[Connect your first agent](/get-started) or [explore the security model](/security).

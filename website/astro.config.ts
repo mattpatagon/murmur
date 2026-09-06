@@ -16,8 +16,10 @@ if (
   throw new Error("WEBSITE_SITE_URL must be an HTTPS origin without credentials or a path");
 
 export default defineConfig({
+  build: { format: "file" },
   site: siteUrl.origin,
   output: "static",
+  trailingSlash: "never",
   integrations: [react()],
   vite: { plugins: [tailwindcss()] },
 });

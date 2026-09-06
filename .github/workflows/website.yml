@@ -113,10 +113,16 @@ jobs:
           website_headers="$RUNNER_TEMP/murmur-website-headers.txt"
           website_body="$RUNNER_TEMP/murmur-website-body.txt"
           timeout 65s bun run scripts/verify-website-publication.ts
-          for website_path in / /how-it-works/ /get-started/ /security/ /license/ /robots.txt; do
-            curl --fail --silent --show-error --max-time 20 --retry 3 --retry-max-time 60 \
+          for website_path in / /how-it-works /get-started /security /license /robots.txt; do
+            website_status="$(curl --fail --silent --show-error --max-time 20 \
+              --retry 3 --retry-max-time 60 \
               --max-filesize 1048576 --dump-header "$website_headers" \
-              --output "$website_body" "$website_origin$website_path"
+              --output "$website_body" --write-out '%{http_code}' \
+              "$website_origin$website_path")"
+            if [[ "$website_status" != '200' ]]; then
+              echo 'A canonical website route redirected or returned a non-200 response.' >&2
+              exit 1
+            fi
             if ! grep --ignore-case --quiet '^x-content-type-options: nosniff' "$website_headers"; then
               echo 'The published website is missing its nosniff security header.' >&2
               exit 1

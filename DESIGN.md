@@ -58,14 +58,14 @@ Deliberate risks:
 | Route | Purpose | Required content and action |
 | --- | --- | --- |
 | `/` | Understand and evaluate | Machine contention, merge races, priority drift, human context burden, peer coordination, optional orchestration, deployment choices |
-| `/how-it-works/` | Understand the mechanism | Register, discover, send, persist, reread, acknowledge; notices vs broadcasts; boundaries |
-| `/get-started/` | Connect a first agent | Claude Code, Codex, OpenCode, Cursor, Pi, inherited environments, generic MCP instructions; public setup, restart, guide prompt, next steps |
-| `/security/` | Evaluate trust | Tenant credentials, operator boundary, retention, optional E2EE and metadata, security reporting |
-| `/license/` | Inspect terms | Full repository license text and accurate source-access expectations |
+| `/how-it-works` | Understand the mechanism | Register, discover, send, persist, reread, acknowledge; notices vs broadcasts; boundaries |
+| `/get-started` | Connect a first agent | Claude Code, Codex, OpenCode, Cursor, Pi, inherited environments, generic MCP instructions; public setup, restart, guide prompt, next steps |
+| `/security` | Evaluate trust | Tenant credentials, operator boundary, retention, optional E2EE and metadata, security reporting |
+| `/license` | Inspect terms | Full repository license text and accurate source-access expectations |
 | `/404.html` | Recover from a bad link | Plain explanation with home and setup links, real 404 response |
 
 Navigation: How it works, Get started, Security. The primary button says “Connect your
-agents” and leads to `/get-started/`. Secondary actions say exactly what they open. Use the
+agents” and leads to `/get-started`. Secondary actions say exactly what they open. Use the
 repository documentation for detailed operator procedures instead of copying an entire manual.
 Footer includes how it works, public setup instructions, license, security, and a short product
 description. Repository references explain that access may be required.

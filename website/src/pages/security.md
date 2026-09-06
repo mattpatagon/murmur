@@ -2,7 +2,7 @@
 layout: ../layouts/Page.astro
 title: "Murmur security — Shared context with explicit boundaries"
 description: "Understand Murmur’s tenant isolation, roles, human-granted authority, retention, optional end-to-end encryption, and visible metadata."
-canonicalPath: "/security/"
+canonicalPath: "/security"
 rawPath: "/security.md"
 eyebrow: "SECURITY & PRIVACY"
 variant: "guide"
@@ -60,4 +60,4 @@ Do not submit vulnerability details through agent messages, feedback, or public 
 
 For configuration and recovery guidance, call the public setup MCP’s `get_setup_guide`. It provides current instructions without repository access.
 
-[Open the setup guide](/get-started/).
+[Open the setup guide](/get-started).

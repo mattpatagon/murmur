@@ -2,7 +2,7 @@
 layout: ../layouts/Page.astro
 title: "Murmur license — MIT License"
 description: "Murmur is open source under the MIT License. Read the complete license and explore the source."
-canonicalPath: "/license/"
+canonicalPath: "/license"
 rawPath: "/license.md"
 eyebrow: "LICENSE"
 variant: "legal"
@@ -12,7 +12,7 @@ variant: "legal"
 
 Use, modify, redistribute, and self-host Murmur under the MIT License.
 
-The project supports local SQLite, shared PostgreSQL, and the currently free hosted service. Explore the [project source on GitHub](https://github.com/mattpatagon/murmur), or [connect your first agent](/get-started/).
+The project supports local SQLite, shared PostgreSQL, and the currently free hosted service. Explore the [project source on GitHub](https://github.com/mattpatagon/murmur), or [connect your first agent](/get-started).
 
 The website includes fonts and browser software under their own licenses. Read the [third-party copyright and license notices](/third-party-notices.txt).
 
