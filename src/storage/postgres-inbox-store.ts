@@ -16,9 +16,25 @@ import {
   type TenantId,
 } from "../domain/value-objects.js";
 import {
+  type MaterializationReservation,
+  reserveMaterializationBytes,
+} from "../materialization-budget.js";
+import {
+  INBOX_PAGE_ROW_OVERHEAD_BYTES,
+  MAX_INBOX_PAGE_BYTES,
+  PLAINTEXT_PAGE_CONTENT_MULTIPLIER,
+  parsePostgresInboxPage,
+} from "./inbox-page-budget.js";
+import type { InboxReadResult } from "./message-store.js";
+import {
   postgresAgentInTransaction,
   renewPostgresSessionInTransaction,
 } from "./postgres-agent-lifecycle-store.js";
+import { getPostgresInboxSnapshot } from "./postgres-inbox-snapshot.js";
+import {
+  createPostgresTenantTransactionRunner,
+  type PostgresTenantTransactionRunner,
+} from "./postgres-message-operation.js";
 import {
   type CountRow,
   CountRowSchema,
@@ -56,9 +72,29 @@ export async function getPostgresMessages(
   tenantId: TenantId,
   query: GetMessagesQuery,
   now: Instant,
+  run: PostgresTenantTransactionRunner = createPostgresTenantTransactionRunner(database, tenantId),
 ): Promise<readonly Message[]> {
-  return await database.begin(async (transaction: TransactionSql): Promise<readonly Message[]> => {
-    await setPostgresTenantContext(transaction, tenantId);
+  return (await readPostgresInbox(tenantId, query, now, false, run)).messages;
+}
+
+export async function getPostgresMessagesWithVersion(
+  database: Sql,
+  tenantId: TenantId,
+  query: GetMessagesQuery,
+  now: Instant,
+  run: PostgresTenantTransactionRunner = createPostgresTenantTransactionRunner(database, tenantId),
+): Promise<InboxReadResult> {
+  return await readPostgresInbox(tenantId, query, now, true, run);
+}
+
+async function readPostgresInbox(
+  tenantId: TenantId,
+  query: GetMessagesQuery,
+  now: Instant,
+  includeVersion: boolean,
+  run: PostgresTenantTransactionRunner,
+): Promise<InboxReadResult> {
+  return await run(async (transaction: TransactionSql): Promise<InboxReadResult> => {
     const agent: Agent = await readingAgent(
       transaction,
       tenantId,
@@ -71,32 +107,73 @@ export async function getPostgresMessages(
         ? agent.generation.value
         : query.generation.value;
     const threadId: string | null = query.threadId === null ? null : query.threadId.value;
-    const raw: unknown = await transaction`
+    const reservation: MaterializationReservation =
+      reserveMaterializationBytes(MAX_INBOX_PAGE_BYTES);
+    try {
+      if (includeVersion) {
+        const snapshot: Awaited<ReturnType<typeof getPostgresInboxSnapshot>> =
+          await getPostgresInboxSnapshot(transaction, tenantId, query, now, generation);
+        const messages: Message[] = snapshot.rows.map(
+          (row: MessageRow): Message => mapMessageRow(row),
+        );
+        reservation.settle(snapshot.estimatedBytes);
+        return { messages, inboxVersion: snapshot.inboxVersion };
+      }
+      const raw: unknown = await transaction`
+      WITH candidates AS MATERIALIZED (
+        SELECT tenant_sequence,
+          ${PLAINTEXT_PAGE_CONTENT_MULTIPLIER}::bigint * octet_length(content)
+            + ${INBOX_PAGE_ROW_OVERHEAD_BYTES}::bigint AS estimated_bytes
+        FROM murmur.messages
+        WHERE tenant_id = ${tenantId.value}::uuid
+          AND recipient_id = ${query.agentId.value}
+          AND recipient_generation = ${generation}
+          AND tenant_sequence > ${query.afterSequence.value}
+          AND expires_at > ${now.toISOString()}::timestamptz
+          AND (${query.unreadOnly} = false OR read_at IS NULL)
+          AND (${threadId}::text IS NULL OR thread_id = ${threadId})
+        ORDER BY tenant_sequence ASC
+        LIMIT ${query.limit}
+      ), budget AS (
+        SELECT COALESCE(SUM(estimated_bytes), 0)::bigint AS estimated_page_bytes FROM candidates
+      )
       SELECT
-        tenant_sequence AS sequence, message_id::text AS message_id,
-        broadcast_id::text AS broadcast_id, thread_id, sender_id, recipient_id,
-        sender_generation, recipient_generation,
-        content, sender_authority, message_kind,
-        orchestrator_policy_id::text AS orchestrator_policy_id,
-        repository_name, branch_name, client_name,
-        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
-        to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS expires_at,
-        CASE WHEN read_at IS NULL THEN NULL
-          ELSE to_char(read_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+        budget.estimated_page_bytes,
+        message.tenant_sequence AS sequence, message.message_id::text AS message_id,
+        message.broadcast_id::text AS broadcast_id, message.thread_id, message.sender_id,
+        message.recipient_id, message.sender_generation, message.recipient_generation,
+        message.content, message.sender_authority, message.message_kind,
+        message.orchestrator_policy_id::text AS orchestrator_policy_id,
+        message.repository_name, message.branch_name, message.client_name,
+        to_char(message.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
+        to_char(message.expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS expires_at,
+        CASE WHEN message.read_at IS NULL THEN NULL
+          ELSE to_char(message.read_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
         END AS read_at
-      FROM murmur.messages
-      WHERE tenant_id = ${tenantId.value}::uuid
-        AND recipient_id = ${query.agentId.value}
-        AND recipient_generation = ${generation}
-        AND tenant_sequence > ${query.afterSequence.value}
-        AND expires_at > ${now.toISOString()}::timestamptz
-        AND (${query.unreadOnly} = false OR read_at IS NULL)
-        AND (${threadId}::text IS NULL OR thread_id = ${threadId})
-      ORDER BY tenant_sequence ASC
-      LIMIT ${query.limit}
+      FROM budget
+      LEFT JOIN candidates ON budget.estimated_page_bytes <= ${MAX_INBOX_PAGE_BYTES}
+      LEFT JOIN murmur.messages AS message
+        ON message.tenant_id = ${tenantId.value}::uuid
+        AND message.tenant_sequence = candidates.tenant_sequence
+      WHERE budget.estimated_page_bytes > ${MAX_INBOX_PAGE_BYTES}
+        OR message.tenant_sequence IS NOT NULL
+      ORDER BY message.tenant_sequence ASC
     `;
-    const rows: MessageRow[] = z.array(MessageRowSchema).parse(raw);
-    return rows.map((row: MessageRow): Message => mapMessageRow(row));
+      const {
+        estimatedBytes,
+        rows,
+      }: { readonly estimatedBytes: number; readonly rows: MessageRow[] } = parsePostgresInboxPage(
+        raw,
+        MessageRowSchema,
+        { kind: "plaintext", limit: query.limit },
+      );
+      const messages: Message[] = rows.map((row: MessageRow): Message => mapMessageRow(row));
+      reservation.settle(estimatedBytes);
+      return { messages, inboxVersion: Sequence.zero() };
+    } catch (error: unknown) {
+      reservation.fail();
+      throw error;
+    }
   });
 }
 
@@ -105,26 +182,25 @@ export async function markPostgresMessagesRead(
   tenantId: TenantId,
   command: MarkMessagesReadCommand,
   now: Instant,
+  run: PostgresTenantTransactionRunner = createPostgresTenantTransactionRunner(database, tenantId),
 ): Promise<MarkMessagesReadResult> {
-  return await database.begin(
-    async (transaction: TransactionSql): Promise<MarkMessagesReadResult> => {
-      await setPostgresTenantContext(transaction, tenantId);
-      const agent: Agent = await readingAgent(
-        transaction,
-        tenantId,
-        command.agentId,
-        command.sessionKey,
-        now,
-      );
-      if (command.messageIds.length === 0) return { readAt: now, updated: 0 };
-      const generation: number =
-        command.generation === null || command.generation === undefined
-          ? agent.generation.value
-          : command.generation.value;
-      const messageIds: string[] = command.messageIds.map(
-        (messageId: MessageId): string => messageId.value,
-      );
-      const raw: unknown = await transaction`
+  return await run(async (transaction: TransactionSql): Promise<MarkMessagesReadResult> => {
+    const agent: Agent = await readingAgent(
+      transaction,
+      tenantId,
+      command.agentId,
+      command.sessionKey,
+      now,
+    );
+    if (command.messageIds.length === 0) return { readAt: now, updated: 0 };
+    const generation: number =
+      command.generation === null || command.generation === undefined
+        ? agent.generation.value
+        : command.generation.value;
+    const messageIds: string[] = command.messageIds.map(
+      (messageId: MessageId): string => messageId.value,
+    );
+    const raw: unknown = await transaction`
       UPDATE murmur.messages
       SET read_at = COALESCE(read_at, ${now.toISOString()}::timestamptz)
       WHERE tenant_id = ${tenantId.value}::uuid
@@ -134,10 +210,9 @@ export async function markPostgresMessagesRead(
         AND expires_at > ${now.toISOString()}::timestamptz
       RETURNING message_id::text AS message_id
     `;
-      const rows: { readonly message_id: string }[] = z.array(MessageIdRowSchema).parse(raw);
-      return { readAt: now, updated: rows.length };
-    },
-  );
+    const rows: { readonly message_id: string }[] = z.array(MessageIdRowSchema).parse(raw);
+    return { readAt: now, updated: rows.length };
+  });
 }
 
 export async function getPostgresInboxVersion(
@@ -150,25 +225,41 @@ export async function getPostgresInboxVersion(
   return await database.begin(async (transaction: TransactionSql): Promise<Sequence> => {
     await setPostgresTenantContext(transaction, tenantId);
     const agent: Agent = await postgresAgentInTransaction(transaction, tenantId, agentId, now);
-    const raw: unknown = await transaction`
+    return await inboxVersionInTransaction(
+      transaction,
+      tenantId,
+      agentId,
+      now,
+      generation === null ? agent.generation.value : generation.value,
+    );
+  });
+}
+
+async function inboxVersionInTransaction(
+  transaction: TransactionSql,
+  tenantId: TenantId,
+  agentId: AgentId,
+  now: Instant,
+  generation: number,
+): Promise<Sequence> {
+  const raw: unknown = await transaction`
       SELECT COALESCE(MAX(active.tenant_sequence), 0)::bigint AS version
       FROM (
         SELECT tenant_sequence FROM murmur.messages
         WHERE tenant_id = ${tenantId.value}::uuid
           AND recipient_id = ${agentId.value}
-          AND recipient_generation = ${generation === null ? agent.generation.value : generation.value}
+          AND recipient_generation = ${generation}
           AND expires_at > ${now.toISOString()}::timestamptz
         UNION ALL
         SELECT tenant_sequence FROM murmur.e2ee_messages
         WHERE tenant_id = ${tenantId.value}::uuid
           AND recipient_id = ${agentId.value}
-          AND recipient_generation = ${generation === null ? agent.generation.value : generation.value}
+          AND recipient_generation = ${generation}
           AND expires_at > ${now.toISOString()}::timestamptz
       ) AS active
     `;
-    const rows: { readonly version: number }[] = z.array(InboxVersionRowSchema).parse(raw);
-    return Sequence.parse(firstRow(rows, "inbox version").version);
-  });
+  const rows: { readonly version: number }[] = z.array(InboxVersionRowSchema).parse(raw);
+  return Sequence.parse(firstRow(rows, "inbox version").version);
 }
 
 export async function pruneExpiredPostgresMessages(

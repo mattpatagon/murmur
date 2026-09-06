@@ -1,0 +1,383 @@
+{
+  "event": "hosted-load-result",
+  "passed": true,
+  "failure": null,
+  "cleanupPassed": true,
+  "lastStage": "database-verification",
+  "durationMs": 3086902,
+  "profile": {
+    "seededAccounts": 25000,
+    "exercisedAccounts": 25000,
+    "steadyConcurrency": 8,
+    "rampConcurrency": [1, 4, 16, 64],
+    "attackConcurrency": 66,
+    "authenticationSlots": 4,
+    "maxSessions": 1000,
+    "maxStreams": 64,
+    "maxAppRssBytes": 536870912,
+    "p95LimitMs": 2000,
+    "p99LimitMs": 5000
+  },
+  "peakAppRssBytes": 409456640,
+  "database": {
+    "baseline": {
+      "tenants": 0,
+      "tokens": 0,
+      "agents": 0,
+      "messages": 0,
+      "unreadMessages": 0,
+      "databaseBytes": 131921587,
+      "schemaBytes": 122429440
+    },
+    "seeded": {
+      "tenants": 25000,
+      "tokens": 25000,
+      "agents": 0,
+      "messages": 0,
+      "unreadMessages": 0,
+      "databaseBytes": 154941107,
+      "schemaBytes": 145448960
+    },
+    "loaded": {
+      "tenants": 25000,
+      "tokens": 25000,
+      "agents": 50000,
+      "messages": 25643,
+      "unreadMessages": 0,
+      "databaseBytes": 173373107,
+      "schemaBytes": 163749888
+    }
+  },
+  "phases": [
+    {
+      "phase": "ramp-1",
+      "offeredConcurrency": 1,
+      "durationMs": 39305,
+      "httpAttempts": 1408,
+      "retries": 0,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "200": 1280,
+        "202": 128
+      },
+      "attemptsPerSecond": 35.82,
+      "operations": 1408,
+      "operationP50Ms": 26.75,
+      "operationP95Ms": 51.79,
+      "operationP99Ms": 72.39,
+      "attemptP95Ms": 51.6
+    },
+    {
+      "phase": "ramp-4",
+      "offeredConcurrency": 4,
+      "durationMs": 17900,
+      "httpAttempts": 1408,
+      "retries": 0,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "200": 1280,
+        "202": 128
+      },
+      "attemptsPerSecond": 78.66,
+      "operations": 1408,
+      "operationP50Ms": 47.22,
+      "operationP95Ms": 102.39,
+      "operationP99Ms": 140.79,
+      "attemptP95Ms": 102.24
+    },
+    {
+      "phase": "ramp-16",
+      "offeredConcurrency": 16,
+      "durationMs": 15576,
+      "httpAttempts": 1408,
+      "retries": 0,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "200": 1280,
+        "202": 128
+      },
+      "attemptsPerSecond": 90.39,
+      "operations": 1408,
+      "operationP50Ms": 182.68,
+      "operationP95Ms": 347.7,
+      "operationP99Ms": 409.82,
+      "attemptP95Ms": 347.53
+    },
+    {
+      "phase": "ramp-64",
+      "offeredConcurrency": 64,
+      "durationMs": 15326,
+      "httpAttempts": 1436,
+      "retries": 28,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "200": 1280,
+        "202": 128,
+        "503": 28
+      },
+      "attemptsPerSecond": 93.7,
+      "operations": 1408,
+      "operationP50Ms": 676.11,
+      "operationP95Ms": 1363.59,
+      "operationP99Ms": 2126.85,
+      "attemptP95Ms": 1292.56
+    },
+    {
+      "phase": "foreign-session-isolation",
+      "offeredConcurrency": 1,
+      "durationMs": 69,
+      "httpAttempts": 5,
+      "retries": 0,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "200": 2,
+        "202": 1,
+        "401": 1,
+        "404": 1
+      },
+      "attemptsPerSecond": 72.35,
+      "operations": 5,
+      "operationP50Ms": 10.68,
+      "operationP95Ms": 26.32,
+      "operationP99Ms": 26.32,
+      "attemptP95Ms": 26.17
+    },
+    {
+      "phase": "known-credentials-under-attack:malformed",
+      "offeredConcurrency": 22,
+      "durationMs": 10686,
+      "httpAttempts": 1024,
+      "retries": 0,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "401": 18,
+        "503": 1006
+      },
+      "attemptsPerSecond": 95.83,
+      "operations": 1024,
+      "operationP50Ms": 50.62,
+      "operationP95Ms": 118.6,
+      "operationP99Ms": 198.81,
+      "attemptP95Ms": 118.6
+    },
+    {
+      "phase": "known-credentials-under-attack:known-key",
+      "offeredConcurrency": 22,
+      "durationMs": 10687,
+      "httpAttempts": 1024,
+      "retries": 0,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "401": 18,
+        "503": 1006
+      },
+      "attemptsPerSecond": 95.82,
+      "operations": 1024,
+      "operationP50Ms": 51.06,
+      "operationP95Ms": 120.27,
+      "operationP99Ms": 170.6,
+      "attemptP95Ms": 120.27
+    },
+    {
+      "phase": "known-credentials-under-attack:unknown-key",
+      "offeredConcurrency": 22,
+      "durationMs": 10686,
+      "httpAttempts": 1024,
+      "retries": 0,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "401": 14,
+        "503": 1010
+      },
+      "attemptsPerSecond": 95.83,
+      "operations": 1024,
+      "operationP50Ms": 49.97,
+      "operationP95Ms": 142.08,
+      "operationP99Ms": 195.66,
+      "attemptP95Ms": 142.08
+    },
+    {
+      "phase": "known-credentials-under-attack",
+      "offeredConcurrency": 8,
+      "durationMs": 10690,
+      "httpAttempts": 704,
+      "retries": 0,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "200": 640,
+        "202": 64
+      },
+      "attemptsPerSecond": 65.85,
+      "operations": 704,
+      "operationP50Ms": 97.59,
+      "operationP95Ms": 194.46,
+      "operationP99Ms": 1406.36,
+      "attemptP95Ms": 194.19
+    },
+    {
+      "phase": "known-credentials-under-attack:recovery",
+      "offeredConcurrency": 1,
+      "durationMs": 341,
+      "httpAttempts": 11,
+      "retries": 0,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "200": 10,
+        "202": 1
+      },
+      "attemptsPerSecond": 32.26,
+      "operations": 11,
+      "operationP50Ms": 30.32,
+      "operationP95Ms": 54.89,
+      "operationP99Ms": 54.89,
+      "attemptP95Ms": 54.63
+    },
+    {
+      "phase": "cold-credentials-under-attack:malformed",
+      "offeredConcurrency": 22,
+      "durationMs": 9721,
+      "httpAttempts": 1024,
+      "retries": 0,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "401": 42,
+        "503": 982
+      },
+      "attemptsPerSecond": 105.34,
+      "operations": 1024,
+      "operationP50Ms": 42.43,
+      "operationP95Ms": 77.87,
+      "operationP99Ms": 150.44,
+      "attemptP95Ms": 77.86
+    },
+    {
+      "phase": "cold-credentials-under-attack:known-key",
+      "offeredConcurrency": 22,
+      "durationMs": 9722,
+      "httpAttempts": 1024,
+      "retries": 0,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "401": 32,
+        "503": 992
+      },
+      "attemptsPerSecond": 105.33,
+      "operations": 1024,
+      "operationP50Ms": 43.69,
+      "operationP95Ms": 99.46,
+      "operationP99Ms": 159.84,
+      "attemptP95Ms": 99.46
+    },
+    {
+      "phase": "cold-credentials-under-attack:unknown-key",
+      "offeredConcurrency": 22,
+      "durationMs": 9721,
+      "httpAttempts": 1024,
+      "retries": 0,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "401": 32,
+        "503": 992
+      },
+      "attemptsPerSecond": 105.33,
+      "operations": 1024,
+      "operationP50Ms": 43.82,
+      "operationP95Ms": 97.4,
+      "operationP99Ms": 163.43,
+      "attemptP95Ms": 97.4
+    },
+    {
+      "phase": "cold-credentials-under-attack",
+      "offeredConcurrency": 8,
+      "durationMs": 9726,
+      "httpAttempts": 724,
+      "retries": 20,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "200": 640,
+        "202": 64,
+        "503": 20
+      },
+      "attemptsPerSecond": 74.44,
+      "operations": 704,
+      "operationP50Ms": 65.88,
+      "operationP95Ms": 154.74,
+      "operationP99Ms": 1226.46,
+      "attemptP95Ms": 142.64
+    },
+    {
+      "phase": "cold-credentials-under-attack:recovery",
+      "offeredConcurrency": 1,
+      "durationMs": 347,
+      "httpAttempts": 11,
+      "retries": 0,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "200": 10,
+        "202": 1
+      },
+      "attemptsPerSecond": 31.69,
+      "operations": 11,
+      "operationP50Ms": 31.42,
+      "operationP95Ms": 49.82,
+      "operationP99Ms": 49.82,
+      "attemptP95Ms": 49.6
+    },
+    {
+      "phase": "all-accounts-mixed-http",
+      "offeredConcurrency": 8,
+      "durationMs": 2736840,
+      "httpAttempts": 275839,
+      "retries": 839,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "200": 250000,
+        "202": 25000,
+        "503": 839
+      },
+      "attemptsPerSecond": 100.79,
+      "operations": 275000,
+      "operationP50Ms": 72.74,
+      "operationP95Ms": 165.44,
+      "operationP99Ms": 240.03,
+      "attemptP95Ms": 162.8
+    },
+    {
+      "phase": "session-and-stream-saturation",
+      "offeredConcurrency": 1,
+      "durationMs": 98610,
+      "httpAttempts": 3066,
+      "retries": 0,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "200": 2064,
+        "202": 1000,
+        "503": 2
+      },
+      "attemptsPerSecond": 31.09,
+      "operations": 3001,
+      "operationP50Ms": 15.49,
+      "operationP95Ms": 31.74,
+      "operationP99Ms": 38.22,
+      "attemptP95Ms": 33.78
+    },
+    {
+      "phase": "saturation-recovery",
+      "offeredConcurrency": 1,
+      "durationMs": 1337,
+      "httpAttempts": 15,
+      "retries": 0,
+      "mcpCapacityResponses": 0,
+      "statusCodes": {
+        "200": 13,
+        "202": 2
+      },
+      "attemptsPerSecond": 11.22,
+      "operations": 14,
+      "operationP50Ms": 21.4,
+      "operationP95Ms": 44.28,
+      "operationP99Ms": 44.28,
+      "attemptP95Ms": 1015.18
+    }
+  ]
+}

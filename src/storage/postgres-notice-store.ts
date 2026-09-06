@@ -26,6 +26,7 @@ import {
   lockPostgresRecipientCommitOrder,
   setPostgresTenantContext,
 } from "./postgres-message-transactions.js";
+import { readPostgresNoticePage } from "./postgres-notice-page.js";
 
 async function noticeRow(
   transaction: TransactionSql,
@@ -176,59 +177,7 @@ export async function listPostgresNotices(
         false,
       );
     }
-    const branch: string | null = query.branchName === null ? null : query.branchName.value;
-    const kind: string | null = query.kind;
-    const cursorCreatedAt: string | null =
-      query.cursor === null ? null : query.cursor.createdAt.toISOString();
-    const cursorNoticeId: string | null =
-      query.cursor === null ? null : query.cursor.noticeId.value;
-    const raw: unknown = await transaction`
-      SELECT notice_id::text AS notice_id, kind, creator_id, creator_generation,
-        repository_name, branch_name, content, idempotency_key,
-        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
-        to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS expires_at,
-        resolved_by_id, resolved_by_generation,
-        CASE WHEN resolved_at IS NULL THEN NULL ELSE
-          to_char(resolved_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END AS resolved_at,
-        withdrawn_by_id, withdrawn_by_generation,
-        CASE WHEN withdrawn_at IS NULL THEN NULL ELSE
-          to_char(withdrawn_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END AS withdrawn_at,
-        resolution_note
-      FROM murmur.notices
-      WHERE tenant_id = ${tenantId.value}::uuid
-        AND repository_name = ${query.repositoryName.value}
-        AND (${branch}::text IS NULL OR branch_name = ${branch})
-        AND (${kind}::text IS NULL OR kind = ${kind})
-        AND (
-          ${query.state} = 'all'
-          OR (${query.state} = 'resolved' AND resolved_at IS NOT NULL)
-          OR (${query.state} = 'withdrawn' AND withdrawn_at IS NOT NULL)
-          OR (${query.state} = 'open' AND resolved_at IS NULL AND withdrawn_at IS NULL
-              AND expires_at > ${now.toISOString()}::timestamptz)
-          OR (${query.state} = 'expired' AND resolved_at IS NULL AND withdrawn_at IS NULL
-              AND expires_at <= ${now.toISOString()}::timestamptz)
-        )
-        AND (
-          ${cursorCreatedAt}::timestamptz IS NULL
-          OR created_at < ${cursorCreatedAt}::timestamptz
-          OR (created_at = ${cursorCreatedAt}::timestamptz
-            AND notice_id > ${cursorNoticeId}::uuid)
-        )
-      ORDER BY created_at DESC, notice_id ASC
-      LIMIT ${query.limit + 1}
-    `;
-    const rows: NoticeRow[] = z.array(NoticeRowSchema).parse(raw);
-    const notices: Notice[] = rows
-      .slice(0, query.limit)
-      .map((row: NoticeRow): Notice => mapNoticeRow(row, now));
-    const last: Notice | undefined = notices.at(-1);
-    return {
-      nextCursor:
-        rows.length > query.limit && last !== undefined
-          ? { createdAt: last.createdAt, noticeId: last.noticeId }
-          : null,
-      notices,
-    };
+    return await readPostgresNoticePage(transaction, tenantId, query, now);
   });
 }
 

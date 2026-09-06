@@ -42,6 +42,13 @@ export class FeedbackCapacityError extends Error {
   }
 }
 
+export class HostedStorageCapacityError extends Error {
+  public constructor() {
+    super("Hosted storage capacity reached. Retry after retained data has been cleaned up.");
+    this.name = "HostedStorageCapacityError";
+  }
+}
+
 export class NoticeStateConflictError extends Error {
   public constructor() {
     super("Notice is no longer open. Refresh it before changing its state.");

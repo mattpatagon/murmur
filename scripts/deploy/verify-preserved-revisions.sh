@@ -80,9 +80,11 @@ resolve_digest_source() {
     fail 'An existing revision lacks one unambiguous supported source tag'
   fi
   if ! binding="$(
-    bounded_command gcloud artifacts docker images describe "$image_prefix$source" \
-      --project "$PROJECT_ID" \
-      --format 'json(image_summary.digest,image_summary.fully_qualified_digest)' --quiet |
+    bounded_command gcloud artifacts tags list \
+      --package "$SERVICE" --repository "$ARTIFACT_REPOSITORY" \
+      --location "$REGION" --project "$PROJECT_ID" \
+      --filter "name=\"$package_name/tags/$source\"" \
+      --limit 2 --format 'json(name,version)' --quiet |
       bounded_command head --bytes=1048577 || exit 1
     printf '.'
   )"; then
@@ -90,12 +92,12 @@ resolve_digest_source() {
   fi
   binding="${binding%.}"
   if [ "${#binding}" -gt 1048576 ] || ! bounded_command jq --exit-status --slurp \
-    --arg digest "$digest" --arg image "$image_name@$digest" '
+    --arg name "$package_name/tags/$source" --arg version "$package_name/versions/$digest" '
     length == 1 and (.[0] |
-      type == "object" and keys == ["image_summary"] and
-      (.image_summary | type) == "object" and
-      (.image_summary | keys) == ["digest", "fully_qualified_digest"] and
-      .image_summary.digest == $digest and .image_summary.fully_qualified_digest == $image
+      type == "array" and length == 1 and (.[0] |
+        type == "object" and keys == ["name", "version"] and
+        .name == $name and .version == $version
+      )
     )
   ' <<< "$binding" >/dev/null; then
     fail 'An existing revision source tag does not match its deployed digest'

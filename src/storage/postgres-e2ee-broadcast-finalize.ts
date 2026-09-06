@@ -4,12 +4,6 @@ import { z } from "zod";
 import type { Agent } from "../domain/models.js";
 import { AgentId, type Instant, type TenantId } from "../domain/value-objects.js";
 import {
-  type EncryptedEnvelopeDto,
-  EncryptedEnvelopeDtoSchema,
-  type PublicAgentSigningChainDto,
-  PublicAgentSigningChainDtoSchema,
-} from "../e2ee/wire-contracts.js";
-import {
   type CancelEncryptedBroadcastInput,
   CancelEncryptedBroadcastInputSchema,
   type CancelEncryptedBroadcastOutput,
@@ -19,8 +13,18 @@ import {
   type CommitEncryptedBroadcastOutput,
   CommitEncryptedBroadcastOutputSchema,
 } from "../e2ee/wire-tools.js";
+import { reserveTemporaryMaterializationBytes } from "../materialization-budget.js";
+import {
+  assertE2eeDeliveryBatch,
+  E2EE_BROADCAST_COMMIT_BATCH_SIZE,
+  E2EE_BROADCAST_COMMIT_SNAPSHOT_LIMIT,
+  type E2eeDeliverySnapshot,
+  e2eeDeliveryBatches,
+  maximumE2eeCommitBatchBytes,
+  parseE2eeDeliverySnapshot,
+  validatedE2eeBroadcastDelivery,
+} from "./e2ee-broadcast-commit-batches.js";
 import type { E2eeWriteAuthorization } from "./e2ee-message-store.js";
-import { encryptedCiphertextBytes } from "./e2ee-store-validation.js";
 import { postgresAgentInTransaction } from "./postgres-agent-lifecycle-store.js";
 import {
   assertPostgresE2eeBroadcastAuthorization,
@@ -39,11 +43,35 @@ import {
   setPostgresTenantContext,
 } from "./postgres-message-transactions.js";
 
-async function allDeliveries(
+async function deliverySnapshot(
+  transaction: TransactionSql,
+  tenantId: TenantId,
+  broadcast: PostgresE2eeBroadcastRow,
+): Promise<readonly E2eeDeliverySnapshot[]> {
+  const raw: unknown = await transaction`
+    SELECT
+      CASE WHEN accepted_at IS NULL THEN NULL ELSE
+        to_char(accepted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+      END AS accepted_at,
+      ciphertext_bytes, claim_id::text AS claim_id,
+      octet_length(envelope_json::text) AS envelope_bytes,
+      recipient_generation, recipient_id,
+      octet_length(sender_chain_json::text) AS sender_chain_bytes
+    FROM murmur.e2ee_broadcast_deliveries
+    WHERE tenant_id = ${tenantId.value}::uuid AND broadcast_id = ${broadcast.broadcast_id}::uuid
+    ORDER BY recipient_id ASC LIMIT ${E2EE_BROADCAST_COMMIT_SNAPSHOT_LIMIT}
+    FOR UPDATE
+  `;
+  return parseE2eeDeliverySnapshot(raw, broadcast.recipient_count);
+}
+
+async function deliveryBatch(
   transaction: TransactionSql,
   tenantId: TenantId,
   broadcastId: string,
+  snapshot: readonly E2eeDeliverySnapshot[],
 ): Promise<readonly PostgresE2eeDeliveryRow[]> {
+  const claims: string[] = snapshot.map((row: E2eeDeliverySnapshot): string => row.claim_id);
   const raw: unknown = await transaction`
     SELECT
       CASE WHEN accepted_at IS NULL THEN NULL ELSE
@@ -53,10 +81,15 @@ async function allDeliveries(
       recipient_generation, recipient_id, sender_chain_json::text AS sender_chain_json
     FROM murmur.e2ee_broadcast_deliveries
     WHERE tenant_id = ${tenantId.value}::uuid AND broadcast_id = ${broadcastId}::uuid
-    ORDER BY recipient_id ASC
-    FOR UPDATE
+      AND claim_id = ANY(${transaction.array(claims)}::uuid[])
+    ORDER BY recipient_id ASC LIMIT ${E2EE_BROADCAST_COMMIT_BATCH_SIZE}
   `;
-  return z.array(PostgresE2eeDeliveryRowSchema).parse(raw);
+  const rows: PostgresE2eeDeliveryRow[] = z
+    .array(PostgresE2eeDeliveryRowSchema)
+    .max(E2EE_BROADCAST_COMMIT_BATCH_SIZE)
+    .parse(raw);
+  assertE2eeDeliveryBatch(rows, snapshot);
+  return rows;
 }
 
 function committedOutput(
@@ -77,7 +110,7 @@ async function requireCurrentGenerations(
   transaction: TransactionSql,
   tenantId: TenantId,
   broadcast: PostgresE2eeBroadcastRow,
-  deliveries: readonly PostgresE2eeDeliveryRow[],
+  deliveries: readonly E2eeDeliverySnapshot[],
   now: Instant,
 ): Promise<void> {
   const sender: Agent = await postgresAgentInTransaction(
@@ -105,63 +138,38 @@ async function requireCurrentGenerations(
   }
 }
 
-function validatedEnvelope(
-  delivery: PostgresE2eeDeliveryRow,
-  broadcast: PostgresE2eeBroadcastRow,
-): EncryptedEnvelopeDto {
-  if (
-    delivery.envelope_json === null ||
-    delivery.sender_chain_json === null ||
-    delivery.ciphertext_bytes === null
-  ) {
-    throw new Error("Encrypted broadcast delivery set is incomplete");
-  }
-  const envelope: EncryptedEnvelopeDto = EncryptedEnvelopeDtoSchema.parse(
-    JSON.parse(delivery.envelope_json),
-  );
-  if (
-    envelope.header.broadcast_id !== broadcast.broadcast_id ||
-    envelope.header.thread_id !== broadcast.thread_id ||
-    envelope.header.sender_id !== broadcast.sender_id ||
-    envelope.header.sender_authority !== broadcast.sender_authority ||
-    envelope.header.recipient_id !== delivery.recipient_id ||
-    envelope.header.message_kind !== "message" ||
-    envelope.header.orchestrator_policy_id !== null ||
-    encryptedCiphertextBytes(envelope) !== delivery.ciphertext_bytes
-  ) {
-    throw new Error("Encrypted broadcast delivery no longer matches its snapshot");
-  }
-  return envelope;
-}
-
 async function insertDeliveries(
   transaction: TransactionSql,
   tenantId: TenantId,
   broadcast: PostgresE2eeBroadcastRow,
-  deliveries: readonly PostgresE2eeDeliveryRow[],
+  snapshot: readonly E2eeDeliverySnapshot[],
 ): Promise<number> {
-  if (deliveries.length === 0) return 0;
-  const firstSequence: number = await allocatePostgresE2eeSequences(
-    transaction,
-    tenantId,
-    deliveries.length,
+  if (snapshot.length === 0) return 0;
+  const release: () => void = reserveTemporaryMaterializationBytes(
+    maximumE2eeCommitBatchBytes(snapshot),
   );
-  let ciphertextBytes: number = 0;
-  let index: number = 0;
-  for (const delivery of deliveries) {
-    const envelope: EncryptedEnvelopeDto = validatedEnvelope(delivery, broadcast);
-    if (
-      delivery.envelope_json === null ||
-      delivery.sender_chain_json === null ||
-      delivery.ciphertext_bytes === null
-    ) {
-      throw new Error("Encrypted broadcast delivery set is incomplete");
-    }
-    const senderChain: PublicAgentSigningChainDto = PublicAgentSigningChainDtoSchema.parse(
-      JSON.parse(delivery.sender_chain_json),
+  try {
+    const firstSequence: number = await allocatePostgresE2eeSequences(
+      transaction,
+      tenantId,
+      snapshot.length,
     );
-    ciphertextBytes += delivery.ciphertext_bytes;
-    await transaction`
+    let ciphertextBytes: number = 0;
+    let index: number = 0;
+    for (const batch of e2eeDeliveryBatches(snapshot)) {
+      const deliveries: readonly PostgresE2eeDeliveryRow[] = await deliveryBatch(
+        transaction,
+        tenantId,
+        broadcast.broadcast_id,
+        batch,
+      );
+      for (const delivery of deliveries) {
+        const { envelope, senderChain }: ReturnType<typeof validatedE2eeBroadcastDelivery> =
+          validatedE2eeBroadcastDelivery(delivery, broadcast);
+        if (delivery.ciphertext_bytes === null)
+          throw new Error("Encrypted broadcast delivery set is incomplete");
+        ciphertextBytes += delivery.ciphertext_bytes;
+        await transaction`
       INSERT INTO murmur.e2ee_messages(
         tenant_id, tenant_sequence, message_id, thread_id,
         sender_id, sender_generation, sender_authority, message_kind,
@@ -180,9 +188,13 @@ async function insertDeliveries(
         ${envelope.header.created_at}::timestamptz, ${envelope.header.expires_at}::timestamptz
       )
     `;
-    index += 1;
+        index += 1;
+      }
+    }
+    return ciphertextBytes;
+  } finally {
+    release();
   }
-  return ciphertextBytes;
 }
 
 export async function commitPostgresEncryptedBroadcast(
@@ -208,22 +220,14 @@ export async function commitPostgresEncryptedBroadcast(
       if (broadcast.state !== "pending" || broadcast.expires_at <= now.toISOString()) {
         throw new Error("Encrypted broadcast is unavailable or expired");
       }
-      const deliveries: readonly PostgresE2eeDeliveryRow[] = await allDeliveries(
+      const deliveries: readonly E2eeDeliverySnapshot[] = await deliverySnapshot(
         transaction,
         tenantId,
-        input.broadcast_id,
+        broadcast,
       );
-      if (
-        deliveries.length !== broadcast.recipient_count ||
-        deliveries.some(
-          (delivery: PostgresE2eeDeliveryRow): boolean => delivery.envelope_json === null,
-        )
-      ) {
-        throw new Error("Encrypted broadcast delivery set is incomplete");
-      }
       await lockPostgresRecipientCommitOrder(database, transaction, tenantId, [
         broadcast.sender_id,
-        ...deliveries.map((delivery: PostgresE2eeDeliveryRow): string => delivery.recipient_id),
+        ...deliveries.map((delivery: E2eeDeliverySnapshot): string => delivery.recipient_id),
       ]);
       await requireCurrentGenerations(transaction, tenantId, broadcast, deliveries, now);
       const ciphertextBytes: number = await insertDeliveries(

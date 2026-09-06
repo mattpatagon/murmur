@@ -9,9 +9,9 @@ import {
   toHistoryMessageDto,
 } from "../domain/history-contracts.js";
 import type { AgentGeneration } from "../domain/lifecycle-values.js";
-import type { GetMessagesQuery, Message } from "../domain/models.js";
+import type { GetMessagesQuery } from "../domain/models.js";
 import type { AgentId } from "../domain/value-objects.js";
-import type { MessageStore } from "../storage/message-store.js";
+import type { InboxReadResult, MessageStore } from "../storage/message-store.js";
 import { toolResult } from "./murmur-tool-results.js";
 
 export async function callHistoryTool(
@@ -30,11 +30,11 @@ export async function callHistoryTool(
   if (generation === null || generation === undefined) {
     throw new Error("History requires an explicit agent generation");
   }
-  const messages: readonly Message[] = await store.getMessages(query);
+  const { messages, inboxVersion }: InboxReadResult = await store.getMessagesWithVersion(query);
   const output: MessageHistoryOutput = MessageHistoryOutputSchema.parse({
     agent_id: query.agentId.value,
     generation: generation.value,
-    inbox_version: (await store.getInboxVersion(query.agentId, generation)).value,
+    inbox_version: inboxVersion.value,
     messages: messages.map(toHistoryMessageDto),
   });
   return toolResult(output);

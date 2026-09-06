@@ -6,6 +6,10 @@ committed workflow is the source of truth for sequencing:
 `.github/workflows/deploy.yml` runs on every push to `main` and can also be
 started manually.
 
+Both production deployment and production-isolation verification execute only for
+`refs/heads/main`. Manual dispatches against a branch or tag skip the privileged job before
+checkout, workload-identity authentication, or production secret access.
+
 ## Service contract
 
 The deployed service exposes:
@@ -35,6 +39,14 @@ because MCP sessions and connector authorization codes are in memory. Messages, 
 credentials, and authorization policy remain durable in PostgreSQL across restarts; a connector
 restarts authorization when an ephemeral five-minute code is lost.
 
+Every deployment explicitly sets one vCPU, 512 MiB, service-wide `--max 1`, and revision-level
+`--max-instances 1`. The service-wide limit also constrains traffic split across revisions;
+revision limits alone do not express that aggregate intent. Do not leave independently reachable
+tagged revisions running as additional free capacity. These controls constrain autoscaling, not
+the entire provider bill: Cloud Run can briefly exceed its instance maximum during traffic spikes,
+and request, network, logging and database charges remain separate. See
+[Cloud Run maximum-instance behavior](https://cloud.google.com/run/docs/configuring/max-instances).
+
 Production PostgreSQL connections must use certificate verification. The
 runtime mounts the Supabase Server root certificate and connects as the
 non-owner, non-superuser, non-`BYPASSRLS` `murmur_app` role. Tenant-qualified
@@ -52,6 +64,12 @@ Provision these dependencies before enabling the workflow:
 - a Supabase PostgreSQL project and its verified Server root certificate;
 - a GitHub `production` environment with protected deployment approvals;
 - Bun 1.3.14 for manual verification and recovery work.
+
+Restrict the GitHub `production` environment's deployment branches to `main`, and restrict the
+Google workload-identity provider to this repository and `assertion.ref == 'refs/heads/main'`.
+The committed job condition prevents accidental dispatches; environment and identity-provider
+policies independently prevent a modified workflow on another branch from obtaining production
+credentials. Verify these settings in the live control planes before enabling deployment.
 
 Do not create or download a long-lived Google service-account key. GitHub
 authenticates with short-lived workload identity credentials.
@@ -174,22 +192,23 @@ Every phase fails closed. Credential and adoption state are read from the
 database and Secret Manager on each run, so an interrupted workflow resumes
 from durable state instead of assuming the previous attempt finished.
 
-Automatic preservation accepts only declared images from the configured artifact repository whose
-source commits descend from v0.13.0.0 (`d89d405`) and are ancestors of the deployment commit. It uses
-full local Git history and rejects unknown provenance, unrelated images, and oversized revision
-inventories before migrations. Digest-only images require one unambiguous full source-SHA tag from
-a bounded tag lookup filtered to that exact registry version, followed by a source-tag lookup that must
-resolve to the deployed digest. Every returned tag must belong to that version and package; 1,001 returned tags exceed the bound.
-Missing, ambiguous, truncated, or mismatched metadata stops the
-deployment. This verifies source compatibility through the trusted build identity and artifact
-registry; it is not an independent cryptographic image attestation.
-
-Older upgrades require a separately verified writer-drain procedure. The workflow does not delete
-retained revisions or bypass contraction safety to accommodate them. When contraction is required,
-an unfiltered, two-name revision lookup must return only the validated ready revision; empty,
-additional, or malformed rows stop the workflow. Normal application retention continues unchanged;
-shared database and live smoke checks can invoke that existing retention behavior, distinct from a
-deployment purge.
+Automatic preservation accepts only declared images from the configured artifact
+repository whose source commits descend from v0.13.0.0 (`d89d405`) and are ancestors
+of the deployment commit. It uses full local Git history and rejects unknown
+provenance, unrelated images, and oversized revision inventories before migrations.
+Digest-only images require one unambiguous full source-SHA tag from a bounded tag lookup
+filtered to that exact registry version. A separate source-tag lookup must resolve to the
+deployed digest. Every returned tag must belong to that version and package; 1,001 returned
+tags exceed the bound. Missing, ambiguous, truncated, or mismatched metadata stops deployment.
+Both registry lookups use Artifact Registry tag metadata; Container Analysis access is not required.
+This verifies source compatibility through the trusted build identity and artifact registry;
+it is not an independent cryptographic image attestation.
+Older upgrades require a separately verified writer-drain procedure. The workflow
+does not delete retained revisions or bypass contraction safety to accommodate them.
+When contraction is required, an unfiltered, two-name revision lookup must return
+only the validated ready revision; empty, additional, or malformed rows stop the workflow.
+Normal application retention continues unchanged; shared database and live smoke
+checks can invoke that existing retention behavior, distinct from a deployment purge.
 
 ## Self-service tenant onboarding
 
@@ -323,9 +342,12 @@ gcloud run deploy murmur-mcp \
   --set-secrets MURMUR_DATABASE_URL=MURMUR_DATABASE_URL:latest,/etc/murmur/secrets/database-ca.pem=MURMUR_DATABASE_CA:latest \
   --allow-unauthenticated \
   --concurrency 80 \
+  --cpu 1 \
+  --max 1 \
   --max-instances 1 \
   --memory 512Mi \
   --port 8080 \
+  --no-use-http2 \
   --timeout 3600
 ```
 
@@ -383,13 +405,16 @@ gh workflow run production-smoke.yml --ref main -f real_window=true
 The opt-in mode shares the deployment concurrency group, checks the exact deployed source revision
 and existing Cloud Logging read access before provisioning, and observes one disposable tenant's
 SDK session. For a digest-only image, it resolves the expected source tag in the configured artifact
-repository and requires that digest to match the deployed image before and after observation. It requires successful same-session stream reconnection, a new notification and durable
+repository and requires that digest to match the deployed image before and after observation.
+The bounded lookup reads only Artifact Registry tag metadata, without requiring Container Analysis.
+It requires successful same-session stream reconnection, a new notification and durable
 inbox delivery, then checks the corresponding server completion events and platform failures. The
 55-minute window cannot be shortened through environment configuration. The job is bounded to 70
 minutes, including setup, targeted credential revocation, tenant suspension, and log-ingestion waits.
 Cleanup verifies that the observer's revoked credentials return 401 and suspends only its derived
 tenant; retained rows are not deleted. Cloud authentication is refreshed after observation, before
-reading final logs. Missing log-read permission fails closed; it never grants IAM access automatically.
+reading final logs. Missing log-read or registry metadata permission fails closed; it never grants
+IAM access automatically.
 
 The preflight and log verifier require explicit `PROJECT_ID`, `REGION`, `SERVICE`,
 `ARTIFACT_REPOSITORY`, `PRODUCTION_URL`, `EXPECTED_GITHUB_SHA`, `MURMUR_LIVE_EXPECTED_VERSION`, and

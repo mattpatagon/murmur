@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { TenantId } from "../domain/value-objects.js";
 import { firstRow, type SchemaProbeRow, SchemaProbeRowSchema } from "./postgres-message-rows.js";
 import { setPostgresTenantContext } from "./postgres-message-transactions.js";
+import { verifyPostgresStorageBudgetSchema } from "./postgres-storage-budget-schema.js";
 
 export async function verifyPostgresMessageSchema(
   database: Sql,
@@ -12,6 +13,7 @@ export async function verifyPostgresMessageSchema(
   const rawRows: unknown = await database.begin(
     async (transaction: TransactionSql): Promise<unknown> => {
       await setPostgresTenantContext(transaction, tenantId);
+      await verifyPostgresStorageBudgetSchema(transaction);
       return await transaction`
         SELECT
           to_regclass('murmur.agents')::text AS agents_table,

@@ -80,6 +80,21 @@ patch-copy step when the pinned upstream SDK's unmodified declarations pass `bun
 the production-stream tests. Review the patch on every SDK upgrade; do not carry it to another
 version automatically. CI and Docker must install it through the reviewed frozen lockfile.
 
+### Pinned SDK declaration correction
+
+`@modelcontextprotocol/sdk@1.30.0` has a version-pinned Bun patch in `patches/`. Its
+`StreamableHTTPClientTransport.sessionId` getter returns `string | undefined`, but the shared
+`Transport` declaration omits explicit `undefined` from the optional property. The two ESM/CommonJS
+declaration edits make that interface match the existing runtime behavior under
+`exactOptionalPropertyTypes`. No JavaScript, dependency version, license (MIT), or runtime surface
+changes; strict library checking remains enabled. The real production-observer SDK import and
+reconnect test exercise this compatibility boundary.
+
+The release maintainer owns the patch. Remove it, its manifest/lockfile mapping, and the Docker
+patch-copy step when the pinned upstream SDK's unmodified declarations pass `bun run verify` and
+the production-stream tests. Review the patch on every SDK upgrade; do not carry it to another
+version automatically. CI and Docker must install it through the reviewed frozen lockfile.
+
 ## Bun upgrades
 
 Bun is both runtime and package manager. Update all reviewed pins together:
@@ -101,6 +116,10 @@ Then verify install, typecheck, lint, formatting, portable tests, SQLite migrati
 integration, bundled stdio/HTTP entry points, the Linux container test, and a clean package install.
 Do not claim a platform is supported until its CI job passes with the new runtime.
 
+The [HTTP transport contract](node-http-transport.md) relies on the pinned runtime's native drain
+and disconnect behavior. Recheck its source assumptions, portable transport regressions, and the
+bounded slow-reader memory gate on the release build before adopting another Bun revision.
+
 ## Schema and protocol upgrades
 
 PostgreSQL migrations are immutable after reaching a shared environment. Add a timestamped forward
@@ -115,6 +134,34 @@ upgrade if their contents matter.
 MCP changes are additive when possible. Preserve existing tool names, required fields, error
 meanings, idempotency behavior, resource URIs, and message retention semantics. A breaking change
 requires an explicit compatibility plan, versioned contract, migration path, and release note.
+
+### v0.14 client and operator checklist
+
+- Send one JSON-RPC message per authenticated HTTP POST. All arrays are rejected with HTTP 400,
+  including batches from older negotiated MCP versions. Parallel individual POSTs remain supported.
+- Keep each in-flight request ID unique within its session. Numeric `42` and string `"42"` remain
+  distinct; duplicate active IDs receive HTTP 409. After cancellation before a response send, the
+  affected session can be retired. On its subsequent 404, initialize a new session and restore
+  subscriptions, then reread the durable inbox. See [request-ID admission](http-request-id-admission.md).
+- Follow `next_cursor` on agent, notice and policy lists and `nextCursor` on `resources/list`, even
+  when fewer items than requested arrive. For an oversized inbox, retry with a smaller `limit`
+  (start with 1), then continue from the last returned sequence, never `inbox_version`. See
+  [inbox response budgets](inbox-response-budget.md). No message is silently truncated or acknowledged.
+- Parse successful tool text as JSON; its indentation is no longer stable. Check the MCP result
+  even when HTTP returns 200: processing and materialization overload use retryable code `-32003`.
+  Honor retry hints with bounded backoff and preserve write idempotency keys.
+- Apply the [retained-storage and audit-headroom migrations](hosted-storage-budget.md) before the
+  matching application. New startup requires accounting readiness. Existing data and hard limits
+  are preserved; monitor the ordinary audit watermark before protected restriction capacity fills.
+- Keep the container backend on HTTP/1 with `--no-use-http2`; public clients may still use HTTP/2
+  at Cloud Run's frontend. Direct self-hosting needs the upstream protections in the
+  [transport contract](node-http-transport.md).
+
+Stdio does not inherit HTTP request-ID, processing or byte-admission policy, but storage page limits
+and compact tool text apply to both transports. Legacy SQLite E2E fields above the new commit bounds
+fail explicitly rather than being rewritten; see [broadcast compatibility](e2ee-broadcast-memory.md).
+
+### Earlier compatibility contracts
 
 The connector-client expansion adds replacement message, broadcast, and feedback check constraints
 as `NOT VALID`, validates each table in its own bounded-lock migration, then swaps the validated

@@ -2,6 +2,59 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.14.0.0] - 2026-09-06
+
+### Security
+
+- Keep hosted storage, credential admission, sessions, notifications and unfinished requests within
+  shared limits that do not grow with account count. Capacity failures remain explicit and retryable.
+- Bound large inboxes, directories, notices, policies, token lists, feedback and encrypted broadcasts
+  before loading or serializing their contents; retain byte reservations until actual work settles.
+- Preserve output backpressure for slow HTTP readers and bound incoming bytes before authentication
+  finishes. Cancelled requests cannot proceed to identity lookup, parsing or application admission.
+- Reject duplicate in-flight request IDs and HTTP batches before SDK dispatch, and retire sessions
+  whose cancelled requests would otherwise retain SDK correlation state.
+- Reserve part of the existing audit allowance for suspension and operator-token revocation without
+  deleting audit history or increasing the absolute storage limits.
+- Keep agent and token quota functions private to their existing database-owned triggers.
+
+### Changed
+
+- Return bounded pages with stable continuation cursors; oversized inbox requests explain how to
+  retry with a smaller limit without losing messages.
+- Use a fixed one-instance, one-CPU, 512 MiB hosted deployment policy. Resource limits intentionally
+  reject excess work; they do not promise unlimited traffic or a fixed cloud bill.
+- Verify hosted workloads with a disposable 25,000-account scenario covering tenant isolation,
+  forged credentials, admission saturation, recovery and explicit latency and memory thresholds.
+- Add an opt-in real-window production stream check with exact-revision and log-access preflight,
+  same-session reconnect evidence and targeted disposable-tenant cleanup.
+- Correct the pinned MCP SDK's optional session-ID declarations without changing its runtime or
+  disabling strict library checks.
+- Preserve compatible Cloud Run revisions and retained database rows during deployment, with
+  source-provenance checks before migrations and no bypass of writer-drain safety for contraction.
+- Verify digest-only deployed images against bounded registry metadata and their exact source tags
+  before preserving revisions or observing production streams, without requiring Container Analysis.
+- Avoid redundant fresh-agent session-history checks while retaining tenant locks, quotas,
+  validated database-returned generation and final agent state, and existing-agent lifecycle behavior.
+
+### Fixed
+
+- Keep hosted credential enrichment on an indexed single-principal lookup instead of scanning the
+  growing token directory on each request; token revocation and suspension remain authoritative.
+- Reuse static tool and row schemas and remove duplicate inbox prechecks while preserving
+  per-request validation, tenant isolation and independently mutable tool catalogs.
+- Let the native HTTP transport finish early-response delivery before closing incomplete inputs.
+- Derive registration activation inside its transaction, avoiding a redundant lookup and duplicate
+  PostgreSQL activity accounting while preserving resource-list notifications.
+- Read inbox pages and their independent versions in one PostgreSQL statement snapshot, preserving tenant checks,
+  generation filters, and payload-byte reservations through failure or cancellation.
+- Release plaintext expiry-preflight pool leases before send, read and acknowledgement
+  transactions; preserve separately committed cleanup and prevent replay after operation failures.
+- Require an observed successful load-worker shutdown; premature exits and forced termination fail
+  verification instead of reporting successful cleanup, and failed cleanup retains the hard deadline.
+- Skip redundant storage-size calculations for fixed-size usage-counter updates, with a catalog
+  guard that falls back for schema changes and preserves existing quota admission ordering.
+
 ## [0.13.2.0] - 2026-09-06
 
 ### Changed

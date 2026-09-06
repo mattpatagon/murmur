@@ -5,6 +5,8 @@ import { z } from "zod";
 
 import type { OrchestratorPolicyId, PersonalId } from "../domain/orchestration.js";
 import type { AgentId, Instant, RepositoryName, TenantId } from "../domain/value-objects.js";
+import { POSTGRES_RUNTIME_POOL } from "../postgres-runtime.js";
+import { verifyPostgresStorageBudgetSchema } from "../storage/postgres-storage-budget-schema.js";
 import { type PostgresSslOptions, postgresSslOptions } from "../postgres-tls.js";
 import { logSafeError } from "../safe-errors.js";
 import type {
@@ -94,11 +96,7 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
     tlsConfiguration: HostedTlsConfiguration,
   ): Promise<PostgresHostedControlPlane> {
     const ssl: PostgresSslOptions = postgresSslOptions(databaseUrl, tlsConfiguration);
-    const database: Sql = postgres(databaseUrl, {
-      connect_timeout: 10,
-      max: 4,
-      ssl,
-    });
+    const database: Sql = postgres(databaseUrl, { ...POSTGRES_RUNTIME_POOL, ssl });
     const controlPlane: PostgresHostedControlPlane = new PostgresHostedControlPlane(database);
     try {
       await controlPlane.ensureSchema();
@@ -124,6 +122,7 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
 
   private async ensureSchema(): Promise<void> {
     await verifyHostedControlPlaneSchema(this.database);
+    await verifyPostgresStorageBudgetSchema(this.database);
   }
 
   public async authenticate(token: string): Promise<HostedPrincipal | null> {

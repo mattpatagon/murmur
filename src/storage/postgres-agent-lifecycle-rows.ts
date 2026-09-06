@@ -23,6 +23,10 @@ const StoredAgentRowSchema: z.ZodType<StoredAgentRow> = z.strictObject({
   generation: z.number().int().positive(),
   metadata_json: z.string(),
 });
+const StoredAgentRowsSchema: z.ZodType<StoredAgentRow[]> = z.array(StoredAgentRowSchema);
+const LiveSessionCountRowsSchema: z.ZodType<{ readonly count: number }[]> = z.array(
+  z.strictObject({ count: z.number().int().nonnegative() }),
+);
 
 export async function endExpiredPostgresSessions(
   transaction: TransactionSql,
@@ -89,9 +93,7 @@ export async function postgresLiveSessionCount(
       AND ended_at IS NULL
       AND lease_expires_at > ${now.toISOString()}::timestamptz
   `;
-  const rows: { readonly count: number }[] = z
-    .array(z.strictObject({ count: z.number().int().nonnegative() }))
-    .parse(raw);
+  const rows: { readonly count: number }[] = LiveSessionCountRowsSchema.parse(raw);
   const row: { readonly count: number } | undefined = rows[0];
   return row === undefined ? 0 : row.count;
 }
@@ -129,6 +131,6 @@ export async function storedPostgresAgent(
     FROM murmur.agents
     WHERE tenant_id = ${tenantId.value}::uuid AND agent_id = ${agentId.value}
   `;
-  const rows: StoredAgentRow[] = z.array(StoredAgentRowSchema).parse(raw);
+  const rows: StoredAgentRow[] = StoredAgentRowsSchema.parse(raw);
   return rows[0] ?? null;
 }

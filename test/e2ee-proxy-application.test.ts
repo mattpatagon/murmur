@@ -139,9 +139,9 @@ class FakeProxyOperations implements E2eeProxyOperations {
     };
   }
 
-  public async getAgent(_input: GetAgentInput): Promise<GetAgentOutput> {
+  public async getAgent(input: GetAgentInput): Promise<GetAgentOutput> {
     this.calls.push("get_agent");
-    return { agent: registration().agent };
+    return { agent: { ...registration().agent, agent_id: input.agent_id } };
   }
 
   public async endSession(input: EndSessionInput): Promise<EndSessionOutput> {

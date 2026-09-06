@@ -8,6 +8,10 @@ import type { AgentId, TenantId } from "../domain/value-objects.js";
 // biome-ignore lint/security/noSecrets: This public constant namespaces a Postgres advisory lock.
 export const POSTGRES_MESSAGE_RECIPIENT_LOCK_SEED: string = "671255459461899938";
 
+const RequiredAgentRowsSchema: z.ZodType<
+  { readonly agent_id: string; readonly authority: SenderAuthority }[]
+> = z.array(z.strictObject({ agent_id: z.string(), authority: z.enum(["peer", "orchestrator"]) }));
+
 export async function setPostgresTenantContext(
   transaction: TransactionSql,
   tenantId: TenantId,
@@ -30,9 +34,8 @@ export async function requirePostgresAgents(
     WHERE tenant_id = ${tenantId.value}::uuid
       AND (agent_id = ${senderId.value} OR agent_id = ${recipientId.value})
   `;
-  const rows: { readonly agent_id: string; readonly authority: SenderAuthority }[] = z
-    .array(z.strictObject({ agent_id: z.string(), authority: z.enum(["peer", "orchestrator"]) }))
-    .parse(rawRows);
+  const rows: { readonly agent_id: string; readonly authority: SenderAuthority }[] =
+    RequiredAgentRowsSchema.parse(rawRows);
   const knownIds: Set<string> = new Set<string>(
     rows.map((row: { readonly agent_id: string }): string => row.agent_id),
   );

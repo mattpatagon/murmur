@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import {
   AgentCapacityError,
   FeedbackCapacityError,
+  HostedStorageCapacityError,
   NoticeCapacityError,
   StorageCorruptionError,
 } from "../src/domain/errors.js";
@@ -16,6 +17,11 @@ function postgresError(code: string, message: string, constraintName?: string): 
 }
 
 test("Postgres quota and accounting failures become stable domain errors", (): void => {
+  expect(
+    normalizePostgresStorageError(
+      postgresError("54000", "hosted retained-storage capacity reached"),
+    ),
+  ).toBeInstanceOf(HostedStorageCapacityError);
   expect(
     normalizePostgresStorageError(postgresError("54000", "tenant agent quota exceeded")),
   ).toBeInstanceOf(AgentCapacityError);
@@ -34,7 +40,7 @@ test("Postgres quota and accounting failures become stable domain errors", (): v
   ).toBeInstanceOf(StorageCorruptionError);
 });
 
-test("new lifecycle constraints never expose schema names while unrelated errors survive", (): void => {
+test("lifecycle constraints hide schema names while ordinary domain errors survive", (): void => {
   const constraint: unknown = normalizePostgresStorageError(
     postgresError("23514", "raw database detail", "notices_expiry_bounds"),
   );
@@ -51,7 +57,7 @@ test("new lifecycle constraints never expose schema names while unrelated errors
     "Stored feedback submission failed runtime validation",
   );
 
-  const unrelated: Error = postgresError("23505", "existing compatibility error");
+  const unrelated: Error = new Error("existing domain error");
   expect(normalizePostgresStorageError(unrelated)).toBe(unrelated);
 });
 
@@ -67,4 +73,25 @@ test("E2E database failures preserve allowlisted guidance and hide schema detail
     postgresError("23514", "internal check detail", "e2ee_messages_internal_check"),
   );
   expect(constraint).toHaveProperty("message", "Encrypted storage rejected the request");
+});
+
+test("unexpected PostgreSQL failures cannot expose internal statements or row contents", (): void => {
+  const privateDetail: string = "SELECT private_column FROM internal_table: MESSAGE_BODY_SENTINEL";
+  const normalized: unknown = normalizePostgresStorageError(postgresError("22001", privateDetail));
+  expect(normalized).toHaveProperty("message", "Storage operation failed. Retry the request.");
+  expect(JSON.stringify(normalized)).not.toContain("MESSAGE_BODY_SENTINEL");
+});
+
+test("fixed PostgreSQL quota and operator recovery guidance remains available", (): void => {
+  for (const message of [
+    "tenant retained-message quota exceeded",
+    "tenant access-token quota exceeded",
+    "tenant retained-broadcast quota exceeded",
+    "cannot revoke the last active operator token; another non-expiring operator is required",
+  ]) {
+    expect(normalizePostgresStorageError(postgresError("54000", message))).toHaveProperty(
+      "message",
+      message,
+    );
+  }
 });

@@ -20,8 +20,6 @@ import type {
   CloseAgentResult,
   EndSessionCommand,
   EndSessionResult,
-  ListAgentsQuery,
-  ListAgentsResult,
   RegisterAgentCommand,
   RegisterAgentResult,
 } from "../domain/models.js";
@@ -42,11 +40,26 @@ import {
   supersedePostgresSessions,
   trimRetainedPostgresSessions,
 } from "./postgres-agent-lifecycle-rows.js";
+import { upsertPostgresAgentSession } from "./postgres-agent-session-write.js";
 import { type AgentRow, AgentRowSchema, mapAgentRow } from "./postgres-message-rows.js";
 import {
   lockPostgresRecipientCommitOrder,
   setPostgresTenantContext,
 } from "./postgres-message-transactions.js";
+
+const AgentRowsSchema: z.ZodType<AgentRow[]> = z.array(AgentRowSchema);
+const InsertedGenerationRowsSchema: z.ZodType<readonly [{ readonly generation: number }]> = z.tuple(
+  [z.strictObject({ generation: z.number().int().positive().safe() })],
+);
+const PresentRowsSchema: z.ZodType<{ readonly present: number }[]> = z.array(
+  z.strictObject({ present: z.number().int() }),
+);
+const EndedRowsSchema: z.ZodType<{ readonly ended: number }[]> = z.array(
+  z.strictObject({ ended: z.number().int() }),
+);
+const UnreadCountRowsSchema: z.ZodType<{ readonly count: number }[]> = z.array(
+  z.strictObject({ count: z.number().int().nonnegative() }),
+);
 
 function agentSelect(now: Instant): string {
   return now.toISOString();
@@ -96,7 +109,7 @@ export async function postgresAgentInTransaction(
     WHERE agent.tenant_id = ${tenantId.value}::uuid
       AND agent.agent_id = ${agentId.value}
   `;
-  const rows: AgentRow[] = z.array(AgentRowSchema).parse(raw);
+  const rows: AgentRow[] = AgentRowsSchema.parse(raw);
   const row: AgentRow | undefined = rows[0];
   if (row === undefined) throw new UnknownAgentError(agentId.value);
   return mapAgentRow(row);
@@ -109,6 +122,7 @@ export async function renewPostgresSessionInTransaction(
   sessionKey: SessionKey,
   now: Instant,
   createIfMissing: boolean,
+  activity: "refresh" | "already-refreshed" = "refresh",
 ): Promise<Agent> {
   await endExpiredPostgresSessions(transaction, tenantId, now, agentId);
   const row: StoredAgentRow | null = await storedPostgresAgent(transaction, tenantId, agentId);
@@ -144,9 +158,7 @@ export async function renewPostgresSessionInTransaction(
       AND ended_at IS NULL
       AND lease_expires_at > ${now.toISOString()}::timestamptz
   `;
-  const existing: { readonly present: number }[] = z
-    .array(z.strictObject({ present: z.number().int() }))
-    .parse(rawExisting);
+  const existing: { readonly present: number }[] = PresentRowsSchema.parse(rawExisting);
   if (
     existing.length === 0 &&
     (await postgresLiveSessionCount(transaction, tenantId, agentId, generation, now)) >=
@@ -171,27 +183,14 @@ export async function renewPostgresSessionInTransaction(
         AND target.session_key = stale.session_key
     `;
   }
-  await transaction`
-    INSERT INTO murmur.agent_sessions(
-      tenant_id, agent_id, generation, session_key,
-      started_at, last_renewed_at, lease_expires_at
-    ) VALUES (
-      ${tenantId.value}::uuid, ${agentId.value}, ${generation.value}, ${sessionKey.value},
-      ${now.toISOString()}::timestamptz,
-      ${now.toISOString()}::timestamptz,
-      ${now.addMinutes(AGENT_LEASE_MINUTES).toISOString()}::timestamptz
-    )
-    ON CONFLICT(tenant_id, agent_id, generation, session_key) DO UPDATE SET
-      last_renewed_at = excluded.last_renewed_at,
-      lease_expires_at = excluded.lease_expires_at,
-      ended_at = NULL,
-      end_reason = NULL
-  `;
+  await upsertPostgresAgentSession(transaction, tenantId, agentId, generation, sessionKey, now);
   await trimRetainedPostgresSessions(transaction, tenantId, agentId);
-  await transaction`
-    UPDATE murmur.agents SET last_seen_at = ${now.toISOString()}::timestamptz
-    WHERE tenant_id = ${tenantId.value}::uuid AND agent_id = ${agentId.value}
-  `;
+  if (activity === "refresh") {
+    await transaction`
+      UPDATE murmur.agents SET last_seen_at = ${now.toISOString()}::timestamptz
+      WHERE tenant_id = ${tenantId.value}::uuid AND agent_id = ${agentId.value}
+    `;
+  }
   return await postgresAgentInTransaction(transaction, tenantId, agentId, now);
 }
 
@@ -222,11 +221,12 @@ export async function registerPostgresAgent(
       existing === null ? 1 : existing.generation,
     );
     let metadata: JsonObject = command.metadata;
+    let becameActive: boolean = existing === null;
     const authority: SenderAuthority = command.authority ?? "peer";
     let reopened: boolean = false;
     let repositoryDiverged: boolean = false;
     if (existing === null) {
-      await transaction`
+      const inserted: unknown = await transaction`
         INSERT INTO murmur.agents(
           tenant_id, agent_id, authority, display_name, metadata, created_at, last_seen_at
         ) VALUES (
@@ -235,7 +235,11 @@ export async function registerPostgresAgent(
           ${database.json(metadata)}, ${now.toISOString()}::timestamptz,
           ${now.toISOString()}::timestamptz
         )
+        RETURNING generation
       `;
+      generation = AgentGeneration.parse(
+        InsertedGenerationRowsSchema.parse(inserted)[0].generation,
+      );
     } else {
       if (existing.authority !== authority) throw new AgentAuthorityConflictError();
       const currentMetadata: JsonObject = JsonObjectSchema.parse(
@@ -254,6 +258,7 @@ export async function registerPostgresAgent(
         generation,
         now,
       );
+      becameActive = existing.closed_at !== null || currentLive === 0;
       if (existing.closed_at !== null) {
         const dormantSameRepository: boolean =
           existing.close_reason === "dormant" && !repositoryChanged;
@@ -285,15 +290,36 @@ export async function registerPostgresAgent(
         WHERE tenant_id = ${tenantId.value}::uuid AND agent_id = ${command.agentId.value}
       `;
     }
-    const agent: Agent = await renewPostgresSessionInTransaction(
-      transaction,
-      tenantId,
-      command.agentId,
-      command.sessionKey ?? SessionKey.default(),
-      now,
-      true,
-    );
-    return { agent, reopened, repositoryDiverged };
+    let agent: Agent;
+    if (existing === null) {
+      // The immediate tenant/agent FK prevents session history for this uncommitted new parent.
+      // Keep the final database read: returned state and metadata are never synthesized from input.
+      await upsertPostgresAgentSession(
+        transaction,
+        tenantId,
+        command.agentId,
+        generation,
+        command.sessionKey ?? SessionKey.default(),
+        now,
+      );
+      agent = await postgresAgentInTransaction(transaction, tenantId, command.agentId, now);
+    } else {
+      agent = await renewPostgresSessionInTransaction(
+        transaction,
+        tenantId,
+        command.agentId,
+        command.sessionKey ?? SessionKey.default(),
+        now,
+        true,
+        "already-refreshed",
+      );
+    }
+    return {
+      agent,
+      becameActive: becameActive && agent.state === "active",
+      reopened,
+      repositoryDiverged,
+    };
   });
 }
 
@@ -316,74 +342,7 @@ export async function getPostgresAgent(
   });
 }
 
-export async function listPostgresAgents(
-  database: Sql,
-  tenantId: TenantId,
-  query: ListAgentsQuery,
-  now: Instant,
-): Promise<ListAgentsResult> {
-  return await database.begin(async (transaction: TransactionSql): Promise<ListAgentsResult> => {
-    await setPostgresTenantContext(transaction, tenantId);
-    await endExpiredPostgresSessions(transaction, tenantId, now);
-    const cursor: string | null = query.cursor === null ? null : query.cursor.value;
-    const raw: unknown = await transaction`
-      SELECT
-        agent.agent_id,
-        agent.authority,
-        agent.display_name,
-        agent.metadata::text AS metadata_json,
-        agent.generation,
-        agent.close_reason,
-        to_char(agent.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
-        to_char(agent.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS last_seen_at,
-        CASE WHEN agent.closed_at IS NULL THEN NULL ELSE
-          to_char(agent.closed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-        END AS closed_at,
-        session.live_session_count,
-        session.lease_expires_at,
-        CASE
-          WHEN agent.closed_at IS NOT NULL THEN 'closed'
-          WHEN session.live_session_count > 0 THEN 'active'
-          ELSE 'inactive'
-        END AS state
-      FROM murmur.agents AS agent
-      CROSS JOIN LATERAL (
-        SELECT
-          COUNT(*)::int AS live_session_count,
-          CASE WHEN MAX(lease_expires_at) IS NULL THEN NULL ELSE
-            to_char(MAX(lease_expires_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-          END AS lease_expires_at
-        FROM murmur.agent_sessions AS current_session
-        WHERE current_session.tenant_id = agent.tenant_id
-          AND current_session.agent_id = agent.agent_id
-          AND current_session.generation = agent.generation
-          AND current_session.ended_at IS NULL
-          AND current_session.lease_expires_at > ${now.toISOString()}::timestamptz
-      ) AS session
-      WHERE agent.tenant_id = ${tenantId.value}::uuid AND (
-        ${query.state} = 'all'
-        OR (${query.state} = 'open' AND agent.closed_at IS NULL)
-        OR (${query.state} = 'closed' AND agent.closed_at IS NOT NULL)
-        OR (${query.state} = 'active' AND agent.closed_at IS NULL
-          AND session.live_session_count > 0)
-        OR (${query.state} = 'inactive' AND agent.closed_at IS NULL
-          AND session.live_session_count = 0)
-      )
-      AND (${cursor}::text IS NULL OR agent.agent_id > ${cursor}::text)
-      ORDER BY agent.agent_id ASC
-      LIMIT ${query.limit + 1}
-    `;
-    const rows: Agent[] = z.array(AgentRowSchema).parse(raw).map(mapAgentRow);
-    const agents: Agent[] = rows.slice(0, query.limit);
-    let nextCursor: AgentId | null = null;
-    if (rows.length > query.limit) {
-      const lastAgent: Agent | undefined = agents.at(-1);
-      if (lastAgent === undefined) throw new Error("Agent page unexpectedly has no cursor row");
-      nextCursor = lastAgent.agentId;
-    }
-    return { agents, nextCursor };
-  });
-}
+export { listPostgresAgents } from "./postgres-agent-page.js";
 
 export async function endPostgresSession(
   database: Sql,
@@ -420,9 +379,7 @@ export async function endPostgresSession(
         AND ended_at IS NULL
       RETURNING 1 AS ended
     `;
-    const ended: { readonly ended: number }[] = z
-      .array(z.strictObject({ ended: z.number().int() }))
-      .parse(raw);
+    const ended: { readonly ended: number }[] = EndedRowsSchema.parse(raw);
     await transaction`
       UPDATE murmur.agents SET last_seen_at = ${now.toISOString()}::timestamptz
       WHERE tenant_id = ${tenantId.value}::uuid AND agent_id = ${command.agentId.value}
@@ -471,7 +428,7 @@ export async function closePostgresAgent(
           AND ended_at IS NULL
         RETURNING 1 AS ended
       `;
-      endedSessions = z.array(z.strictObject({ ended: z.number().int() })).parse(endedRaw).length;
+      endedSessions = EndedRowsSchema.parse(endedRaw).length;
     }
     const unreadRaw: unknown = await transaction`
       SELECT COUNT(*)::int AS count FROM murmur.messages
@@ -481,9 +438,7 @@ export async function closePostgresAgent(
         AND read_at IS NULL
         AND expires_at > ${now.toISOString()}::timestamptz
     `;
-    const unreadRows: { readonly count: number }[] = z
-      .array(z.strictObject({ count: z.number().int().nonnegative() }))
-      .parse(unreadRaw);
+    const unreadRows: { readonly count: number }[] = UnreadCountRowsSchema.parse(unreadRaw);
     return {
       agent: await postgresAgentInTransaction(transaction, tenantId, command.agentId, now),
       alreadyClosed,

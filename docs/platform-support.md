@@ -31,6 +31,15 @@ independently of the runner's development tools.
 Platform support means a change cannot merge when a matrix job fails. It does not mean every
 operator convenience script is portable.
 
+The portability gate includes real localhost [native HTTP transport](node-http-transport.md)
+tests, bounded ingress/output tests, and request-ID lifetime regressions. The same opaque-byte
+staging implementation runs on Windows, macOS, and Linux without relying on native input pause.
+Portable PostgreSQL-driver recordings also check fresh expiry probes, transaction rollback and
+cleanup ordering without requiring a database or shell; real PostgreSQL verification remains in
+the Linux hosted gate.
+Managed hosting relies on Cloud Run's frontend to terminate external connections; a self-hosted
+public listener needs the equivalent edge protections documented by the transport contract.
+
 ## Entry points
 
 The public package exposes `murmur`, `murmur-hook`, `murmur-e2ee-proxy`, and `murmur-mcp` as bundled

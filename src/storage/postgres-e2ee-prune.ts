@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { Instant, TenantId } from "../domain/value-objects.js";
 import { updatePostgresE2eeUsage } from "./postgres-e2ee-usage.js";
+import { queryPostgresE2eePruneCandidates } from "./postgres-expiry-preflight.js";
 import { setPostgresTenantContext } from "./postgres-message-transactions.js";
 
 type UsageCounts = {
@@ -160,6 +161,7 @@ export async function prunePostgresE2ee(
 ): Promise<number> {
   return await database.begin(async (transaction: TransactionSql): Promise<number> => {
     await setPostgresTenantContext(transaction, tenantId);
+    if (!(await queryPostgresE2eePruneCandidates(transaction, tenantId, now))) return 0;
     const broadcasts: UsageCounts = await expiredBroadcastUsage(transaction, tenantId, now);
     const directClaims: number = await expireDirectClaims(transaction, tenantId, now);
     const expiredPrekeys: number = await expirePublicPrekeys(transaction, tenantId, now);

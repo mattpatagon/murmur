@@ -23,12 +23,26 @@ import {
 } from "./support/production-stream-logs.js";
 
 const IMAGE: string = `${CONFIG.region}-docker.pkg.dev/${CONFIG.project}/${CONFIG.repository}/${CONFIG.service}`;
+const PACKAGE: string = `projects/${CONFIG.project}/locations/${CONFIG.region}/repositories/${CONFIG.repository}/packages/${CONFIG.service}`;
 const DIGEST: string = `sha256:${"b".repeat(64)}`;
 const OTHER_DIGEST: string = `sha256:${"c".repeat(64)}`;
 const FAILURE: string = "Production stream log verification failed";
 
-function sourceArtifact(digest: string = DIGEST): unknown {
-  return { image_summary: { digest, fully_qualified_digest: `${IMAGE}@${digest}` } };
+test("digest preflight requires only Artifact Registry tag reads, not Container Analysis", async (): Promise<void> => {
+  const fixture: LogFixture = digestFixture();
+  fixture.artifactRegistryOnly = true;
+  const context: StreamLogContext = await preflightProductionStreamLogs(CONFIG, fixture);
+  expect(context.revision).toBe(REVISION);
+  expect(context.expectedSha).toBe(SHA);
+  expect(fixture.releaseCalls).toBe(1);
+});
+
+function sourceArtifact(
+  digest: string = DIGEST,
+  packageName: string = PACKAGE,
+  source: string = SHA,
+): { readonly name: string; readonly version: string }[] {
+  return [{ name: `${packageName}/tags/${source}`, version: `${packageName}/versions/${digest}` }];
 }
 
 function digestFixture(image: string = `${IMAGE}@${DIGEST}`): LogFixture {
@@ -73,20 +87,30 @@ test("digest-only preflight proves the exact source tag through bounded authenti
   if (call === undefined) throw new Error("Missing source provenance lookup");
   expect(call.arguments).toEqual([
     "artifacts",
-    "docker",
-    "images",
-    "describe",
-    `${IMAGE}:${SHA}`,
+    "tags",
+    "list",
+    "--package",
+    CONFIG.service,
+    "--repository",
+    CONFIG.repository,
+    "--location",
+    CONFIG.region,
     "--project",
     CONFIG.project,
+    "--filter",
+    `name="${PACKAGE}/tags/${SHA}"`,
+    "--limit",
+    "2",
     "--format",
-    "json(image_summary.digest,image_summary.fully_qualified_digest)",
+    "json(name,version)",
     "--quiet",
     "--verbosity=error",
   ]);
   expect(call.timeoutMs).toBeGreaterThan(0);
   expect(call.timeoutMs).toBeLessThanOrEqual(30_000);
-  expect(call.arguments.join(" ")).not.toMatch(/list|impersonate|access-token|Authorization|iam/u);
+  expect(call.arguments.join(" ")).not.toMatch(
+    /docker|describe|impersonate|access-token|Authorization|iam/u,
+  );
 });
 
 test("digest provenance is read afresh at preflight and both post-window deployment checks", async (): Promise<void> => {
@@ -123,70 +147,52 @@ for (const image of [`${IMAGE}:${SHA}`, `${IMAGE}:${SHA}@${DIGEST}`]) {
 const INVALID_ARTIFACTS: readonly { readonly name: string; readonly value: unknown }[] = [
   { name: "null", value: null },
   { name: "empty object", value: {} },
-  { name: "ambiguous inventory", value: [sourceArtifact(), sourceArtifact()] },
-  { name: "missing full image", value: { image_summary: { digest: DIGEST } } },
+  { name: "empty inventory", value: [] },
+  { name: "ambiguous inventory", value: [...sourceArtifact(), ...sourceArtifact()] },
+  { name: "missing name", value: [{ version: `${PACKAGE}/versions/${DIGEST}` }] },
+  { name: "missing version", value: [{ name: `${PACKAGE}/tags/${SHA}` }] },
+  { name: "wrong source tag", value: sourceArtifact(DIGEST, PACKAGE, "c".repeat(40)) },
   { name: "retargeted source tag", value: sourceArtifact(OTHER_DIGEST) },
   {
-    name: "digest and full identity disagreement",
-    value: {
-      image_summary: { digest: DIGEST, fully_qualified_digest: `${IMAGE}@${OTHER_DIGEST}` },
-    },
+    name: "tag and version package disagreement",
+    value: [{ name: `${PACKAGE}/tags/${SHA}`, version: `${PACKAGE}-foreign/versions/${DIGEST}` }],
   },
   {
     name: "wrong region",
-    value: {
-      image_summary: {
-        digest: DIGEST,
-        fully_qualified_digest: `europe-west1-docker.pkg.dev/${CONFIG.project}/${CONFIG.repository}/${CONFIG.service}@${DIGEST}`,
-      },
-    },
+    value: sourceArtifact(DIGEST, PACKAGE.replace(CONFIG.region, "europe-west1")),
   },
   {
     name: "wrong project",
-    value: {
-      image_summary: {
-        digest: DIGEST,
-        fully_qualified_digest: `${CONFIG.region}-docker.pkg.dev/foreign-project/${CONFIG.repository}/${CONFIG.service}@${DIGEST}`,
-      },
-    },
+    value: sourceArtifact(DIGEST, PACKAGE.replace(CONFIG.project, "foreign-project")),
   },
   {
     name: "wrong repository",
-    value: {
-      image_summary: {
-        digest: DIGEST,
-        fully_qualified_digest: `${CONFIG.region}-docker.pkg.dev/${CONFIG.project}/foreign/${CONFIG.service}@${DIGEST}`,
-      },
-    },
+    value: sourceArtifact(DIGEST, PACKAGE.replace(CONFIG.repository, "foreign")),
   },
   {
     name: "wrong service",
-    value: {
-      image_summary: { digest: DIGEST, fully_qualified_digest: `${IMAGE}-foreign@${DIGEST}` },
-    },
+    value: sourceArtifact(DIGEST, `${PACKAGE}-foreign`),
   },
   { name: "uppercase digest", value: sourceArtifact(`sha256:${"B".repeat(64)}`) },
   { name: "short digest", value: sourceArtifact(`sha256:${"b".repeat(63)}`) },
   { name: "digest trailing newline", value: sourceArtifact(`${DIGEST}\n`) },
   {
-    name: "tagged noncanonical full identity",
-    value: {
-      image_summary: { digest: DIGEST, fully_qualified_digest: `${IMAGE}:${SHA}@${DIGEST}` },
-    },
+    name: "noncanonical tag identity",
+    value: sourceArtifact(DIGEST, PACKAGE, `${SHA}@${DIGEST}`),
   },
   {
-    name: "full identity trailing newline",
-    value: { image_summary: { digest: DIGEST, fully_qualified_digest: `${IMAGE}@${DIGEST}\n` } },
+    name: "tag identity trailing newline",
+    value: sourceArtifact(DIGEST, PACKAGE, `${SHA}\n`),
   },
   {
     name: "unrequested metadata",
-    value: {
-      image_summary: {
-        digest: DIGEST,
-        fully_qualified_digest: `${IMAGE}@${DIGEST}`,
+    value: [
+      {
+        name: `${PACKAGE}/tags/${SHA}`,
+        version: `${PACKAGE}/versions/${DIGEST}`,
         private: "private-artifact-sentinel",
       },
-    },
+    ],
   },
 ];
 

@@ -63,7 +63,25 @@ Hosted requests pass through ordered, independently observable gates:
 5. Reserve request or stream capacity, then apply principal and tenant rate limits.
 6. Resolve or create a tenant-bound MCP session within session quotas.
 7. Parse the MCP envelope and dispatch through the role-specific application.
-8. Stream the response, release all capacity, and emit one completion event when the body closes.
+8. Stream the response and emit one completion event when the body closes. Each capacity owner
+   releases only after its own response, actual handler, query, or SDK-send obligations settle.
+
+Session initialization reserves global and tenant capacity before asynchronous application
+construction. Failed initialization releases that reservation. Revocation tracking retains only
+in-flight initialization snapshots, released on success and failure; old tenant or token revocations
+do not accumulate process-wide history. Request bodies share an absolute
+10-second read deadline across MCP, registration, and connector token routes; incomplete bodies
+are canceled and receive HTTP 408. Buffered body memory is bounded by the route's byte limit,
+including when a sender fragments the body into many small chunks.
+Before native JSON parsing, the HTTP readers also enforce
+[fixed structural limits](http-json-structure.md): 32 container levels and 16,384
+structural units. This bounds deeply nested and dense input before recursive schema validation.
+
+Hosted retained storage has a fixed service-wide [admission budget](hosted-storage-budget.md),
+in addition to tenant quotas. Runtime startup requires its accounting triggers to be enabled.
+PostgreSQL [expiry preflights](postgres-expiry-preflight.md) avoid no-op cleanup writes without
+delaying expiry or quota recovery. Inbox hints use a [bounded dispatcher](postgres-notification-bounds.md);
+durable tenant inboxes remain the source of truth after overload, cancellation and reconnect.
 
 `POST /v1/tenants` is the one unauthenticated hosted mutation. It branches after route and origin
 validation, before credential extraction, and accepts only the strict tenant-registration schema.
@@ -78,6 +96,10 @@ The client cannot supply a tenant ID, principal role, server request ID, trace p
 identifier for audit correlation. Its bounded lowercase client identifier is informational
 provenance only. Each request reauthenticates so revocation and suspension apply immediately;
 matching live sessions are also closed proactively.
+
+Credential admission retains at most 32,768 recent hashed credentials for five minutes and never
+polls the complete credential directory. Admission hints prioritize previously authenticated
+clients; they never replace database authorization. See [credential-admission.md](credential-admission.md).
 
 Connector OAuth compatibility branches at public discovery and authorization routes. A bounded,
 in-memory authorization code carries no Murmur credential and is bound to the exact client,
@@ -203,6 +225,10 @@ subscriptions, request rates, agents, tokens, retained messages, stored bytes, m
 broadcast fan-out. Admission returns a safe retryable status before allocating downstream resources
 when a bound is full.
 
+[HTTP response and MCP processing capacity](http-processing-capacity.md) are separate: canceling
+a response does not release unfinished handler work. SDK initialization and ping acquire processing
+capacity too; cancellation notifications do not.
+
 Standalone SSE responses rotate before the hosting platform's request deadline. The configured
 lifetime defaults to and is hard-capped at 55 minutes; a stable per-session jitter rotates each
 stream during the final 10% of that window. Rotation closes only the response, releases stream
@@ -230,9 +256,32 @@ Queues are finite and waits have deadlines. Shutdown stops new admission, closes
 closes applications and stores, then flushes telemetry within a bounded timeout. Cleanup remains
 best-effort across multiple failures and preserves the original startup or shutdown error safely.
 
+Both runtime PostgreSQL pools set fixed statement, lock, and idle-transaction deadlines on every
+connection. See [postgres-runtime-bounds.md](postgres-runtime-bounds.md) for their values and the
+separate limits of connection-pool waiting and multi-statement operations.
+Hosted [authentication query bounds](hosted-auth-query-bounds.md) preserve indexed credential
+enrichment as the account directory grows, without caching authorization or delaying revocation.
+
+Successful MCP tool text uses compact JSON and carries the same values as `structuredContent`.
+Clients must parse the JSON, not depend on indentation. This avoids whitespace amplification for
+dense metadata; it does not replace payload, page, concurrency, or response-lifetime bounds.
+Agent directory and resource enumeration use [byte-limited cursor pages](agent-page-bounds.md).
+Repository [notice pages](notice-page-bounds.md) and administrative
+[orchestration-policy pages](orchestration-policy-pages.md) also return a complete fitting prefix
+with the existing continuation cursor. [Inbox reads](inbox-response-budget.md) reject oversized
+pages without transferring their payload; their inbox version is not a pagination cursor.
+These reads share the hosted [materialization byte budget](http-materialization-budget.md).
+Session-scoped [request-ID admission](http-request-id-admission.md) prevents concurrent IDs from
+moving results onto another response lifetime. The [native HTTP transport](node-http-transport.md)
+stages opaque input within a shared byte budget and waits for native output drain before reading
+more response bytes. Application authentication and route-specific body parsing retain their order.
+Encrypted [broadcast finalization](e2ee-broadcast-memory.md) reserves bounded scratch space for
+payload batches while preserving one atomic commit.
+
 ## Failure model
 
-- Invalid external input becomes a stable client-safe MCP or HTTP error.
+- Invalid external input becomes a stable client-safe MCP or HTTP error. Resource storage failures
+  follow the same [safe error mapping](mcp-resource-errors.md) as tools.
 - Authentication backend failure is distinct from an invalid or missing credential.
 - Capacity and rate rejection are distinct by gate and scope.
 - Database rows and notification envelopes are parsed before use; malformed trusted-state data
