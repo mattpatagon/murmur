@@ -26,6 +26,15 @@ type ImageRecord = {
   readonly metadata: { readonly name: string };
   readonly spec: { readonly containers: { readonly image: string }[] };
 };
+type ArtifactRecord = {
+  readonly image_summary: {
+    readonly digest: string;
+    readonly fully_qualified_digest: string;
+  };
+};
+export type StreamRevisionImage =
+  | { readonly kind: "tagged" }
+  | { readonly kind: "digest-only"; readonly digest: string };
 type ResourceRecord = {
   readonly type: "cloud_run_revision";
   readonly labels: {
@@ -74,6 +83,13 @@ const ImageSchema: z.ZodType<ImageRecord> = z.strictObject({
   metadata: z.strictObject({ name: RevisionSchema }),
   spec: z.strictObject({
     containers: z.array(z.strictObject({ image: z.string().max(512) })).length(1),
+  }),
+});
+const DigestSchema: z.ZodString = z.string().regex(/^sha256:[0-9a-f]{64}(?![\s\S])/u);
+const ArtifactSchema: z.ZodType<ArtifactRecord> = z.strictObject({
+  image_summary: z.strictObject({
+    digest: DigestSchema,
+    fully_qualified_digest: z.string().max(512),
   }),
 });
 
@@ -160,6 +176,39 @@ export function streamRevisionArguments(
   ];
 }
 
+function streamImageName(config: StreamLogConfiguration): string {
+  return `${config.region}-docker.pkg.dev/${config.project}/${config.repository}/${config.service}`;
+}
+
+export function streamArtifactArguments(config: StreamLogConfiguration): string[] {
+  return [
+    "artifacts",
+    "docker",
+    "images",
+    "describe",
+    `${streamImageName(config)}:${config.expectedSha}`,
+    "--project",
+    config.project,
+    "--format",
+    "json(image_summary.digest,image_summary.fully_qualified_digest)",
+    "--quiet",
+    "--verbosity=error",
+  ];
+}
+
+export function validateStreamArtifact(
+  value: unknown,
+  config: StreamLogConfiguration,
+  digest: string,
+): void {
+  const parsed: ReturnType<typeof ArtifactSchema.safeParse> = ArtifactSchema.safeParse(value);
+  requireStreamLog(parsed.success);
+  requireStreamLog(
+    parsed.data.image_summary.digest === digest &&
+      parsed.data.image_summary.fully_qualified_digest === `${streamImageName(config)}@${digest}`,
+  );
+}
+
 export function streamServiceRevision(value: unknown, config: StreamLogConfiguration): string {
   const parsed: ReturnType<typeof ServiceSchema.safeParse> = ServiceSchema.safeParse(value);
   requireStreamLog(parsed.success);
@@ -180,7 +229,7 @@ export function validateStreamRevision(
   value: unknown,
   config: StreamLogConfiguration,
   revision: string,
-): void {
+): StreamRevisionImage {
   const parsed: ReturnType<typeof ImageSchema.safeParse> = ImageSchema.safeParse(value);
   requireStreamLog(parsed.success && parsed.data.metadata.name === revision);
   const container: (typeof parsed.data.spec.containers)[number] | undefined =
@@ -189,12 +238,19 @@ export function validateStreamRevision(
   const prefix: string = `${config.region}-docker.pkg.dev/${config.project}/${config.repository}/`;
   requireStreamLog(container.image.startsWith(prefix));
   const taggedImage: string = container.image.slice(prefix.length);
+  if (taggedImage.startsWith(`${config.service}@`)) {
+    const digest: string = taggedImage.slice(config.service.length + 1);
+    requireStreamLog(DigestSchema.safeParse(digest).success);
+    // Cloud Run may retain only the digest. Source-tag provenance must be checked separately.
+    return { kind: "digest-only", digest };
+  }
   const expectedTag: string = `${config.service}:${config.expectedSha}`;
   requireStreamLog(
     taggedImage === expectedTag ||
       (taggedImage.startsWith(`${expectedTag}@sha256:`) &&
         /^[0-9a-f]{64}(?![\s\S])/u.test(taggedImage.slice(expectedTag.length + 8))),
   );
+  return { kind: "tagged" };
 }
 
 function scope(config: StreamLogConfiguration, revision: string): string {

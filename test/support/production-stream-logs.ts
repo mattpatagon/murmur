@@ -112,6 +112,16 @@ export class LogFixture implements StreamLogRuntime {
     },
   };
   public releaseValue: unknown = { revision: SHA, version: CONFIG.expectedVersion };
+  public releaseCalls: number = 0;
+  public artifact: unknown = {
+    image_summary: {
+      digest: `sha256:${"b".repeat(64)}`,
+      fully_qualified_digest: `${CONFIG.region}-docker.pkg.dev/${CONFIG.project}/${CONFIG.repository}/murmur@sha256:${"b".repeat(64)}`,
+    },
+  };
+  public readonly artifactReplies: string[] = [];
+  public artifactFailure: boolean = false;
+  public artifactMilliseconds: number = 0;
   public initial: unknown = [applicationLog(true)];
   public replacement: unknown = [applicationLog(false)];
   public platform: unknown = [];
@@ -132,6 +142,7 @@ export class LogFixture implements StreamLogRuntime {
     origin: string,
     timeoutMs: number,
   ): Promise<unknown> => {
+    this.releaseCalls += 1;
     expect(origin).toBe(CONFIG.origin);
     expect(timeoutMs).toBeGreaterThan(0);
     expect(timeoutMs).toBeLessThanOrEqual(10_000);
@@ -145,6 +156,12 @@ export class LogFixture implements StreamLogRuntime {
       if (this.oversize) return " ".repeat(STREAM_LOG_MAX_BYTES + 1);
       if (arguments_[0] === "run")
         return JSON.stringify(arguments_[1] === "services" ? this.service : this.image);
+      if (arguments_[0] === "artifacts") {
+        this.elapsed += this.artifactMilliseconds;
+        if (this.artifactFailure) throw new Error("private-registry-access-sentinel");
+        const reply: string | undefined = this.artifactReplies.shift();
+        return reply === undefined ? JSON.stringify(this.artifact) : reply;
+      }
       const filter: string | undefined = arguments_[2];
       if (filter === undefined) throw new Error("Missing fixture filter");
       if (filter.includes(INITIAL_ID)) {

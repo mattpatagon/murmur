@@ -16,12 +16,15 @@ import { StreamLogDeadline, type StreamLogRuntime } from "./production-stream-lo
 import {
   parseStreamApplication,
   type StreamApplicationLog,
+  type StreamRevisionImage,
   streamAccessArguments,
+  streamArtifactArguments,
   streamObservationArguments,
   streamRevisionArguments,
   streamServiceArguments,
   streamServiceRevision,
   validateStreamAccess,
+  validateStreamArtifact,
   validateStreamPlatform,
   validateStreamRevision,
 } from "./production-stream-log-queries.js";
@@ -35,11 +38,18 @@ async function deployedContext(
 ): Promise<StreamLogContext> {
   const service: unknown = await deadline.command(streamServiceArguments(config));
   const revision: string = streamServiceRevision(service, config);
-  validateStreamRevision(
+  const image: StreamRevisionImage = validateStreamRevision(
     await deadline.command(streamRevisionArguments(config, revision)),
     config,
     revision,
   );
+  if (image.kind === "digest-only") {
+    validateStreamArtifact(
+      await deadline.command(streamArtifactArguments(config)),
+      config,
+      image.digest,
+    );
+  }
   const release: ReturnType<typeof StreamLogReleaseSchema.safeParse> =
     StreamLogReleaseSchema.safeParse(
       await runtime.release(config.origin, deadline.remaining(10_000)),
