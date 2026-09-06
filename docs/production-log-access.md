@@ -21,6 +21,10 @@ the verifier does not discover other buckets or fall back to a broader scope.
 The view filter is the cloud-enforced boundary. The verifier additionally filters by service,
 region, exact serving revision, observation window, and expected request/session correlations.
 Its two-row limits, output projections, safe errors, and absolute deadlines remain unchanged.
+The platform-error window ends at the observer's recorded end time. Disposable-tenant cleanup runs
+after that boundary and is validated independently, including its bounded retry of authentication
+capacity responses; correlated application completion lookups retain narrow timestamp slack and
+bounded ingestion polling.
 
 ## Authorized operator setup
 

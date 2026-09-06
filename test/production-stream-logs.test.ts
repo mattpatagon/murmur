@@ -9,7 +9,10 @@ import {
   type StreamLogResult,
   validateStreamLogConfiguration,
 } from "../scripts/lib/production-stream-log-contracts.js";
-import type { StreamApplicationLog } from "../scripts/lib/production-stream-log-queries.js";
+import {
+  type StreamApplicationLog,
+  streamObservationArguments,
+} from "../scripts/lib/production-stream-log-queries.js";
 import {
   preflightProductionStreamLogs,
   verifyProductionStreamLogs,
@@ -281,6 +284,19 @@ test("any platform 5xx rejects the window, including a 3600-second request witho
     verifyProductionStreamLogs(CONFIG, context, JSON.stringify(result()), fixture),
   ).rejects.toThrow(ProductionStreamLogFailure);
   expect(fixture.sleeps).toEqual([]);
+});
+
+test("platform evidence ends before adversarial cleanup while application lookup keeps ingestion slack", async (): Promise<void> => {
+  const fixture: LogFixture = new LogFixture();
+  const context: StreamLogContext = await fixture.ready();
+  const observed: StreamLogResult = result();
+  const platform: string = streamObservationArguments(context, observed, "platform").join(" ");
+  const application: string = streamObservationArguments(context, observed, "replacement").join(
+    " ",
+  );
+  expect(platform).toContain(`timestamp<="${observed.endedAt}"`);
+  expect(platform).not.toContain(`timestamp<="${timestamp(END + 30_000)}"`);
+  expect(application).toContain(`timestamp<="${timestamp(END + 30_000)}"`);
 });
 
 test("post-observation revision changes and shorter real windows invalidate prior preflight evidence", async (): Promise<void> => {
