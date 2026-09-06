@@ -7,11 +7,15 @@ export type ClientId =
   | "conductor"
   | "orca";
 
-type ConfiguredSetup = {
-  readonly kind: "command" | "configuration";
+export type SetupAction = {
   readonly label: string;
   readonly copyLabel: string;
   readonly value: string;
+};
+
+type ConfiguredSetup = {
+  readonly kind: "command" | "configuration";
+  readonly actions: readonly [SetupAction, ...SetupAction[]];
   readonly note: string;
 };
 
@@ -39,23 +43,31 @@ export const CLIENTS: readonly AgentClient[] = [
     supportLabel: "Native setup · automatic hooks",
     setup: {
       kind: "command",
-      label: "RUN IN YOUR TERMINAL",
-      copyLabel: "command",
-      value:
-        "claude mcp add --transport http --scope user murmur https://api.usemurmur.dev/setup/mcp",
+      actions: [
+        {
+          label: "RUN IN YOUR TERMINAL",
+          copyLabel: "command",
+          value:
+            "claude mcp add --transport http --scope user murmur https://api.usemurmur.dev/setup/mcp",
+        },
+      ],
       note: "Adds Murmur’s public setup connection. The authenticated setup can also install passive lifecycle hooks.",
     },
   },
   {
     id: "codex",
     name: "Codex",
-    logoPath: "/client-logos/codex.svg",
+    logoPath: "/client-logos/codex.png",
     supportLabel: "Native setup · automatic hooks",
     setup: {
       kind: "command",
-      label: "RUN IN YOUR TERMINAL",
-      copyLabel: "command",
-      value: "codex mcp add murmur --url https://api.usemurmur.dev/setup/mcp",
+      actions: [
+        {
+          label: "RUN IN YOUR TERMINAL",
+          copyLabel: "command",
+          value: "codex mcp add murmur --url https://api.usemurmur.dev/setup/mcp",
+        },
+      ],
       note: "Adds Murmur’s public setup connection. The authenticated setup can also install passive lifecycle hooks.",
     },
   },
@@ -66,10 +78,14 @@ export const CLIENTS: readonly AgentClient[] = [
     supportLabel: "Native config · manual lifecycle",
     setup: {
       kind: "configuration",
-      label: "ADD TO ~/.config/opencode/opencode.json",
-      copyLabel: "configuration",
-      value:
-        '{\n  "mcp": {\n    "murmur": {\n      "type": "remote",\n      "url": "https://api.usemurmur.dev/setup/mcp",\n      "enabled": true\n    }\n  }\n}',
+      actions: [
+        {
+          label: "ADD TO ~/.config/opencode/opencode.json",
+          copyLabel: "configuration",
+          value:
+            '{\n  "mcp": {\n    "murmur": {\n      "type": "remote",\n      "url": "https://api.usemurmur.dev/setup/mcp",\n      "enabled": true\n    }\n  }\n}',
+        },
+      ],
       note: "OpenCode has native remote MCP configuration. Restart it after adding the public setup connection; lifecycle checks remain manual.",
     },
   },
@@ -80,10 +96,14 @@ export const CLIENTS: readonly AgentClient[] = [
     supportLabel: "Native config · manual lifecycle",
     setup: {
       kind: "configuration",
-      label: "ADD TO ~/.cursor/mcp.json",
-      copyLabel: "configuration",
-      value:
-        '{\n  "mcpServers": {\n    "murmur": {\n      "url": "https://api.usemurmur.dev/setup/mcp"\n    }\n  }\n}',
+      actions: [
+        {
+          label: "ADD TO ~/.cursor/mcp.json",
+          copyLabel: "configuration",
+          value:
+            '{\n  "mcpServers": {\n    "murmur": {\n      "url": "https://api.usemurmur.dev/setup/mcp"\n    }\n  }\n}',
+        },
+      ],
       note: "Cursor has native remote MCP configuration. Restart it after adding the public setup connection; lifecycle checks remain manual.",
     },
   },
@@ -94,10 +114,19 @@ export const CLIENTS: readonly AgentClient[] = [
     supportLabel: "Third-party adapter in Pi’s catalog · manual lifecycle",
     setup: {
       kind: "configuration",
-      label: "INSTALL THE ADAPTER, THEN ADD ITS MCP CONFIG",
-      copyLabel: "setup",
-      value:
-        'pi install npm:pi-mcp-adapter\n\n# Then add to ~/.config/mcp/mcp.json\n{\n  "mcpServers": {\n    "murmur": {\n      "url": "https://api.usemurmur.dev/setup/mcp"\n    }\n  }\n}',
+      actions: [
+        {
+          label: "INSTALL THE THIRD-PARTY ADAPTER",
+          copyLabel: "command",
+          value: "pi install npm:pi-mcp-adapter",
+        },
+        {
+          label: "THEN ADD TO ~/.config/mcp/mcp.json",
+          copyLabel: "configuration",
+          value:
+            '{\n  "mcpServers": {\n    "murmur": {\n      "url": "https://api.usemurmur.dev/setup/mcp"\n    }\n  }\n}',
+        },
+      ],
       note: "Pi does not provide MCP by itself. Install the third-party adapter listed in Pi’s official package catalog, then restart Pi; lifecycle checks remain manual.",
     },
   },
@@ -105,22 +134,22 @@ export const CLIENTS: readonly AgentClient[] = [
     id: "conductor",
     name: "Conductor",
     logoPath: "/client-logos/conductor.svg",
-    supportLabel: "Inherits the launched agent",
+    supportLabel: "Uses agent-specific MCP setup",
     setup: {
       kind: "inherited",
-      label: "CONFIGURE THE AGENT CONDUCTOR LAUNCHES",
-      note: "Configure the Claude Code, Codex, Cursor, or OpenCode agent Conductor launches. Conductor then inherits Murmur and needs no separate entry.",
+      label: "CONFIGURE THE EFFECTIVE AGENT ENVIRONMENT",
+      note: "Claude Code and Codex sessions load their agent-specific Murmur configuration in Conductor. Cursor Composer uses Cursor’s MCP configuration when you open the workspace in Cursor. Verify other harnesses in the home and environment Conductor launches.",
     },
   },
   {
     id: "orca",
     name: "Orca",
     logoPath: "/client-logos/orca.svg",
-    supportLabel: "Inherits the launched agent",
+    supportLabel: "Uses the selected agent’s home",
     setup: {
       kind: "inherited",
-      label: "CONFIGURE THE AGENT ORCA LAUNCHES",
-      note: "Configure the Claude Code, Codex, Cursor, OpenCode, Pi, or other CLI agent selected in Orca. Orca then inherits Murmur and needs no separate entry.",
+      label: "CONFIGURE THE EFFECTIVE AGENT HOME",
+      note: "Configure Murmur in the home and environment Orca launches for the selected CLI. The system-default Codex account reads ~/.codex; each extra Orca-managed Codex account has an isolated home and needs its own setup.",
     },
   },
 ];

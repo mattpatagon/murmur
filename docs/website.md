@@ -45,9 +45,10 @@ required to read the site.
 
 The client catalog shows only vendor-provided marks for Claude Code, Codex, OpenCode, Cursor, Pi,
 Conductor, and Orca. The vendored asset provenance file records each primary source and SHA-256.
-Conductor and Orca are described as environments that inherit the selected agent's Murmur setup;
-Pi identifies its third-party adapter from Pi's official package catalog. The Murmur favicon is a separate local
-brand asset and must remain linked from every page.
+Conductor and Orca are described as environments that use the selected agent's effective home and
+configuration; isolated agent homes require their own setup. Pi identifies its third-party adapter
+from Pi's official package catalog. The Murmur favicon is a separate local brand asset and must
+remain linked from every page.
 
 ## Build configuration
 

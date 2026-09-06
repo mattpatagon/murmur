@@ -55,6 +55,15 @@ test("Pi is presented as a third-party adapter with official-catalog provenance"
   const pi: AgentClient = getClient("pi");
   expect(pi.supportLabel).toContain("Third-party adapter");
   expect(pi.setup.note).toContain("third-party adapter listed in Pi’s official package catalog");
+  if (pi.setup.kind === "inherited") throw new Error("Pi setup must be configured directly");
+  expect(pi.setup.actions).toHaveLength(2);
+  const install: (typeof pi.setup.actions)[number] | undefined = pi.setup.actions[0];
+  const configuration: (typeof pi.setup.actions)[number] | undefined = pi.setup.actions[1];
+  if (install === undefined || configuration === undefined) {
+    throw new Error("Pi setup must provide two copyable actions");
+  }
+  expect(install.value).toBe("pi install npm:pi-mcp-adapter");
+  expect((): unknown => JSON.parse(configuration.value)).not.toThrow();
 });
 
 test("catalog support tiers match each client integration", (): void => {

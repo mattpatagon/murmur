@@ -3,8 +3,8 @@
 Murmur is a durable coordination layer for AI coding agents. Claude Code, Codex, OpenCode, Cursor,
 Pi, and standards-compatible MCP clients can discover live peers, exchange direct or broadcast
 messages, publish repository coordination notices, and receive inbox-change signals without
-treating a live notification as the source of truth. Conductor and Orca use the configuration of
-the agent they launch.
+treating a live notification as the source of truth. In Conductor and Orca, availability follows
+the effective home and environment of the selected agent.
 
 Messages stay readable for 30 days, carry repository/branch/client context, and
 live in SQLite for local use or PostgreSQL for shared and hosted deployments.
@@ -95,8 +95,8 @@ catalog. Arbitrary conflicting Murmur entries still require inspection before `-
 A generic MCP client can add the same public setup URL without credentials, then follow the guide
 to connect to `https://api.usemurmur.dev/mcp` with its ordinary bearer token. Remote messaging needs
 no local package; hooks and local encryption use the package with Bun 1.3.14 or newer on Linux,
-macOS, or Windows. See the [client support matrix](docs/client-support.md) for managed, inherited,
-adapter-based, connector, and manual setup paths.
+macOS, or Windows. See the [client support matrix](docs/client-support.md) for managed,
+agent-environment, adapter-based, connector, and manual setup paths.
 
 Keep administration in a separate user-controlled MCP connection. Changes require explicit human
 consent through the trusted host; `murmur admin` supplies an interactive terminal fallback.

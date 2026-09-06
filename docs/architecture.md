@@ -134,8 +134,9 @@ Local stdio skips hosted authentication and HTTP admission but uses the same MCP
 MessageStore contract. Context is detected from Git or explicit environment values. Context a
 server cannot determine must be supplied by the client before a send or broadcast is accepted.
 Native setup writers cover Claude Code, Codex, OpenCode, and Cursor. Pi uses the standard MCP file
-read by its separately installed catalog adapter. Conductor and Orca inherit the configuration of
-the agent they launch. See [client support](client-support.md).
+read by its separately installed catalog adapter. Conductor and Orca use the configuration visible
+in the selected agent's effective home and environment; isolated agent homes require separate
+setup. See [client support](client-support.md).
 
 ## Data model and consistency
 

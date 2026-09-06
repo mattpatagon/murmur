@@ -6,6 +6,7 @@ import {
   type ClientId,
   type ClientSetup,
   getClient,
+  type SetupAction,
 } from "../data/clients";
 import { ClipboardCopy } from "./clipboard";
 
@@ -28,9 +29,18 @@ export default function Setup(): ReactElement {
     setFeedback("");
   }
 
-  async function copy(): Promise<void> {
-    if (setup.kind === "inherited") return;
-    await clipboard.copy(setup.value, setFeedback);
+  async function copy(action: SetupAction): Promise<void> {
+    setFeedback("");
+    await clipboard.copy(action.value, (message: string): void => {
+      const subject: string = action.copyLabel === "configuration" ? "Configuration" : "Command";
+      setFeedback(`${subject}: ${message}`);
+    });
+  }
+
+  function firstSetupValue(candidate: ClientSetup): string {
+    if (candidate.kind === "inherited") return "";
+    const first: SetupAction | undefined = candidate.actions[0];
+    return first === undefined ? "" : first.value;
   }
 
   return (
@@ -52,29 +62,44 @@ export default function Setup(): ReactElement {
           ),
         )}
       </fieldset>
-      <div className="command-label">
-        <span className="eyebrow">{setup.label}</span>
-        {setup.kind === "inherited" ? null : (
-          <button type="button" className="copy-button" onClick={copy}>
-            Copy {setup.copyLabel} <span aria-hidden="true">⧉</span>
-          </button>
-        )}
-      </div>
       {setup.kind === "inherited" ? (
-        <div className="inherited-setup">
-          <img
-            className={`inherited-logo inherited-logo-${client.id}`}
-            src={client.logoPath}
-            alt=""
-            width="48"
-            height="48"
-          />
-          <strong>{client.name} uses your launched agent’s connection.</strong>
-        </div>
+        <>
+          <div className="command-label">
+            <span className="eyebrow">{setup.label}</span>
+          </div>
+          <div className="inherited-setup">
+            <img
+              className={`inherited-logo inherited-logo-${client.id}`}
+              src={client.logoPath}
+              alt=""
+              width="48"
+              height="48"
+            />
+            <strong>{client.name} uses the effective MCP configuration for its agent.</strong>
+          </div>
+        </>
       ) : (
-        <pre className="command">
-          <code>{setup.value}</code>
-        </pre>
+        <div className="setup-actions">
+          {setup.actions.map(
+            (action: SetupAction): ReactElement => (
+              <div className="setup-action" key={action.label}>
+                <div className="command-label">
+                  <span className="eyebrow">{action.label}</span>
+                  <button
+                    type="button"
+                    className="copy-button"
+                    onClick={(): Promise<void> => copy(action)}
+                  >
+                    Copy {action.copyLabel} <span aria-hidden="true">⧉</span>
+                  </button>
+                </div>
+                <pre className="command">
+                  <code>{action.value}</code>
+                </pre>
+              </div>
+            ),
+          )}
+        </div>
       )}
       <p className="copy-feedback" role="status">
         {feedback}
@@ -85,14 +110,14 @@ export default function Setup(): ReactElement {
         <div className="no-js-setup">
           <p>Claude Code:</p>
           <pre>
-            <code>{claudeSetup.kind === "command" ? claudeSetup.value : ""}</code>
+            <code>{firstSetupValue(claudeSetup)}</code>
           </pre>
           <p>Codex:</p>
           <pre>
-            <code>{codexSetup.kind === "command" ? codexSetup.value : ""}</code>
+            <code>{firstSetupValue(codexSetup)}</code>
           </pre>
           <p>OpenCode, Cursor, and Pi use the configuration shown in the setup guide.</p>
-          <p>Conductor and Orca inherit the connection of the agent they launch.</p>
+          <p>Conductor and Orca use the effective MCP configuration of their selected agent.</p>
         </div>
       </noscript>
     </div>

@@ -117,14 +117,14 @@ export function createUpgradeCheckOutput(
           "Install the exact latest public Murmur client package without repository access.",
       },
       {
-        command: "murmur setup --user",
+        command: null,
         description:
-          "Refresh standard user configuration. If E2E is enabled, run `murmur setup --user --e2ee` instead.",
+          "Rerun the exact setup command used for this endpoint, preserving its client flags, --url, --e2ee, and --vault-path options.",
       },
       {
         command: null,
         description:
-          "Restart active Claude Code, Codex, OpenCode, Cursor, and Pi sessions so they load the upgraded connection. Conductor and Orca inherit the restarted agent's configuration.",
+          "Restart each configured agent session so it loads the upgraded connection. In Conductor and Orca, verify the selected agent's effective home and environment.",
       },
     ],
   });

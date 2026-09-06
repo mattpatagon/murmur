@@ -11,7 +11,7 @@
     border-block: 1px solid var(--color-line);
   }
   .compatibility-heading p {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
   }
   .compatibility-heading span {
@@ -57,14 +57,14 @@
   }
   .client-name {
     overflow: hidden;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .client-support {
     color: var(--color-muted);
-    font-size: 9px;
+    font-size: 11px;
     line-height: 1.35;
   }
   .client-logo-opencode {
@@ -75,6 +75,9 @@
   }
   .client-logo-orca {
     padding: 7px 4px;
+    background: var(--color-night);
+  }
+  .client-logo-pi {
     background: var(--color-night);
   }
   .section {
@@ -178,7 +181,7 @@
     padding: 9px 10px;
     border-right: 1px solid var(--color-line);
     border-bottom: 2px solid transparent;
-    font-size: 11px;
+    font-size: 13px;
     text-align: left;
   }
   .client-selector button:nth-child(4n) {
@@ -216,6 +219,9 @@
     padding: 7px 3px;
     background: var(--color-night);
   }
+  .setup-client-logo-pi {
+    background: var(--color-night);
+  }
   .command-label {
     display: flex;
     justify-content: space-between;
@@ -224,13 +230,13 @@
     padding: 14px 20px 0;
   }
   .command-label .eyebrow {
-    font-size: 9px;
+    font-size: 11px;
   }
   .copy-button {
     display: inline-flex;
     align-items: center;
     gap: 10px;
-    font-size: 11px;
+    font-size: 12px;
     min-height: 44px;
   }
   .copy-button:hover {
@@ -262,12 +268,13 @@
     border-radius: 4px;
     color: var(--color-muted);
     font-family: var(--font-mono);
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.02em;
     text-transform: uppercase;
   }
   .setup-note {
-    font-size: 12px;
+    font-size: 14px;
+    line-height: 1.5;
     margin: 0;
     padding: 0 20px 20px;
   }

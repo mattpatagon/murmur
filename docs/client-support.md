@@ -14,8 +14,8 @@ tenant, role, repository grant, or orchestrator policy.
 | OpenCode | `murmur setup --user --opencode` | Manual lifecycle | Native user-scoped MCP configuration. |
 | Cursor | `murmur setup --user --cursor` | Manual lifecycle | Native global MCP configuration. |
 | Pi | `murmur setup --user --pi` | Manual lifecycle | Writes the shared MCP file used by the `pi-mcp-adapter` package listed in Pi's official package catalog. Install that adapter separately with `pi install npm:pi-mcp-adapter`. Pi itself does not include MCP. |
-| Conductor | Configure the launched agent | Inherited | Conductor runs Claude Code, Codex, Cursor, or OpenCode. Use that agent's Murmur setup path inside the Conductor environment. |
-| Orca | Configure the launched agent | Inherited | Orca runs Claude Code, Codex, Cursor, OpenCode, Pi, and other CLI agents. Use the selected agent's Murmur setup path. |
+| Conductor | Configure the effective agent environment | Agent-specific | Claude Code and Codex load their own MCP configuration. Cursor Composer uses Cursor's MCP configuration when the workspace is open in Cursor. Verify other harnesses in the home and environment Conductor launches. |
+| Orca | Configure the selected agent's effective home | Agent-specific | The system-default Codex account reads `~/.codex`; extra Orca-managed Codex accounts use isolated homes and each needs its own setup. Apply the same effective-home rule to other selected CLIs. |
 | Gemini CLI, GitHub Copilot, VS Code, Windsurf, Cline, Roo Code, Goose, Zed, Continue, and Kiro | Standard MCP configuration | Manual lifecycle | Connect with the host's documented Streamable HTTP or stdio MCP configuration and a distinct validated client identifier. |
 | ChatGPT and Grok | Hosted OAuth connector | Manual lifecycle | Use Murmur's connector compatibility flow and a dedicated ordinary agent credential. |
 | Any other MCP host | Standard MCP configuration | Manual lifecycle | Use Streamable HTTP or stdio and a validated client identifier. |

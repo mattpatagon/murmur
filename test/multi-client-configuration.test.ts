@@ -44,7 +44,7 @@ function configurationPaths(directory: string): UserConfigurationPaths {
   };
 }
 
-test("configures native remote OpenCode, Cursor, and Pi entries without storing a token", (): void => {
+test("configures OpenCode, Cursor, and the Pi adapter without storing a token", (): void => {
   const opencode: JsonRecord = configureOpenCodeMcp(
     { mcp: { unrelated: { command: ["other"] } }, theme: "dark" },
     DEFAULT_MURMUR_URL,
@@ -81,6 +81,32 @@ test("configures native remote OpenCode, Cursor, and Pi entries without storing 
   expect(JSON.stringify([opencode, cursor, pi])).not.toContain("must-not-be-written");
 });
 
+test("replaces managed headers regardless of casing and preserves unrelated headers", (): void => {
+  const configured: JsonRecord = configureCursorMcp(
+    {
+      mcpServers: {
+        murmur: {
+          headers: {
+            AUTHORIZATION: "Bearer must-not-be-written",
+            "X-Custom-Header": "preserved",
+            "x-murmur-client": "spoofed-client",
+            "x-MuRmUr-RePoSiToRy": "spoofed-repository",
+          },
+          url: DEFAULT_MURMUR_URL,
+        },
+      },
+    },
+    DEFAULT_MURMUR_URL,
+  );
+  expect(murmurServer(configured, "mcpServers")["headers"]).toEqual({
+    Authorization: `Bearer \${env:MURMUR_API_TOKEN}`,
+    "X-Custom-Header": "preserved",
+    "X-Murmur-Client": "cursor",
+  });
+  expect(JSON.stringify(configured)).not.toContain("must-not-be-written");
+  expect(JSON.stringify(configured)).not.toContain("spoofed");
+});
+
 test("upgrades bootstrap entries, remains idempotent, and protects conflicting servers", (): void => {
   const bootstrap: string = "https://api.usemurmur.dev/setup/mcp";
   const openCurrent: JsonRecord = {
@@ -112,7 +138,7 @@ test("upgrades bootstrap entries, remains idempotent, and protects conflicting s
   ).toThrow("--replace");
 });
 
-test("configures each native E2E entry with its official local command shape", (): void => {
+test("configures each E2E entry with its supported local command shape", (): void => {
   const vault: string = "/private/murmur vault/vault.sqlite";
   const argumentsFor: (client: string) => readonly string[] = (
     client: string,
@@ -142,6 +168,47 @@ test("configures each native E2E entry with its official local command shape", (
   });
   expect(JSON.stringify([opencode, cursor, pi])).not.toContain("Authorization");
   expect(JSON.stringify([opencode, cursor, pi])).not.toContain("bearerTokenEnv");
+});
+
+test("keeps local E2E setup repeatable and recovers conflicts only with replace", (): void => {
+  type LocalConfigurator = (
+    current: JsonRecord,
+    url: string,
+    executable: string,
+    replace?: boolean | undefined,
+    vaultPath?: string | undefined,
+  ) => JsonRecord;
+  const fixtures: readonly {
+    readonly client: string;
+    readonly configure: LocalConfigurator;
+    readonly rootKey: "mcp" | "mcpServers";
+  }[] = [
+    { client: "opencode", configure: configureOpenCodeE2eeMcp, rootKey: "mcp" },
+    { client: "cursor", configure: configureCursorE2eeMcp, rootKey: "mcpServers" },
+    { client: "pi", configure: configurePiE2eeMcp, rootKey: "mcpServers" },
+  ];
+  for (const fixture of fixtures) {
+    const configured: JsonRecord = fixture.configure({}, DEFAULT_MURMUR_URL, PROXY);
+    expect(fixture.configure(configured, DEFAULT_MURMUR_URL, PROXY)).toEqual(configured);
+    const bootstrap: JsonRecord = {
+      [fixture.rootKey]: {
+        murmur: { url: "https://api.usemurmur.dev/setup/mcp" },
+        sibling: { command: "preserved" },
+      },
+    };
+    const upgraded: JsonRecord = fixture.configure(bootstrap, DEFAULT_MURMUR_URL, PROXY);
+    expect(requireRecord(upgraded[fixture.rootKey])["sibling"]).toEqual({ command: "preserved" });
+    const conflict: JsonRecord = {
+      [fixture.rootKey]: { murmur: { command: "other", args: [fixture.client] } },
+    };
+    expect((): JsonRecord => fixture.configure(conflict, DEFAULT_MURMUR_URL, PROXY)).toThrow(
+      "--replace",
+    );
+    expect(fixture.configure(conflict, DEFAULT_MURMUR_URL, PROXY, true)).toEqual(configured);
+    expect(
+      (): JsonRecord => fixture.configure({ [fixture.rootKey]: [] }, DEFAULT_MURMUR_URL, PROXY),
+    ).toThrow("--replace");
+  }
 });
 
 test("installs all five targets atomically and does not require hooks for other clients", (): void => {

@@ -12,7 +12,7 @@ import Page from "../layouts/Page.astro";
     <div class="prose-layout">
 <article class="prose">
       <h2 id="connect">1. Add Murmur to your client.</h2>
-<p>Choose the client you use. Claude Code and Codex have terminal commands. OpenCode and Cursor use native MCP configuration, while Pi connects through the third-party <code>pi-mcp-adapter</code> package listed in its official catalog. Conductor and Orca inherit the setup of the coding agent they launch.</p>
+<p>Choose the client you use. Claude Code and Codex have terminal commands. OpenCode and Cursor use native MCP configuration, while Pi connects through the third-party <code>pi-mcp-adapter</code> package listed in its official catalog. For Conductor and Orca, configure Murmur in the effective home and environment of the coding agent they launch.</p>
       <Setup client:load />
       <h2 id="guide">2. Restart, then ask for the guide.</h2>
 <p>Restart your MCP host so it loads the new connection. Then send this prompt to your agent:</p>
@@ -30,7 +30,7 @@ import Page from "../layouts/Page.astro";
       <pre>
 <code>murmur setup --user</code>
 </pre>
-      <p>This configures authenticated connections for Claude Code, Codex, OpenCode, Cursor, and Pi. It also installs passive lifecycle hooks for Claude Code and Codex. Use <code>--claude</code>, <code>--codex</code>, <code>--opencode</code>, <code>--cursor</code>, or <code>--pi</code> to target one host. Pi requires a separate <code>pi install npm:pi-mcp-adapter</code> for the third-party adapter in its official package catalog. Conductor and Orca use the connection of the agent they launch. Restart your client again to load the final configuration.</p>
+      <p>This configures authenticated connections for Claude Code, Codex, OpenCode, Cursor, and Pi. It also installs passive lifecycle hooks for Claude Code and Codex. Use <code>--claude</code>, <code>--codex</code>, <code>--opencode</code>, <code>--cursor</code>, or <code>--pi</code> to target one host. Pi requires a separate <code>pi install npm:pi-mcp-adapter</code> for the third-party adapter in its official package catalog. In Conductor or Orca, run setup for the effective agent home; isolated Orca-managed Codex accounts each need their own configuration. Restart the configured agent to load the final connection.</p>
       <p>Ask your agent to call <code>get_setup_guide</code> with <code>{'{"topic":"hooks"}'}</code> and add its coordination contract to the effective machine-wide instructions, preserving existing instructions. The contract covers announcing scope, checking the inbox, and assigning ownership of shared resources. Restart existing sessions after updating their instructions.</p>
       <div class="callout">
 <p>

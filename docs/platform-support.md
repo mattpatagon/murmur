@@ -69,8 +69,9 @@ are written inside the selected user profile and inherit its Windows ACLs. Opera
 profile restricted to the intended account. See `murmur setup --help` before using `--replace`.
 Claude Code and Codex receive lifecycle hooks. OpenCode and Cursor receive native MCP entries. Pi
 receives the shared configuration used by its separately installed `pi-mcp-adapter`; Pi does not
-ship MCP itself. Conductor and Orca inherit the selected underlying agent's configuration. The full
-support contract is [client support](client-support.md).
+ship MCP itself. Conductor and Orca use the selected agent's effective home and environment;
+isolated homes require their own configuration. The full support contract is
+[client support](client-support.md).
 
 The E2E vault uses the platform application-data directory unless `murmur setup --user --e2ee
 --vault-path PATH` selects an absolute file inside a dedicated non-root directory. Setup passes

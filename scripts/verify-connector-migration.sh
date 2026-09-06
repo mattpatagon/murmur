@@ -255,5 +255,11 @@ if psql "$migration_url" --set ON_ERROR_STOP=1 \
   echo 'Feedback client constraint accepted an overlong slug' >&2
   exit 1
 fi
+if psql "$migration_url" --set ON_ERROR_STOP=1 \
+  --command "begin; set local murmur.tenant_id = '00000000-0000-4000-8000-000000000001'; update murmur.messages set client_name = 'ágent' where thread_id = 'connector-migration-message'; rollback;" \
+  >/dev/null 2>&1; then
+  echo 'Message client constraint accepted a non-ASCII slug' >&2
+  exit 1
+fi
 
 echo 'Populated connector and client slug migration lock-timeout fixtures passed'

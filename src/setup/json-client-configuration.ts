@@ -26,13 +26,15 @@ export function readJsonRecord(path: string, read: (path: string) => string): Js
 
 function portableHeaders(existing: unknown): JsonRecord {
   if (!isRecord(existing)) return {};
+  const managedHeaders: ReadonlySet<string> = new Set([
+    "authorization",
+    "x-murmur-branch",
+    "x-murmur-client",
+    "x-murmur-repository",
+  ]);
   return Object.fromEntries(
     Object.entries(existing).filter(
-      ([name]: [string, unknown]): boolean =>
-        name !== "Authorization" &&
-        name !== "X-Murmur-Branch" &&
-        name !== "X-Murmur-Client" &&
-        name !== "X-Murmur-Repository",
+      ([name]: [string, unknown]): boolean => !managedHeaders.has(name.toLowerCase()),
     ),
   );
 }

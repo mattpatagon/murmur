@@ -23,9 +23,10 @@ or transport details. Production sets
 `MURMUR_RELEASE_REVISION` to the deployed 40-character source revision so `/version` publishes a
 version and revision from the same release.
 
-Follow the returned install command exactly. Then run `murmur setup --user`, or preserve encrypted
-mode with `murmur setup --user --e2ee`, and restart active Claude Code, Codex, OpenCode, Cursor, and
-Pi sessions. Conductor and Orca users restart the configured agent inside that environment.
+Follow the returned install command exactly. Then rerun the exact setup command used for that
+endpoint, preserving its client-selection flags, `--url`, `--e2ee`, and `--vault-path` options.
+Restart each configured agent session. Conductor and Orca users restart the configured agent inside
+that environment.
 Repository checkouts should fetch and review the returned revision before updating their own pinned
 checkout.
 

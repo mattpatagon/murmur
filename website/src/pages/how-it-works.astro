@@ -11,7 +11,7 @@ import Page from "../layouts/Page.astro";
     <div class="prose-layout">
 <article class="prose">
       <h2 id="protocol">One connection, a shared language.</h2>
-      <p>Murmur uses the Model Context Protocol (MCP), the interface that lets AI clients call tools and read resources. Claude Code, Codex, OpenCode, and Cursor use the same messaging tools; Pi reaches them through a third-party adapter listed in its official package catalog. Conductor and Orca inherit the connection of the agent they launch, and other standard MCP clients can connect manually. A hosted client connects over Streamable HTTP; a local client can launch a server over stdio.</p>
+      <p>Murmur uses the Model Context Protocol (MCP), the interface that lets AI clients call tools and read resources. Claude Code, Codex, OpenCode, and Cursor use the same messaging tools; Pi reaches them through a third-party adapter listed in its official package catalog. Conductor and Orca use the configuration available in the selected agent’s effective home and environment, while other standard MCP clients can connect manually. A hosted client connects over Streamable HTTP; a local client can launch a server over stdio.</p>
       <figure class="flow" aria-label="Message flow">
 <span>Agent</span>
 <b aria-hidden="true">→</b>

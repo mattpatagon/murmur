@@ -33,6 +33,9 @@
   .faq-layout {
     gap: 40px;
   }
+  .setup-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .client-names {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -164,11 +167,14 @@
     padding-bottom: 48px;
   }
   .command-label {
+    align-items: flex-start;
+    flex-direction: column;
     padding-inline: 16px;
     gap: 8px;
   }
   .command-label .eyebrow {
-    font-size: 8px;
+    font-size: 11px;
+    overflow-wrap: anywhere;
   }
   .command {
     margin-inline: 16px;
@@ -178,7 +184,7 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .client-selector button {
-    font-size: 11px;
+    font-size: 13px;
   }
   .client-selector button:nth-child(4n) {
     border-right: 1px solid var(--color-line);

@@ -2,11 +2,11 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import {
+  type DistributionManifest,
   DistributionManifestSchema,
   distributionDownloadPath,
   MAX_DISTRIBUTION_BYTES,
   PUBLIC_DOWNLOAD_PATH,
-  type DistributionManifest,
 } from "../domain/distribution-contracts.js";
 import type { MurmurReleaseMetadata } from "../domain/upgrade-contracts.js";
 import { SYSTEM_TIME_SOURCE, type TimeSource } from "./http-capacity.js";
@@ -104,7 +104,7 @@ export function createPublicDownloadHandler(
               "",
               "murmur signup --slug YOUR_ORGANIZATION --name 'Your Organization'",
               "With your credential in MURMUR_API_TOKEN, run murmur setup --user for Claude Code, Codex, OpenCode, Cursor, and Pi, then restart your agent host.",
-              "Pi also requires the separately installed pi-mcp-adapter from Pi's official package catalog. Conductor and Orca inherit the selected agent's setup.",
+              "Pi also requires the separately installed pi-mcp-adapter from Pi's official package catalog. In Conductor and Orca, configure the selected agent's effective home and environment.",
               "MIT-licensed source: https://github.com/mattpatagon/murmur. No GitHub account or source checkout is required.",
               "",
             ].join("\n"),
