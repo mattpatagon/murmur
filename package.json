@@ -48,8 +48,8 @@
     "test": "bun run verify && bun test",
     "test:coverage": "bun run scripts/require-hosted-coverage.ts && bun run scripts/run-coverage.ts",
     "test:cloud": "bun test test/cloud.mcp.e2e.test.ts",
-    "test:linux": "bun run scripts/require-cross-platform-test.ts && MURMUR_TEST_DOCKER_IMAGE=oven/bun:1.3.14 bun test test/cloud-cross-platform.mcp.e2e.test.ts",
-    "test:portability": "bun test test/check-dependencies.test.ts test/check-documentation.test.ts test/check-file-lines.test.ts test/check-safety.test.ts test/check-coverage.test.ts test/entrypoints.test.ts test/configuration-boundaries.test.ts test/user-configuration.test.ts test/portability.test.ts test/repository-context.test.ts test/store.test.ts test/sqlite-message-concurrency.test.ts test/sqlite-message-upgrades.test.ts test/http-capacity.test.ts test/mcp-resources.test.ts test/murmur-tool-definitions.test.ts test/observability.test.ts test/telemetry.test.ts test/resource-lifecycle.test.ts test/safe-errors.test.ts test/security-boundaries.test.ts test/public-distribution.test.ts test/bootstrap-configuration.test.ts test/signup.test.ts test/signup-network.test.ts test/signup-files.test.ts test/signup-windows-acl.test.ts test/public-setup.test.ts test/public-setup-body.test.ts test/public-setup-response.test.ts",
+    "test:linux": "bun run scripts/require-cross-platform-test.ts && MURMUR_TEST_DEPLOY_REVISIONS=1 bun test test/deploy-revision-preservation.test.ts test/deploy-revision-cutover.test.ts && MURMUR_TEST_DOCKER_IMAGE=oven/bun:1.3.14 bun test test/cloud-cross-platform.mcp.e2e.test.ts",
+    "test:portability": "bun test test/check-dependencies.test.ts test/check-documentation.test.ts test/check-file-lines.test.ts test/check-safety.test.ts test/check-coverage.test.ts test/entrypoints.test.ts test/configuration-boundaries.test.ts test/user-configuration.test.ts test/portability.test.ts test/repository-context.test.ts test/store.test.ts test/sqlite-message-concurrency.test.ts test/sqlite-message-upgrades.test.ts test/http-capacity.test.ts test/mcp-resources.test.ts test/murmur-tool-definitions.test.ts test/observability.test.ts test/telemetry.test.ts test/resource-lifecycle.test.ts test/safe-errors.test.ts test/security-boundaries.test.ts test/public-distribution.test.ts test/bootstrap-configuration.test.ts test/signup.test.ts test/signup-network.test.ts test/signup-files.test.ts test/signup-windows-acl.test.ts test/public-setup.test.ts test/public-setup-body.test.ts test/public-setup-response.test.ts test/production-stream-cleanup.test.ts test/production-stream-fixture.test.ts test/production-stream-health-approval.test.ts test/production-stream-log-process.test.ts test/production-stream-logs.test.ts test/production-stream-observer.test.ts test/production-stream-sdk.test.ts test/production-stream-transport.test.ts",
     "test:e2e": "bun test test/mcp.e2e.test.ts",
     "typecheck": "tsc --project tsconfig.json --noEmit && tsc --project tsconfig.test.json --noEmit",
     "verify": "bun run typecheck && bun run website:check && bun run lint && bun run format:check",
@@ -83,5 +83,8 @@
     "fast-uri": "3.1.6",
     "qs": "6.16.0",
     "zod": "4.4.3"
+  },
+  "patchedDependencies": {
+    "@modelcontextprotocol/sdk@1.30.0": "patches/@modelcontextprotocol%2Fsdk@1.30.0.patch"
   }
 }

@@ -39,7 +39,7 @@ hosted verifier creates isolated roles and databases; never aim it at production
 | `bun run test` | Environment-independent full suite; hosted and cross-machine cases report explicit skips when their external fixtures are absent |
 | `bun run test:portability` | Platform-safe unit and integration suite used on Linux, macOS, and Windows |
 | `bun run test:distribution` | Builds and installs the public tarball, then exercises all package commands without repository access |
-| `bun run test:linux` | Required host-to-Linux-container MCP test; needs Docker and `MURMUR_TEST_DATABASE_URL` for disposable PostgreSQL 17 |
+| `bun run test:linux` | Required Linux deployment-preservation regressions and host-to-container MCP test; needs Bash, jq, Docker, and `MURMUR_TEST_DATABASE_URL` for disposable PostgreSQL 17 |
 | `bun run test:coverage` | Strict coverage for an already-provisioned hosted-test environment; fails early instead of auditing skipped hosted code |
 | `MURMUR_VERIFY_COVERAGE=1 bash scripts/verify-hosted-postgres.sh` | Authoritative PostgreSQL 17, RLS, upgrade, and hosted coverage gate |
 | `bun run build` | Bundles the stdio MCP entry point |
@@ -60,6 +60,10 @@ The full hosted test needs an isolated database administrator URL as documented 
 supplies it through a disposable PostgreSQL service, then runs the Linux-container test against the
 same service. Environment-backed tests may skip in `bun run test`; that does not replace either
 required CI result.
+
+The Linux gate sets `MURMUR_TEST_DEPLOY_REVISIONS=1` for synthetic deployment-preservation tests.
+Without that explicit flag they do not launch shell tools; enabling it on another platform fails
+instead of reporting a skipped Linux gate. No cloud credentials are used by these tests.
 
 ## Change design
 

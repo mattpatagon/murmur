@@ -63,6 +63,21 @@ frozen dependencies before root verification, and run `website:check`, `website:
 `website:test`. Refresh the third-party notices and browser evidence as described in
 [website maintenance](website.md#verification-and-maintenance).
 
+### Pinned SDK declaration correction
+
+`@modelcontextprotocol/sdk@1.30.0` has a version-pinned Bun patch in `patches/`. Its
+`StreamableHTTPClientTransport.sessionId` getter returns `string | undefined`, but the shared
+`Transport` declaration omits explicit `undefined` from the optional property. The two ESM/CommonJS
+declaration edits make that interface match the existing runtime behavior under
+`exactOptionalPropertyTypes`. No JavaScript, dependency version, license (MIT), or runtime surface
+changes; strict library checking remains enabled. The real production-observer SDK import and
+reconnect test exercise this compatibility boundary.
+
+The release maintainer owns the patch. Remove it, its manifest/lockfile mapping, and the Docker
+patch-copy step when the pinned upstream SDK's unmodified declarations pass `bun run verify` and
+the production-stream tests. Review the patch on every SDK upgrade; do not carry it to another
+version automatically. CI and Docker must install it through the reviewed frozen lockfile.
+
 ## Bun upgrades
 
 Bun is both runtime and package manager. Update all reviewed pins together:

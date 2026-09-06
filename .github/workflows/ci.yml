@@ -14,6 +14,47 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  production-image:
+    name: Fresh production image and SDK compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the proposed revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Build the production Dockerfile from the exact checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]] || [[ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]]; then
+            echo 'The checkout does not match the CI revision.' >&2
+            exit 1
+          fi
+          image_tag="murmur-production-ci:$GITHUB_SHA"
+          timeout --signal=TERM --kill-after=10s 600s \
+            docker build --no-cache --pull=false --progress=plain \
+              --build-arg "MURMUR_RELEASE_REVISION=$GITHUB_SHA" --tag "$image_tag" .
+
+      - name: Verify SDK compatibility and distribution integrity in the restricted image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_tag="murmur-production-ci:$GITHUB_SHA"
+          container_name="murmur-image-check-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          cleanup_image_check() {
+            timeout --signal=TERM --kill-after=5s 10s \
+              docker rm --force "$container_name" >/dev/null 2>&1 || true
+          }
+          trap cleanup_image_check EXIT
+          timeout --signal=TERM --kill-after=5s 30s \
+            docker run --rm --name "$container_name" --network none --read-only \
+              --cap-drop ALL --security-opt no-new-privileges \
+              --memory 512m --cpus 2 --pids-limit 128 \
+              --mount "type=bind,src=$GITHUB_WORKSPACE/scripts/verify-production-image.ts,dst=/app/scripts/verify-production-image.ts,readonly" \
+              --env "MURMUR_IMAGE_EXPECTED_REVISION=$GITHUB_SHA" \
+              --entrypoint bun "$image_tag" /app/scripts/verify-production-image.ts
+
   portability:
     name: Portability (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

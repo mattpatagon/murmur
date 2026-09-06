@@ -17,6 +17,13 @@ All notable changes to Murmur are documented in this file.
   smoke checks for `usemurmur.dev`. Run Wrangler with the pinned Node runtime.
 - Prevent Cloudflare proxy analytics injection with website response headers and verify the
   privacy policy in both artifact validation and production smoke checks.
+- Add an opt-in real-window production stream check with exact-revision and log-access preflight,
+  same-session reconnect evidence, and targeted disposable-tenant cleanup.
+
+### Changed
+
+- Preserve compatible Cloud Run revisions and retained database rows during deployment, with
+  source checks before migrations and no bypass of writer-drain safety for contraction.
 
 ### For contributors
 
@@ -24,6 +31,8 @@ All notable changes to Murmur are documented in this file.
   The frontend keeps Astro's TypeScript 6 checker separate from the backend's TypeScript 7 gate.
 - Extend exact dependency and file-size policies to the website, enforce safe frontend source,
   and test metadata, link, asset, clipboard, and deployment artifact failure paths.
+- Correct the pinned MCP SDK's optional session-ID declarations without changing its runtime or
+  disabling strict library checks.
 
 ## [0.13.0.0] - 2026-09-05
 

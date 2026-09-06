@@ -46,6 +46,8 @@ jobs:
     steps:
       - name: Check out the merged revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
 
       - name: Install Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -95,6 +97,10 @@ jobs:
       - name: Validate Secret Manager rollout permissions
         shell: bash
         run: bash scripts/deploy/validate-secret-permissions.sh
+
+      - name: Verify preserved revision compatibility
+        shell: bash
+        run: bash scripts/deploy/verify-preserved-revisions.sh
 
       - name: Apply migrations and verify shared Postgres
         shell: bash
@@ -331,46 +337,9 @@ jobs:
             sleep 5
           done
 
-      - name: Drain superseded Cloud Run revisions
+      - name: Preserve superseded Cloud Run revisions
         shell: bash
-        run: |
-          set -euo pipefail
-          latest_revision="$(gcloud run services describe "$SERVICE" \
-            --project "$PROJECT_ID" \
-            --region "$REGION" \
-            --format 'value(status.latestReadyRevisionName)')"
-          if [ -z "$latest_revision" ]; then
-            echo 'Cloud Run did not report a latest ready revision' >&2
-            exit 1
-          fi
-          gcloud run services update-traffic "$SERVICE" \
-            --project "$PROJECT_ID" \
-            --region "$REGION" \
-            --to-latest \
-            --quiet
-          while IFS= read -r revision; do
-            if [ -n "$revision" ] && [ "$revision" != "$latest_revision" ]; then
-              gcloud run revisions delete "$revision" \
-                --project "$PROJECT_ID" \
-                --region "$REGION" \
-                --quiet
-            fi
-          done < <(gcloud run revisions list \
-            --project "$PROJECT_ID" \
-            --region "$REGION" \
-            --service "$SERVICE" \
-            --format 'value(metadata.name)')
-          unexpected_revision="$(gcloud run revisions list \
-              --project "$PROJECT_ID" \
-              --region "$REGION" \
-              --service "$SERVICE" \
-              --filter "metadata.name!=$latest_revision" \
-              --format 'value(metadata.name)' | head -1)"
-          if [ -n "$unexpected_revision" ]; then
-            echo "Prior incompatible revision remained active: $unexpected_revision" >&2
-            exit 1
-          fi
-          curl --fail --silent --show-error "$PRODUCTION_URL/health" >/dev/null
+        run: bash scripts/deploy/preserve-revisions.sh
 
       - name: Finalize tenant-qualified database keys
         if: env.TENANT_CONTRACT_FINALIZE_REQUIRED == 'true'

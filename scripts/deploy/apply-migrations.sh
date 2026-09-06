@@ -10,8 +10,6 @@ bootstrap_database_credential="$database_url"
 database_url="$(MURMUR_DATABASE_URL_TO_VERIFY="$database_url" \
   bun scripts/require-verified-database-url.ts)"
 echo "::add-mask::$database_url"
-MURMUR_MIGRATION_DATABASE_URL="$database_url" \
-  bash scripts/prune-expired-before-migration.sh
 bunx supabase db push --db-url "$database_url" --include-all --yes
 MURMUR_BOOTSTRAP_DATABASE_CREDENTIAL="$bootstrap_database_credential" \
   MURMUR_BOOTSTRAP_DATABASE_URL="$database_url" \
