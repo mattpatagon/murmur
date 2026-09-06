@@ -2,7 +2,7 @@
 
 All notable changes to Murmur are documented in this file.
 
-## [0.14.1.0] - 2026-09-05
+## [0.13.1.0] - 2026-09-06
 
 ### Added
 
