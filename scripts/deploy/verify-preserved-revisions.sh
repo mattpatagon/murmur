@@ -41,6 +41,69 @@ if [[ ! ${PROJECT_ID:-} =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]] ||
 fi
 
 readonly image_prefix="$REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REPOSITORY/$SERVICE:"
+readonly image_name="${image_prefix%:}"
+readonly package_name="projects/$PROJECT_ID/locations/$REGION/repositories/$ARTIFACT_REPOSITORY/packages/$SERVICE"
+
+resolve_digest_source() {
+  local digest="$1" metadata source binding
+  if ! metadata="$(
+    bounded_command gcloud artifacts tags list \
+      --package "$SERVICE" --repository "$ARTIFACT_REPOSITORY" \
+      --location "$REGION" --project "$PROJECT_ID" \
+      --filter "version=\"$package_name/versions/$digest\"" \
+      --limit 1001 --format 'json(name,version)' --quiet |
+      bounded_command head --bytes=1048577 || exit 1
+    printf '.'
+  )"; then
+    fail 'Revision preservation preflight could not inspect image source tags'
+  fi
+  metadata="${metadata%.}"
+  if [ "${#metadata}" -gt 1048576 ] || ! bounded_command jq --exit-status --slurp \
+    --arg prefix "$package_name/tags/" --arg version "$package_name/versions/$digest" '
+    length == 1 and (.[0] |
+      type == "array" and length <= 1000 and
+      (map(.name) | length == (unique | length)) and all(.[];
+        type == "object" and keys == ["name", "version"] and
+        (.name | type) == "string" and (.name | startswith($prefix)) and
+        (.name | length) <= 512 and
+        (.name | ltrimstr($prefix) | length > 0 and (test("[^a-zA-Z0-9._-]") | not)) and
+        .version == $version
+      )
+    )
+  ' <<< "$metadata" >/dev/null; then
+    fail 'Revision preservation preflight received unsupported or excessive source metadata'
+  fi
+  if ! source="$(bounded_command jq --raw-output --exit-status --arg prefix "$package_name/tags/" '
+    [.[].name | ltrimstr($prefix) | select(length == 40 and test("^[0-9a-f]+$"))] |
+    if length == 1 then .[0] else error("unsupported source tags") end
+  ' <<< "$metadata")"; then
+    fail 'An existing revision lacks one unambiguous supported source tag'
+  fi
+  if ! binding="$(
+    bounded_command gcloud artifacts tags list \
+      --package "$SERVICE" --repository "$ARTIFACT_REPOSITORY" \
+      --location "$REGION" --project "$PROJECT_ID" \
+      --filter "name=\"$package_name/tags/$source\"" \
+      --limit 2 --format 'json(name,version)' --quiet |
+      bounded_command head --bytes=1048577 || exit 1
+    printf '.'
+  )"; then
+    fail 'Revision preservation preflight could not verify image source binding'
+  fi
+  binding="${binding%.}"
+  if [ "${#binding}" -gt 1048576 ] || ! bounded_command jq --exit-status --slurp \
+    --arg name "$package_name/tags/$source" --arg version "$package_name/versions/$digest" '
+    length == 1 and (.[0] |
+      type == "array" and length == 1 and (.[0] |
+        type == "object" and keys == ["name", "version"] and
+        .name == $name and .version == $version
+      )
+    )
+  ' <<< "$binding" >/dev/null; then
+    fail 'An existing revision source tag does not match its deployed digest'
+  fi
+  printf '%s' "$source"
+}
 
 if ! shallow_repository="$(bounded_command git rev-parse --is-shallow-repository)" ||
   [ "$shallow_repository" != 'false' ]; then
@@ -91,20 +154,32 @@ if ! declared_images="$(bounded_command jq --raw-output \
 fi
 
 declare -A verified_sources=()
+declare -A verified_images=()
 revision_count=0
 while IFS= read -r declared_image; do
   if [ -z "$declared_image" ]; then
     continue
   fi
   revision_count=$((revision_count + 1))
-  if [[ "$declared_image" != "$image_prefix"* ]]; then
+  if [ "${verified_images[$declared_image]:-}" = 'true' ]; then
+    continue
+  fi
+  if [[ "$declared_image" == "$image_name@sha256:"* ]]; then
+    digest="${declared_image#"$image_name@"}"
+    if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+      fail 'An existing revision lacks an exact supported source tag'
+    fi
+    source_commit="$(resolve_digest_source "$digest")" || exit 1
+  elif [[ "$declared_image" == "$image_prefix"* ]]; then
+    source_tag="${declared_image#"$image_prefix"}"
+    if [[ ! "$source_tag" =~ ^[0-9a-f]{40}(@sha256:[0-9a-f]{64})?$ ]]; then
+      fail 'An existing revision lacks an exact supported source tag'
+    fi
+    source_commit="${source_tag%%@*}"
+  else
     fail 'An existing revision has untrusted declared image provenance'
   fi
-  source_tag="${declared_image#"$image_prefix"}"
-  if [[ ! "$source_tag" =~ ^[0-9a-f]{40}(@sha256:[0-9a-f]{64})?$ ]]; then
-    fail 'An existing revision lacks an exact supported source tag'
-  fi
-  source_commit="${source_tag%%@*}"
+  verified_images[$declared_image]='true'
   if [ "${verified_sources[$source_commit]:-}" = 'true' ]; then
     continue
   fi

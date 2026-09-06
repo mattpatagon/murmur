@@ -30,6 +30,7 @@ import {
   postgresAgentInTransaction,
   renewPostgresSessionInTransaction,
 } from "./postgres-agent-lifecycle-store.js";
+import { getPostgresInboxSnapshot } from "./postgres-inbox-snapshot.js";
 import {
   createPostgresTenantTransactionRunner,
   type PostgresTenantTransactionRunner,
@@ -109,6 +110,15 @@ async function readPostgresInbox(
     const reservation: MaterializationReservation =
       reserveMaterializationBytes(MAX_INBOX_PAGE_BYTES);
     try {
+      if (includeVersion) {
+        const snapshot: Awaited<ReturnType<typeof getPostgresInboxSnapshot>> =
+          await getPostgresInboxSnapshot(transaction, tenantId, query, now, generation);
+        const messages: Message[] = snapshot.rows.map(
+          (row: MessageRow): Message => mapMessageRow(row),
+        );
+        reservation.settle(snapshot.estimatedBytes);
+        return { messages, inboxVersion: snapshot.inboxVersion };
+      }
       const raw: unknown = await transaction`
       WITH candidates AS MATERIALIZED (
         SELECT tenant_sequence,
@@ -159,10 +169,7 @@ async function readPostgresInbox(
       );
       const messages: Message[] = rows.map((row: MessageRow): Message => mapMessageRow(row));
       reservation.settle(estimatedBytes);
-      const inboxVersion: Sequence = includeVersion
-        ? await inboxVersionInTransaction(transaction, tenantId, query.agentId, now, generation)
-        : Sequence.zero();
-      return { messages, inboxVersion };
+      return { messages, inboxVersion: Sequence.zero() };
     } catch (error: unknown) {
       reservation.fail();
       throw error;

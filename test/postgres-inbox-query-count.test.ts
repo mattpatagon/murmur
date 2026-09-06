@@ -151,16 +151,16 @@ for (const operation of ["read", "mark", "empty mark"]) {
         });
       }
       expect(lookup).toHaveBeenCalledTimes(0);
-      expect(fixture.transactions).toHaveLength(1);
+      expect(fixture.transactions).toHaveLength(2);
       expect(fixture.events[0]).toBe("clock");
       expect(fixture.events.filter((event: string): boolean => event === "clock")).toHaveLength(1);
       expect(fixture.events[2]).toContain("AS candidates");
-      const transaction: string[] | undefined = fixture.transactions[0];
+      expect(fixture.transactions[0]).toHaveLength(2);
+      const transaction: string[] | undefined = fixture.transactions[1];
       if (transaction === undefined) throw new Error("Missing inbox transaction");
       expect(transaction[0]).toContain("set_config");
-      expect(transaction[1]).toContain("AS candidates");
-      expect(transaction[2]).toContain("session.live_session_count");
-      expect(transaction.length).toBe(operation === "empty mark" ? 3 : 4);
+      expect(transaction[1]).toContain("session.live_session_count");
+      expect(transaction.length).toBe(operation === "empty mark" ? 2 : 3);
       expect(transaction.filter((sql: string): boolean => sql.includes("set_config"))).toHaveLength(
         1,
       );

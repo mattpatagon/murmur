@@ -27,8 +27,10 @@ export class InboxReadFixture {
   public clockCalls: number = 0;
   public completedTransactions: number = 0;
   public version: number = 17;
-  public versionAction: (() => Promise<void>) | null = null;
+  public completionAction: (() => Promise<void>) | null = null;
+  public pageAction: (() => Promise<void>) | null = null;
   public pageOverride: unknown[] | null = null;
+  public snapshotOverride: unknown[] | null = null;
   public agent: AgentRow | null = {
     agent_id: READ_AGENT.value,
     authority: "peer",
@@ -88,17 +90,33 @@ export class InboxReadFixture {
           if (text.includes("session.live_session_count"))
             return this.agent === null ? [] : [this.agent];
           if (text.includes("WITH candidates AS MATERIALIZED")) {
-            return this.pageOverride === null
-              ? [{ ...this.row, estimated_page_bytes: READ_BYTES }]
-              : this.pageOverride;
+            if (this.pageAction !== null) await this.pageAction();
+            const rows: unknown[] =
+              this.pageOverride === null
+                ? [{ ...this.row, estimated_page_bytes: READ_BYTES }]
+                : this.pageOverride;
+            if (!text.includes("AS inbox_version")) return rows;
+            if (this.snapshotOverride !== null) return this.snapshotOverride;
+            if (rows.length === 0) return [this.emptySnapshot()];
+            return rows.map((row: unknown): unknown =>
+              typeof row === "object" && row !== null
+                ? { ...row, inbox_version: this.version }
+                : row,
+            );
           }
           if (text.includes("AS version")) {
-            if (this.versionAction !== null) await this.versionAction();
             return [{ version: this.version }];
           }
           throw new Error("Unexpected inbox-read fixture query");
         };
         const result: unknown = await run(query);
+        if (
+          this.completionAction !== null &&
+          statements.some((statement: ReadStatement): boolean =>
+            statement.text.includes("WITH candidates AS MATERIALIZED"),
+          )
+        )
+          await this.completionAction();
         this.completedTransactions += 1;
         return result;
       },
@@ -143,5 +161,12 @@ export class InboxReadFixture {
 
   public statements(): ReadStatement[] {
     return this.transactions.flat();
+  }
+
+  public emptySnapshot(): Record<string, unknown> {
+    const payload: Record<string, null> = Object.fromEntries(
+      Object.keys(this.row).map((key: string): [string, null] => [key, null]),
+    );
+    return { ...payload, estimated_page_bytes: 0, inbox_version: this.version };
   }
 }

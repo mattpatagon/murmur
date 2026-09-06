@@ -196,8 +196,13 @@ Automatic preservation accepts only declared images from the configured artifact
 repository whose source commits descend from v0.13.0.0 (`d89d405`) and are ancestors
 of the deployment commit. It uses full local Git history and rejects unknown
 provenance, unrelated images, and oversized revision inventories before migrations.
-This checks declared source compatibility, not a cryptographic image attestation;
-the build identity and artifact registry remain trusted deployment boundaries.
+Digest-only images require one unambiguous full source-SHA tag from a bounded tag lookup
+filtered to that exact registry version. A separate source-tag lookup must resolve to the
+deployed digest. Every returned tag must belong to that version and package; 1,001 returned
+tags exceed the bound. Missing, ambiguous, truncated, or mismatched metadata stops deployment.
+Both registry lookups use Artifact Registry tag metadata; Container Analysis access is not required.
+This verifies source compatibility through the trusted build identity and artifact registry;
+it is not an independent cryptographic image attestation.
 Older upgrades require a separately verified writer-drain procedure. The workflow
 does not delete retained revisions or bypass contraction safety to accommodate them.
 When contraction is required, an unfiltered, two-name revision lookup must return
@@ -390,6 +395,32 @@ real SDK transport compatibility with an injected short lifetime. After rollout,
 real-window observation for at least 55 minutes: confirm `stream_rotated: true` completion events on
 the new revision, successful reconnect traffic for the same hashed session correlation, continued
 health/version success, and no new 3,600-second platform truncations or frontend HTML 500s.
+
+Run that real-window verification separately after the ordinary isolation canary succeeds:
+
+```bash
+gh workflow run production-smoke.yml --ref main -f real_window=true
+```
+
+The opt-in mode shares the deployment concurrency group, checks the exact deployed source revision
+and existing Cloud Logging read access before provisioning, and observes one disposable tenant's
+SDK session. For digest-only images, the expected source tag in the configured artifact repository
+must resolve to the deployed digest before and after observation. The bounded lookup reads only
+Artifact Registry tag metadata, without requiring Container Analysis permissions. It requires successful
+same-session stream reconnection, a new notification and durable
+inbox delivery, then checks the corresponding server completion events and platform failures. The
+55-minute window cannot be shortened through environment configuration. The job is bounded to 70
+minutes, including setup, targeted credential revocation, tenant suspension and log-ingestion waits.
+Cloud authentication is refreshed after observation, before reading final logs. Missing log-read
+permission or required registry metadata access fails closed; it never grants IAM automatically.
+The preflight and
+log verifier require explicit `PROJECT_ID`, `REGION`, `SERVICE`, `ARTIFACT_REPOSITORY`,
+`PRODUCTION_URL`, `EXPECTED_GITHUB_SHA`, `MURMUR_LIVE_EXPECTED_VERSION` and `RUNNER_TEMP`.
+The observer uses `MURMUR_LIVE_URL`, `MURMUR_LIVE_OPERATOR_TOKEN`, `MURMUR_LIVE_EXPECTED_SHA`
+and `MURMUR_LIVE_EXPECTED_VERSION`, with explicit `MURMUR_VERIFY_PRODUCTION_STREAM=1` opt-in.
+The workflow supplies them; credentials must not be passed
+as command-line arguments. JSON evidence contains only allowlisted verification metadata and a
+hashed session correlation. No other tenant's inbox is used by this opt-in observer.
 
 The canary obtains and masks the operator credential through the deploy
 identity. It creates a short-lived tenant credential, verifies operator/admin/

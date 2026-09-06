@@ -86,16 +86,18 @@ for (const method of ["get_messages", "get_message_history", "resources/read"]) 
         expect(output.inbox_version).toBe(17);
         expect(output.messages).toHaveLength(1);
       }
-      expect(fixture.transactions).toHaveLength(1);
-      expect(fixture.completedTransactions).toBe(1);
+      expect(fixture.transactions).toHaveLength(2);
+      expect(fixture.completedTransactions).toBe(2);
       expect(fixture.clockCalls).toBe(1);
-      const paired: ReadStatement[] | undefined = fixture.transactions[0];
+      const paired: ReadStatement[] | undefined = fixture.transactions[1];
       if (paired === undefined) throw new Error("Missing paired read transaction");
-      expect(paired).toHaveLength(5);
+      expect(paired).toHaveLength(3);
       const first: ReadStatement | undefined = paired[0];
       if (first === undefined) throw new Error("Missing tenant context query");
       expect(first.text).toContain("set_config");
-      const preflight: ReadStatement | undefined = paired[1];
+      const pruning: ReadStatement[] | undefined = fixture.transactions[0];
+      if (pruning === undefined) throw new Error("Missing expiry preflight transaction");
+      const preflight: ReadStatement | undefined = pruning[1];
       if (preflight === undefined) throw new Error("Missing fresh expiry preflight");
       expect(preflight.text).toContain("AS candidates");
       expect(preflight.values).toContain(READ_NOW.toISOString());
@@ -105,23 +107,29 @@ for (const method of ["get_messages", "get_message_history", "resources/read"]) 
       const page: ReadStatement | undefined = paired.find((statement: ReadStatement): boolean =>
         statement.text.includes("WITH candidates AS MATERIALIZED"),
       );
-      const version: ReadStatement | undefined = paired.find((statement: ReadStatement): boolean =>
-        statement.text.includes("AS version"),
-      );
-      if (page === undefined || version === undefined)
-        throw new Error("Missing page or independent version query");
+      if (page === undefined) throw new Error("Missing page and independent version query");
+      expect(page.text).toContain("AS inbox_version");
       expect(page.values).toContain(method === "get_message_history" ? 7 : 1);
-      expect(version.values.filter((value: unknown): boolean => typeof value === "number")).toEqual(
-        method === "get_message_history" ? [7, 7] : [1, 1],
+      const fragments: string[] = page.text.split("?");
+      const generations: unknown[] = page.values.filter(
+        (_value: unknown, index: number): boolean => {
+          const fragment: string | undefined = fragments[index];
+          return fragment !== undefined && fragment.endsWith("recipient_generation = ");
+        },
       );
-      expect(version.text).toContain("murmur.messages");
-      expect(version.text).toContain("murmur.e2ee_messages");
-      expect(version.text).toContain("MAX(active.tenant_sequence)");
-      expect(version.text).not.toContain("thread_id");
-      expect(version.text).not.toContain("read_at");
-      expect(version.text).not.toContain("LIMIT");
-      expect(version.values).not.toContain("selected-thread");
-      expect(version.values).toContain(READ_NOW.toISOString());
+      expect(generations).toEqual(method === "get_message_history" ? [7, 7, 7] : [1, 1, 1]);
+      const versionStart: number = page.text.indexOf("high_water AS MATERIALIZED");
+      const versionEnd: number = page.text.indexOf("SELECT budget.estimated_page_bytes");
+      expect(versionStart).toBeGreaterThan(0);
+      expect(versionEnd).toBeGreaterThan(versionStart);
+      const versionText: string = page.text.slice(versionStart, versionEnd);
+      expect(versionText).toContain("murmur.messages");
+      expect(versionText).toContain("murmur.e2ee_messages");
+      expect(versionText).toContain("MAX(active.tenant_sequence)");
+      expect(versionText).not.toContain("thread_id");
+      expect(versionText).not.toContain("read_at");
+      expect(versionText).not.toContain("LIMIT");
+      expect(page.values).toContain(READ_NOW.toISOString());
       if (method !== "resources/read") {
         expect(page.values).toContain("selected-thread");
         expect(page.values).toContain(true);
@@ -137,7 +145,7 @@ for (const method of ["get_messages", "get_message_history", "resources/read"]) 
   });
 }
 
-test("unknown agents and over-budget pages fail before any paired version query", async (): Promise<void> => {
+test("unknown agents fail before payload reads and oversized pages need no separate version query", async (): Promise<void> => {
   const fixture: InboxReadFixture = new InboxReadFixture();
   const budget: MaterializationByteBudget = new MaterializationByteBudget(MAX_INBOX_PAGE_BYTES);
   const scope: MaterializationScope = new MaterializationScope(budget);
@@ -148,6 +156,13 @@ test("unknown agents and over-budget pages fail before any paired version query"
       callDataTool("get_messages", { agent_id: READ_AGENT.value }, fixture.context()),
     ).rejects.toBeInstanceOf(UnknownAgentError);
     expect(budget.reservedBytes).toBe(0);
+    expect(
+      fixture
+        .statements()
+        .some((statement: ReadStatement): boolean =>
+          statement.text.includes("WITH candidates AS MATERIALIZED"),
+        ),
+    ).toBe(false);
     fixture.agent = {
       agent_id: READ_AGENT.value,
       authority: "peer",
@@ -174,7 +189,9 @@ test("unknown agents and over-budget pages fail before any paired version query"
     expect(
       fixture
         .statements()
-        .some((statement: ReadStatement): boolean => statement.text.includes("AS version")),
+        .some((statement: ReadStatement): boolean =>
+          statement.text.trimStart().startsWith("SELECT COALESCE(MAX(active.tenant_sequence)"),
+        ),
     ).toBe(false);
   } finally {
     complete();
@@ -183,11 +200,11 @@ test("unknown agents and over-budget pages fail before any paired version query"
   }
 });
 
-test("a returned page remains charged during a blocked version read after its response is canceled", async (): Promise<void> => {
+test("a returned page remains charged during blocked transaction completion after its response is canceled", async (): Promise<void> => {
   const fixture: InboxReadFixture = new InboxReadFixture();
   const entered: DeferredRead = deferred();
   const release: DeferredRead = deferred();
-  fixture.versionAction = async (): Promise<void> => {
+  fixture.completionAction = async (): Promise<void> => {
     entered.resolve();
     await release.promise;
   };
@@ -204,7 +221,7 @@ test("a returned page remains charged during a blocked version read after its re
     expect(budget.reservedBytes).toBe(READ_BYTES);
     scope.finishResponse();
     expect(budget.reservedBytes).toBe(READ_BYTES);
-    expect(fixture.completedTransactions).toBe(0);
+    expect(fixture.completedTransactions).toBe(1);
     release.resolve();
     await operation;
     expect(budget.reservedBytes).toBe(READ_BYTES);
@@ -233,18 +250,18 @@ test("a populated wait_for_messages read does not fetch an unused inbox version"
         .statements()
         .some((statement: ReadStatement): boolean => statement.text.includes("AS version")),
     ).toBe(false);
-    expect(fixture.transactions).toHaveLength(1);
+    expect(fixture.transactions).toHaveLength(2);
   } finally {
     await fixture.store.close();
   }
 });
 
-test("empty pages reserve no bytes while a version failure cannot prematurely release a materialized page", async (): Promise<void> => {
+test("empty pages reserve no bytes while completion failure cannot prematurely release a materialized page", async (): Promise<void> => {
   for (const empty of [false, true]) {
     const fixture: InboxReadFixture = new InboxReadFixture();
     if (empty) fixture.pageOverride = [];
-    fixture.versionAction = async (): Promise<void> => {
-      throw new Error("Version query fixture failed");
+    fixture.completionAction = async (): Promise<void> => {
+      throw new Error("Read transaction fixture failed");
     };
     const budget: MaterializationByteBudget = new MaterializationByteBudget(MAX_INBOX_PAGE_BYTES);
     const scope: MaterializationScope = new MaterializationScope(budget);
@@ -256,7 +273,7 @@ test("empty pages reserve no bytes while a version failure cannot prematurely re
           async (): Promise<CallToolResult | null> =>
             await callDataTool("get_messages", { agent_id: READ_AGENT.value }, fixture.context()),
         ),
-      ).rejects.toThrow("Version query fixture failed");
+      ).rejects.toThrow("Read transaction fixture failed");
       expect(budget.reservedBytes).toBe(empty ? 0 : READ_BYTES);
       complete();
       expect(budget.reservedBytes).toBe(empty ? 0 : READ_BYTES);

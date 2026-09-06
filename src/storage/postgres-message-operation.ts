@@ -1,7 +1,7 @@
 import type { Sql, TransactionSql } from "postgres";
 
 import type { Instant, TenantId } from "../domain/value-objects.js";
-import { queryPostgresPruneCandidates } from "./postgres-expiry-preflight.js";
+import { postgresHasPruneCandidates } from "./postgres-expiry-preflight.js";
 import { setPostgresTenantContext } from "./postgres-message-transactions.js";
 import { normalizePostgresStorageError } from "./postgres-storage-errors.js";
 
@@ -10,10 +10,6 @@ type PostgresTenantOperation<Result> = (transaction: TransactionSql) => Promise<
 export type PostgresTenantTransactionRunner = <Result>(
   operation: PostgresTenantOperation<Result>,
 ) => Promise<Result>;
-
-type OperationAttempt<Result> =
-  | { readonly kind: "needs-prune" }
-  | { readonly kind: "completed"; readonly value: Result };
 
 export function createPostgresTenantTransactionRunner(
   database: Sql,
@@ -38,27 +34,15 @@ export function createPruneAwarePostgresTransactionRunner(
   pruneCandidates: () => Promise<number>,
 ): PostgresTenantTransactionRunner {
   return async <Result>(operation: PostgresTenantOperation<Result>): Promise<Result> => {
-    let operationStarted: boolean = false;
-    let attempt: OperationAttempt<Result>;
+    let hasCandidates: boolean;
     try {
-      attempt = await database.begin(
-        async (transaction: TransactionSql): Promise<OperationAttempt<Result>> => {
-          await setPostgresTenantContext(transaction, tenantId);
-          if (await queryPostgresPruneCandidates(transaction, tenantId, now)) {
-            return { kind: "needs-prune" };
-          }
-          operationStarted = true;
-          return { kind: "completed", value: await operation(transaction) };
-        },
-      );
+      hasCandidates = await postgresHasPruneCandidates(database, tenantId, now);
     } catch (error: unknown) {
-      // The old prune preflight normalized failures; operation and operation-commit errors did not.
-      throw operationStarted ? error : normalizePostgresStorageError(error);
+      throw normalizePostgresStorageError(error);
     }
-    if (attempt.kind === "completed") return attempt.value;
-    // Release the preflight transaction before the independently committed, bounded pruning phases.
-    // Candidates may remain after pruning; execute once instead of retrying until they disappear.
-    await pruneCandidates();
+    // Release even an empty preflight's pool lease before joining the operation queue again.
+    // Candidates may remain after bounded pruning; execute once instead of retrying them.
+    if (hasCandidates) await pruneCandidates();
     return await createPostgresTenantTransactionRunner(database, tenantId)(operation);
   };
 }

@@ -4,8 +4,8 @@ import postgres, { type Sql, type TransactionSql } from "postgres";
 
 import { UnknownAgentError } from "../src/domain/errors.js";
 import { AgentGeneration } from "../src/domain/lifecycle-values.js";
-import type { Message } from "../src/domain/models.js";
-import { AgentId, DisplayName, Instant, Sequence } from "../src/domain/value-objects.js";
+import type { GetMessagesQuery, Message } from "../src/domain/models.js";
+import { AgentId, DisplayName, Instant, Sequence, ThreadId } from "../src/domain/value-objects.js";
 import {
   MaterializationByteBudget,
   MaterializationScope,
@@ -15,9 +15,12 @@ import { POSTGRES_RUNTIME_CONNECTION } from "../src/postgres-runtime.js";
 import { postgresSslOptions } from "../src/postgres-tls.js";
 import type { E2eeMessageStore } from "../src/storage/e2ee-message-store.js";
 import { MAX_INBOX_PAGE_BYTES } from "../src/storage/inbox-page-budget.js";
-import type { MessageStore } from "../src/storage/message-store.js";
+import type { InboxReadResult, MessageStore } from "../src/storage/message-store.js";
 import { getPostgresEncryptedMessages } from "../src/storage/postgres-e2ee-inbox.js";
-import { getPostgresMessages } from "../src/storage/postgres-inbox-store.js";
+import {
+  getPostgresMessages,
+  getPostgresMessagesWithVersion,
+} from "../src/storage/postgres-inbox-store.js";
 import { PostgresMessageStore } from "../src/storage/postgres-message-store.js";
 import {
   createPostgresE2eeTestTenant,
@@ -86,8 +89,13 @@ test.skipIf(applicationDatabaseUrl === undefined || adminDatabaseUrl === undefin
     });
     let transferredPlaintextBytes: number = 0;
     let transferredEnvelopeBytes: number = 0;
+    const readStatements: string[] = [];
+    const snapshotCommandCounts: number[] = [];
     const observed: Sql = postgres(applicationDatabaseUrl, {
       connection: POSTGRES_RUNTIME_CONNECTION,
+      debug: (_connection: number, query: string): void => {
+        readStatements.push(query);
+      },
       max: 1,
       ssl: postgresSslOptions(applicationDatabaseUrl, testTlsConfiguration),
       transform: {
@@ -134,14 +142,45 @@ test.skipIf(applicationDatabaseUrl === undefined || adminDatabaseUrl === undefin
         Array.from({ length: 7 }, (): string => "\u0001".repeat(100_000)),
       );
       const queryTime: Instant = Instant.parse(now.toISOString());
+      const snapshot: (query: GetMessagesQuery, instant?: Instant) => Promise<InboxReadResult> =
+        async (query: GetMessagesQuery, instant: Instant = queryTime): Promise<InboxReadResult> => {
+          readStatements.length = 0;
+          const result: InboxReadResult = await getPostgresMessagesWithVersion(
+            observed,
+            tenant.tenantId,
+            query,
+            instant,
+          );
+          snapshotCommandCounts.push(readStatements.length);
+          return result;
+        };
       await expect(
         getPostgresMessages(observed, tenant.tenantId, pageQuery(500), queryTime),
       ).rejects.toThrow(PAGE_ERROR);
+      expect(transferredPlaintextBytes).toBe(0);
+      await expect(snapshot(pageQuery(500))).rejects.toThrow(PAGE_ERROR);
       expect(transferredPlaintextBytes).toBe(0);
       expect(
         await getPostgresMessages(observed, tenant.tenantId, pageQuery(1), queryTime),
       ).toHaveLength(1);
       expect(transferredPlaintextBytes).toBe(100_000);
+      const singleSnapshot: InboxReadResult = await snapshot(pageQuery(1));
+      expect(singleSnapshot.messages).toHaveLength(1);
+      const firstSnapshotMessage: Message | undefined = singleSnapshot.messages[0];
+      if (firstSnapshotMessage === undefined) throw new Error("Missing snapshot fixture message");
+      expect(singleSnapshot.inboxVersion.value).toBeGreaterThan(
+        firstSnapshotMessage.sequence.value,
+      );
+      expect(transferredPlaintextBytes).toBe(200_000);
+      for (const filtered of [
+        { ...pageQuery(1), threadId: ThreadId.parse("missing-snapshot-thread") },
+        { ...pageQuery(1), afterSequence: Sequence.parse(singleSnapshot.inboxVersion.value + 1) },
+      ]) {
+        const empty: InboxReadResult = await snapshot(filtered);
+        expect(empty.messages).toEqual([]);
+        expect(empty.inboxVersion.value).toBe(singleSnapshot.inboxVersion.value);
+        expect(transferredPlaintextBytes).toBe(200_000);
+      }
       const budget: MaterializationByteBudget = new MaterializationByteBudget(MAX_INBOX_PAGE_BYTES);
       const scope: MaterializationScope = new MaterializationScope(budget);
       const finishHandler: () => void = scope.startHandler();
@@ -149,7 +188,12 @@ test.skipIf(applicationDatabaseUrl === undefined || adminDatabaseUrl === undefin
         await withMaterializationScope(scope, async (): Promise<void> => {
           await expect(store.getMessages(pageQuery(500))).rejects.toThrow(PAGE_ERROR);
           expect(budget.reservedBytes).toBe(0);
+          await expect(store.getMessagesWithVersion(pageQuery(500))).rejects.toThrow(PAGE_ERROR);
+          expect(budget.reservedBytes).toBe(0);
           await expect(otherStore.getMessages(pageQuery(500))).rejects.toBeInstanceOf(
+            UnknownAgentError,
+          );
+          await expect(otherStore.getMessagesWithVersion(pageQuery(500))).rejects.toBeInstanceOf(
             UnknownAgentError,
           );
           expect(budget.reservedBytes).toBe(0);
@@ -239,6 +283,34 @@ test.skipIf(applicationDatabaseUrl === undefined || adminDatabaseUrl === undefin
       expect(paired.messages).toHaveLength(1);
       expect(paired.inboxVersion.value).toBe(inbox.inbox_version);
       expect(paired.inboxVersion.value).toBeGreaterThan(first.sequence.value);
+      const beforeEmptyBytes: number = transferredPlaintextBytes;
+      const beforeSnapshotEnvelopeBytes: number = transferredEnvelopeBytes;
+      const unreadSnapshot: InboxReadResult = await snapshot({
+        ...pageQuery(500),
+        unreadOnly: true,
+      });
+      expect(unreadSnapshot.messages).toEqual([]);
+      expect(unreadSnapshot.inboxVersion.value).toBe(inbox.inbox_version);
+      expect(transferredPlaintextBytes).toBe(beforeEmptyBytes);
+      const historicalSnapshot: InboxReadResult = await snapshot({
+        ...pageQuery(1),
+        generation: AgentGeneration.parse(1),
+        threadId: first.threadId,
+      });
+      expect(
+        historicalSnapshot.messages.map((message: Message): string => message.messageId.value),
+      ).toEqual([first.messageId.value]);
+      expect(historicalSnapshot.inboxVersion.value).toBe(inbox.inbox_version);
+      const otherGeneration: InboxReadResult = await snapshot({
+        ...pageQuery(1),
+        generation: AgentGeneration.parse(2),
+      });
+      expect(otherGeneration.messages).toEqual([]);
+      expect(otherGeneration.inboxVersion.value).toBe(0);
+      const expiredSnapshot: InboxReadResult = await snapshot(pageQuery(1), queryTime.addDays(31));
+      expect(expiredSnapshot.messages).toEqual([]);
+      expect(expiredSnapshot.inboxVersion.value).toBe(0);
+      expect(transferredEnvelopeBytes).toBe(beforeSnapshotEnvelopeBytes);
       const encryptedFirst: (typeof inbox.messages)[number] | undefined = inbox.messages[0];
       if (encryptedFirst === undefined) throw new Error("Encrypted first page is missing");
       expect(encryptedFirst.envelope.ciphertext.length).toBe(699_072);
@@ -261,6 +333,16 @@ test.skipIf(applicationDatabaseUrl === undefined || adminDatabaseUrl === undefin
           afterSequence: Sequence.zero(),
         }),
       ).toEqual([]);
+      const otherSnapshot: InboxReadResult = await otherStore.getMessagesWithVersion({
+        ...pageQuery(500),
+        agentId: otherReader,
+      });
+      expect(otherSnapshot.messages).toEqual([]);
+      expect(otherSnapshot.inboxVersion.value).toBe(0);
+      // This direct adapter includes BEGIN/context/full Agent validation/page/COMMIT.
+      // The public store's separate expiry preflight remains covered by the deterministic fixture.
+      expect(snapshotCommandCounts).toHaveLength(7);
+      expect(snapshotCommandCounts).toEqual(Array.from({ length: 7 }, (): number => 5));
     } finally {
       try {
         if (rootStore !== null) await rootStore.close();

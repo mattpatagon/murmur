@@ -2,6 +2,7 @@ FROM oven/bun:1.3.14 AS dependencies
 
 WORKDIR /app
 COPY package.json bun.lock bunfig.toml ./
+COPY patches ./patches
 RUN bun install --frozen-lockfile --production
 COPY src ./src
 COPY scripts/build-distribution.ts ./scripts/build-distribution.ts

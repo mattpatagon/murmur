@@ -6,15 +6,15 @@ The operation reads the clock once and checks expiration before reading agent or
 Standalone inbox version lookups and subscription validation are unchanged.
 
 With no expiration candidates and no named session renewal, an inbox read or nonempty
-acknowledgement uses one transaction and six PostgreSQL protocol statements. An empty
-acknowledgement uses five, including the current reader lookup. The fresh payload-free expiry
-check shares the operation's tenant context; this removes a separate BEGIN, context assignment
-and COMMIT. It does not cache expiration or agent existence, or remove validation.
+acknowledgement uses two transactions and nine PostgreSQL protocol statements. An empty
+acknowledgement uses eight, including the current reader lookup. The fresh payload-free expiry
+check releases its pool lease before the operation acquires a new tenant-scoped transaction.
+It does not cache expiration or agent existence, or remove validation.
 
 MCP page-and-version reads use the [paired inbox transaction](inbox-read-transactions.md), which
-adds the independent version query to the existing inbox transaction. With the same preconditions,
-the pair uses seven protocol statements. Direct sends share the same fresh expiry check with
-their transaction. When candidates exist, the read-only preflight commits before the original
+computes the gated page and independent version in one statement snapshot. With the same preconditions,
+the pair uses nine protocol statements. Direct sends also release their fresh expiry preflight's
+pool lease before the operation transaction. When candidates exist, the preflight commits before the original
 bounded message and lifecycle cleanup transactions run. The operation then runs exactly once in
 a new tenant transaction. Cleanup remains committed if the operation later fails, and retained
 candidates do not cause a retry loop. See [expiry preflights](postgres-expiry-preflight.md).
@@ -36,7 +36,12 @@ generation rollover/history, inbox version, acknowledgements and session renewal
 actor identities also work before tenant-contract finalization; cleanup targets only its two
 fixture tenants. `test/postgres-prune-operation-transactions.test.ts` checks candidate transitions,
 commit and failure ordering, safe preflight errors, no operation replay, and ordinary standalone
-adapter transactions. The unchanged full hosted load remains the performance acceptance gate.
+adapter transactions. A no-candidate preflight commit failure prevents operation entry as well.
+The unchanged full hosted load remains the performance acceptance gate.
+`test/postgres-inbox-snapshot.test.ts` rejects malformed combined metadata and empty sentinels,
+and checks reservation ownership during cancellation. The real PostgreSQL snapshot concurrency
+test commits another message after the page statement and verifies that the returned version stays
+with that page, while cursor continuation and subscription initialization recover the later message.
 `test/postgres-send-transactions.test.ts` records real runtime-role protocol statements for a
 named-session send and duplicate retry, preserving the original message and lease on duplicates.
 It also verifies that expired rows and their charged bytes stay reclaimed after idempotency,

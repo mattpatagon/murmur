@@ -26,8 +26,14 @@ All notable changes to Murmur are documented in this file.
   reject excess work; they do not promise unlimited traffic or a fixed cloud bill.
 - Verify hosted workloads with a disposable 25,000-account scenario covering tenant isolation,
   forged credentials, admission saturation, recovery and explicit latency and memory thresholds.
+- Add an opt-in real-window production stream check with exact-revision and log-access preflight,
+  same-session reconnect evidence and targeted disposable-tenant cleanup.
+- Correct the pinned MCP SDK's optional session-ID declarations without changing its runtime or
+  disabling strict library checks.
 - Preserve compatible Cloud Run revisions and retained database rows during deployment, with
   source-provenance checks before migrations and no bypass of writer-drain safety for contraction.
+- Verify digest-only deployed images against bounded registry metadata and their exact source tags
+  before preserving revisions or observing production streams, without requiring Container Analysis.
 - Avoid redundant fresh-agent session-history checks while retaining tenant locks, quotas,
   validated database-returned generation and final agent state, and existing-agent lifecycle behavior.
 
@@ -40,10 +46,10 @@ All notable changes to Murmur are documented in this file.
 - Let the native HTTP transport finish early-response delivery before closing incomplete inputs.
 - Derive registration activation inside its transaction, avoiding a redundant lookup and duplicate
   PostgreSQL activity accounting while preserving resource-list notifications.
-- Read inbox pages and their independent versions in one transaction, preserving tenant checks,
+- Read inbox pages and their independent versions in one PostgreSQL statement snapshot, preserving tenant checks,
   generation filters, and payload-byte reservations through failure or cancellation.
-- Share fresh no-expiry checks with plaintext send, read and acknowledgement transactions;
-  preserve separately committed cleanup when candidates exist and a later operation fails.
+- Release plaintext expiry-preflight pool leases before send, read and acknowledgement
+  transactions; preserve separately committed cleanup and prevent replay after operation failures.
 - Require an observed successful load-worker shutdown; premature exits and forced termination fail
   verification instead of reporting successful cleanup, and failed cleanup retains the hard deadline.
 - Skip redundant storage-size calculations for fixed-size usage-counter updates, with a catalog

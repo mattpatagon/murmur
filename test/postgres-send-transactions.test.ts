@@ -23,18 +23,22 @@ function countStatement(statements: readonly string[], command: string): number 
 }
 
 function expectSendTransaction(statements: readonly string[], expectedCount: number): void {
-  expect(countStatement(statements, "begin")).toBe(1);
-  expect(countStatement(statements, "commit")).toBe(1);
+  expect(countStatement(statements, "begin")).toBe(2);
+  expect(countStatement(statements, "commit")).toBe(2);
   expect(countStatement(statements, "rollback")).toBe(0);
   expect(statements).toHaveLength(expectedCount);
   expect(
     statements.filter((statement: string): boolean => statement.includes("set_config")),
-  ).toHaveLength(1);
+  ).toHaveLength(2);
   expect(
     statements.filter((statement: string): boolean => statement.includes("AS candidates")),
   ).toHaveLength(1);
   expect(statements[1]).toContain("set_config");
   expect(statements[2]).toContain("AS candidates");
+  expect(statements.slice(3, 5).map((statement: string): string => statement.trim())).toEqual([
+    "commit",
+    "begin",
+  ]);
 }
 
 function sessionRow(
@@ -49,14 +53,14 @@ function sessionRow(
 }
 
 test.skipIf(!sendPostgresConfigured)(
-  "PostgreSQL named-session send and duplicate each share one preflight transaction without duplicate renewal",
+  "PostgreSQL named-session send and duplicate release their preflight lease without duplicate renewal",
   async (): Promise<void> => {
     await withSendTransactionFixture(async (fixture: SendTransactionFixture): Promise<void> => {
       fixture.clock.set(fixture.now.addMinutes(5));
       const command: SendMessageCommand = sendCommand(fixture);
       fixture.statements.length = 0;
       const sent: SendMessageResult = await fixture.store.sendMessage(command);
-      expectSendTransaction(fixture.statements, 16);
+      expectSendTransaction(fixture.statements, 19);
       expect(sent.duplicate).toBe(false);
       expect(sent.message.senderId.value).toBe(fixture.sender.value);
       expect(sent.message.recipientId.value).toBe(fixture.recipient.value);
@@ -84,7 +88,7 @@ test.skipIf(!sendPostgresConfigured)(
       fixture.clock.set(fixture.now.addMinutes(10));
       fixture.statements.length = 0;
       const duplicate: SendMessageResult = await fixture.store.sendMessage(command);
-      expectSendTransaction(fixture.statements, 8);
+      expectSendTransaction(fixture.statements, 11);
       expect(duplicate.duplicate).toBe(true);
       expect(duplicate.message.messageId.value).toBe(sent.message.messageId.value);
       expect(duplicate.message.sequence.value).toBe(sent.message.sequence.value);

@@ -148,19 +148,23 @@ function query(agentId: AgentId): GetMessagesQuery {
 function expectInboxTransactions(statements: readonly string[], expectedStatements: number): void {
   expect(
     statements.filter((statement: string): boolean => statement.trim() === "begin"),
-  ).toHaveLength(1);
+  ).toHaveLength(2);
   expect(
     statements.filter((statement: string): boolean => statement.trim() === "commit"),
-  ).toHaveLength(1);
+  ).toHaveLength(2);
   expect(statements).toHaveLength(expectedStatements);
   expect(
     statements.filter((statement: string): boolean => statement.includes("set_config")),
-  ).toHaveLength(1);
+  ).toHaveLength(2);
   expect(
     statements.filter((statement: string): boolean => statement.includes("AS candidates")),
   ).toHaveLength(1);
   expect(statements[1]).toContain("set_config");
   expect(statements[2]).toContain("AS candidates");
+  expect(statements.slice(3, 5).map((statement: string): string => statement.trim())).toEqual([
+    "commit",
+    "begin",
+  ]);
   expect(
     statements.filter((statement: string): boolean =>
       statement.includes("session.live_session_count"),
@@ -194,7 +198,7 @@ test.skipIf(!postgresConfigured)(
         limit: 1,
         threadId: first.message.threadId,
       });
-      expectInboxTransactions(fixture.statements, 7);
+      expectInboxTransactions(fixture.statements, 9);
       expect(page.messages.map((message: Message): string => message.messageId.value)).toEqual([
         first.message.messageId.value,
       ]);
@@ -320,12 +324,12 @@ test.skipIf(!postgresConfigured)(
           (message: Message): string => message.messageId.value,
         ),
       ).toEqual([first.message.messageId.value]);
-      expectInboxTransactions(fixture.statements, 6);
+      expectInboxTransactions(fixture.statements, 9);
       fixture.statements.length = 0;
       expect(
         await fixture.store.markMessagesRead({ agentId: fixture.reader, messageIds: [] }),
       ).toEqual({ readAt: fixture.now, updated: 0 });
-      expectInboxTransactions(fixture.statements, 5);
+      expectInboxTransactions(fixture.statements, 8);
       await verifySessionsAndIsolation(fixture);
       await fixture.store.closeAgent({
         agentId: fixture.reader,
@@ -397,7 +401,7 @@ test.skipIf(!postgresConfigured)(
           })
         ).updated,
       ).toBe(1);
-      expectInboxTransactions(fixture.statements, 6);
+      expectInboxTransactions(fixture.statements, 9);
       expect(
         await fixture.store.getMessages({ ...query(fixture.reader), unreadOnly: true }),
       ).toEqual([]);

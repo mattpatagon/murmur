@@ -5,6 +5,24 @@ database. Its default population is 25,000 tenants, each with a synthetic agent 
 measures a bounded concurrent workload across those accounts; it does not claim 25,000 simultaneous
 connections or reproduce Cloud Run, Supabase network latency, or their billing behavior.
 
+## Recorded 25,000-account result
+
+The [2026-09-06 aggregate report](evidence/hosted-load-2026-09-06.json) passed the default
+25,000-account workload in 3,086,902 ms, including final database verification and successful
+fixture/process cleanup. The application was pinned to one CPU core; disposable PostgreSQL 17.10
+had a one-CPU, 768 MiB container limit, 128 MiB shared buffers and 60 maximum connections. The
+generator ran on separate CPU cores. Another repository's validation job shared the VM during
+the latter part of this run, so these are not isolated-host benchmark numbers. No application
+limits or acceptance thresholds were raised.
+
+All 25,000 tenant journeys completed: 275,000 mixed-workload operations with 839 recorded capacity
+retries, p95 165.44 ms and p99 240.03 ms. At ramp concurrency 64, p95 was 1,363.59 ms and p99 was
+2,126.85 ms, below the 2,000/5,000 ms gates. Peak sampled application RSS was 409,456,640 bytes,
+below 512 MiB. Forged-credential attacks, foreign-session isolation, the 1,000-session/64-stream
+ceilings, and post-saturation recovery all passed. This is not a 25,000-concurrent-user, production
+latency, exhaustive penetration-test, or fixed-billing guarantee. Earlier failed runs are not
+included as passing evidence; the report records this completed run only.
+
 ## Disposable database prerequisites
 
 Reserve this host's database/load resources through Murmur before running. Use Bun 1.3.14 and an

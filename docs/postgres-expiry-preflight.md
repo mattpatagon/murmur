@@ -5,11 +5,11 @@ transaction with the runtime role and transaction-local tenant context. When no 
 exists at the supplied clock, cleanup returns zero without issuing the existing write queries.
 Encrypted pruning performs its candidate query inside its existing tenant transaction.
 
-Plaintext direct sends, inbox reads, paired page/version reads and acknowledgements share this
-fresh check with their operation transaction when no candidate exists. Tenant context is assigned
-once, before the check and all agent or payload work. A positive check commits and releases its
-connection before running the original separately committed pruning, then starts one ordinary
-tenant transaction for the operation. Pruning is never nested under the initial transaction and
+Plaintext direct sends, inbox reads, paired page/version reads and acknowledgements release this
+fresh check's transaction before the operation rejoins the connection-pool queue, even when there
+are no candidates. Tenant context is assigned independently inside each transaction. A positive
+check runs the original separately committed pruning before one ordinary tenant transaction for
+the operation. Pruning is never nested under the initial transaction and
 is not rolled back by a later operation failure. Remaining bounded or referenced candidates do
 not trigger a loop. Standalone `pruneExpired` retains its independent preflight transaction.
 
@@ -34,9 +34,9 @@ zero-delta shortcut was added.
 This reduces the common empty plaintext cleanup from two transactions and eleven SQL
 statements (including tenant context) to one transaction and two statements. Including
 BEGIN and COMMIT, that is fifteen versus four protocol query executions for standalone cleanup.
-The combined no-candidate operation saves another BEGIN, tenant assignment and COMMIT compared
-with separate preflight and operation transactions. Expired data
-adds one read-only preflight transaction to the existing cleanup cost. The encrypted
+The operation retains its separate transaction; combining the two did not provide a reliable
+improvement in the bounded load comparison and introduced a latency risk. Expired data adds one
+read-only preflight transaction to the existing cleanup cost. The encrypted
 empty path retains one transaction but avoids usage-row locks and no-op writes.
 
 This does not serialize cleanup against concurrent insertion. A row committed after the

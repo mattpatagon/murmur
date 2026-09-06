@@ -27,6 +27,9 @@ staging implementation runs on Windows, macOS, and Linux without relying on nati
 Portable PostgreSQL-driver recordings also check fresh expiry probes, transaction rollback and
 cleanup ordering without requiring a database or shell; real PostgreSQL verification remains in
 the Linux hosted gate.
+The same portability gate exercises production-stream observation, real SDK reconnect with
+in-memory SQLite, targeted cleanup, and log-verifier subprocess deadlines using injected local
+fixtures. These tests need no cloud credentials, live deployment, or installed Google Cloud CLI.
 Managed hosting relies on Cloud Run's frontend to terminate external connections; a self-hosted
 public listener needs the equivalent edge protections documented by the transport contract.
 

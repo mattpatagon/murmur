@@ -51,18 +51,23 @@ function firstTransaction(fixture: PostgresPruneFixture): PruneTransaction {
 }
 
 for (const operation of OPERATIONS) {
-  test(`${operation} shares exactly one tenant context and fresh preflight with its operation`, async (): Promise<void> => {
+  test(`${operation} releases its fresh preflight transaction before acquiring the operation lease`, async (): Promise<void> => {
     const fixture: PostgresPruneFixture = new PostgresPruneFixture();
     try {
       await invoke(fixture, operation);
-      expect(fixture.transactions).toHaveLength(1);
-      expect(firstTransaction(fixture).events.slice(0, 3)).toEqual([
+      expect(fixture.transactions).toHaveLength(2);
+      expect(firstTransaction(fixture).events).toEqual(["context", "candidate"]);
+      expect(fixture.events.slice(0, 7)).toEqual([
+        "begin",
         "context",
         "candidate",
+        "commit",
+        "begin",
+        "context",
         "agent",
       ]);
       expect(firstTransaction(fixture).status).toBe("committed");
-      expect(eventCount(fixture, "context")).toBe(1);
+      expect(eventCount(fixture, "context")).toBe(2);
       expect(eventCount(fixture, "candidate")).toBe(1);
       expect(eventCount(fixture, "agent")).toBe(1);
       expect(eventCount(fixture, "message-prune")).toBe(0);
@@ -73,16 +78,19 @@ for (const operation of OPERATIONS) {
   });
 }
 
-test("send performs a fresh preflight and authoritative agent check in one transaction", async (): Promise<void> => {
+test("send releases its preflight lease before the authoritative agent check fails", async (): Promise<void> => {
   const fixture: PostgresPruneFixture = new PostgresPruneFixture();
   fixture.agentAvailable = false;
   try {
     await expect(fixture.store.sendMessage(baseMessageCommand())).rejects.toBeInstanceOf(
       UnknownAgentError,
     );
-    expect(fixture.transactions).toHaveLength(1);
-    expect(firstTransaction(fixture).events).toEqual(["context", "candidate", "agent"]);
-    expect(firstTransaction(fixture).status).toBe("rolled-back");
+    expect(fixture.transactions).toHaveLength(2);
+    expect(firstTransaction(fixture).events).toEqual(["context", "candidate"]);
+    expect(firstTransaction(fixture).status).toBe("committed");
+    expect(
+      fixture.transactions.map((transaction: PruneTransaction): string => transaction.status),
+    ).toEqual(["committed", "rolled-back"]);
     expect(fixture.clockCalls).toBe(1);
   } finally {
     await fixture.store.close();
@@ -256,6 +264,22 @@ for (const candidates of [false, true]) {
     });
   }
 }
+
+test("a no-candidate preflight commit failure prevents acquiring an operation lease", async (): Promise<void> => {
+  const fixture: PostgresPruneFixture = new PostgresPruneFixture();
+  fixture.failAt = "preflight-commit";
+  try {
+    await expect(invoke(fixture, "mark")).rejects.toThrow(
+      "Storage operation failed. Retry the request.",
+    );
+    expect(fixture.transactions).toHaveLength(1);
+    expect(firstTransaction(fixture).status).toBe("rolled-back");
+    expect(eventCount(fixture, "agent")).toBe(0);
+    expect(fixture.acknowledged).toBe(0);
+  } finally {
+    await fixture.store.close();
+  }
+});
 
 test("the post-prune operation context failure remains an operation error", async (): Promise<void> => {
   const fixture: PostgresPruneFixture = new PostgresPruneFixture();
