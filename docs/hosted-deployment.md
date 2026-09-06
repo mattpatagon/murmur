@@ -409,9 +409,11 @@ SDK session. For a digest-only image, it resolves the expected source tag in the
 repository and requires that digest to match the deployed image before and after observation.
 The bounded lookup reads only Artifact Registry tag metadata, without requiring Container Analysis.
 It requires successful same-session stream reconnection, a new notification and durable
-inbox delivery, then checks the corresponding server completion events and platform failures. The
-55-minute window cannot be shortened through environment configuration. The job is bounded to 70
-minutes, including setup, targeted credential revocation, tenant suspension, and log-ingestion waits.
+inbox delivery, then checks the corresponding server completion events and platform failures.
+The platform-failure query stops at observation end. Later adversarial cleanup is independently
+verified and may exercise a bounded 503 retry. Application-row lookup retains narrow timestamp slack
+and bounded ingestion polling. The fixed 55-minute window and 70-minute job bound include setup,
+targeted credential revocation, tenant suspension, and log-ingestion waits.
 The observer binds its worker to its own tenant's existing personal identity, verifies revoked credentials
 return 401, and suspends only its derived tenant; retained rows are not deleted. Session DELETEs retry
 503 at most twice with one-second waits inside the 20-second deadline; only 200, 401, or 404 confirms
