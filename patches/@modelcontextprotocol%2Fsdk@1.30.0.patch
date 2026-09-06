@@ -1,0 +1,26 @@
+diff --git a/dist/cjs/shared/transport.d.ts b/dist/cjs/shared/transport.d.ts
+index 1bd95efb41fcfd1ae09712ca968c57d828e0acaf..18377bc3a2ce10eb10588fd885ecf4925ac4daa4 100644
+--- a/dist/cjs/shared/transport.d.ts
++++ b/dist/cjs/shared/transport.d.ts
+@@ -80,7 +80,7 @@ export interface Transport {
+     /**
+      * The session ID generated for this connection.
+      */
+-    sessionId?: string;
++    sessionId?: string | undefined;
+     /**
+      * Sets the protocol version used for the connection (called when the initialize response is received).
+      */
+diff --git a/dist/esm/shared/transport.d.ts b/dist/esm/shared/transport.d.ts
+index 1bd95efb41fcfd1ae09712ca968c57d828e0acaf..18377bc3a2ce10eb10588fd885ecf4925ac4daa4 100644
+--- a/dist/esm/shared/transport.d.ts
++++ b/dist/esm/shared/transport.d.ts
+@@ -80,7 +80,7 @@ export interface Transport {
+     /**
+      * The session ID generated for this connection.
+      */
+-    sessionId?: string;
++    sessionId?: string | undefined;
+     /**
+      * Sets the protocol version used for the connection (called when the initialize response is received).
+      */

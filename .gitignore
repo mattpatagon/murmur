@@ -11,3 +11,5 @@ coverage/
 .context/
 *.tgz
 gha-creds-*.json
+.astro/
+.wrangler/

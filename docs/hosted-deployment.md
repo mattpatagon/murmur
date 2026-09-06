@@ -149,8 +149,10 @@ concurrency group. It performs these phases in order:
 1. Check out the merged revision, install exact dependencies, run all local
    verification, test custom-CA TLS, and verify hosted isolation against a
    disposable PostgreSQL 17 service.
-2. Authenticate with workload identity, validate secret permissions, install
-   the CA, apply all pending migrations, and run the shared PostgreSQL suite.
+2. Authenticate with workload identity, validate secret permissions and the source
+   compatibility of retained revisions, install the CA, apply pending migrations,
+   and run the shared PostgreSQL suite. Deployment does not invoke global expiry
+   pruning; existing retained data and overfull storage ledgers are preserved.
 3. Build an image tagged with the Git commit SHA and push it to Artifact
    Registry.
 4. Inspect enabled runtime-secret versions. Reuse a valid `murmur_app`
@@ -159,8 +161,9 @@ concurrency group. It performs these phases in order:
 5. Deploy a compatibility revision when legacy adoption is still required,
    atomically bootstrap the first operator if necessary, adopt the founding
    token, and switch to strict multi-tenant authorization.
-6. Route all traffic to the healthy revision and drain superseded revisions
-   before any forward-only database contraction.
+6. Route all traffic to the healthy revision and remove direct revision tags,
+   preserving superseded revision definitions. Existing streams can finish;
+   traffic routing alone does not prove their writers have drained.
 7. Finalize and validate tenant-qualified foreign keys when the database is at
    contract version 1, restart the strict revision at contract version 2, and
    verify health again.
@@ -170,6 +173,23 @@ concurrency group. It performs these phases in order:
 Every phase fails closed. Credential and adoption state are read from the
 database and Secret Manager on each run, so an interrupted workflow resumes
 from durable state instead of assuming the previous attempt finished.
+
+Automatic preservation accepts only declared images from the configured artifact repository whose
+source commits descend from v0.13.0.0 (`d89d405`) and are ancestors of the deployment commit. It uses
+full local Git history and rejects unknown provenance, unrelated images, and oversized revision
+inventories before migrations. Digest-only images require one unambiguous full source-SHA tag from
+a bounded tag lookup filtered to that exact registry version, followed by a source-tag lookup that must
+resolve to the deployed digest. Every returned tag must belong to that version and package; 1,001 returned tags exceed the bound.
+Missing, ambiguous, truncated, or mismatched metadata stops the
+deployment. This verifies source compatibility through the trusted build identity and artifact
+registry; it is not an independent cryptographic image attestation.
+
+Older upgrades require a separately verified writer-drain procedure. The workflow does not delete
+retained revisions or bypass contraction safety to accommodate them. When contraction is required,
+an unfiltered, two-name revision lookup must return only the validated ready revision; empty,
+additional, or malformed rows stop the workflow. Normal application retention continues unchanged;
+shared database and live smoke checks can invoke that existing retention behavior, distinct from a
+deployment purge.
 
 ## Self-service tenant onboarding
 
@@ -204,9 +224,10 @@ The tenant-key upgrade is an expand-and-contract migration:
 1. The expansion migration backfills tenant-local message sequences while
    retaining old global constraints and records contract version 1.
 2. A compatible application revision is deployed and health-checked.
-3. Traffic moves entirely to that revision and older Cloud Run revisions are
-   deleted, terminating old streams and preventing an incompatible writer from
-   returning.
+3. Traffic moves entirely to that revision and direct revision tags are removed.
+   Retained revision definitions are not deleted. If any superseded revision
+   remains, automatic finalization stops: independently verify writer drainage
+   before performing the documented contraction. Routing is not drainage evidence.
 4. `murmur.finalize_tenant_contract()` installs tenant-qualified primary and
    idempotency contracts atomically and records version 2.
 5. Foreign keys are validated and the strict revision restarts with
@@ -231,8 +252,9 @@ valid production index or edit an applied migration.
 
 Do not leave a pre-lifecycle revision serving traffic after the compatibility leases can expire.
 Older writers do not renew named leases and use the former broadcast audience rule. The automated
-workflow's full traffic cutover and old-revision drain therefore form part of this migration's
-correctness contract. If rollout cannot complete inside that window, stop and deploy the current
+workflow rejects retained sources older than the supported compatibility floor before migrations;
+an earlier upgrade requires independently verified writer drainage within this migration's
+compatibility window. If rollout cannot complete inside that window, stop and deploy the current
 forward revision; do not expose lifecycle tools alongside mixed broadcast semantics. Rollback to a
 pre-lifecycle application is unsupported after any identity advances beyond generation 1.
 
@@ -352,6 +374,31 @@ real-window observation for at least 55 minutes: confirm `stream_rotated: true` 
 the new revision, successful reconnect traffic for the same hashed session correlation, continued
 health/version success, and no new 3,600-second platform truncations or frontend HTML 500s.
 
+Run that real-window verification separately after the ordinary isolation canary succeeds:
+
+```bash
+gh workflow run production-smoke.yml --ref main -f real_window=true
+```
+
+The opt-in mode shares the deployment concurrency group, checks the exact deployed source revision
+and existing Cloud Logging read access before provisioning, and observes one disposable tenant's
+SDK session. For a digest-only image, it resolves the expected source tag in the configured artifact
+repository and requires that digest to match the deployed image before and after observation. It requires successful same-session stream reconnection, a new notification and durable
+inbox delivery, then checks the corresponding server completion events and platform failures. The
+55-minute window cannot be shortened through environment configuration. The job is bounded to 70
+minutes, including setup, targeted credential revocation, tenant suspension, and log-ingestion waits.
+Cleanup verifies that the observer's revoked credentials return 401 and suspends only its derived
+tenant; retained rows are not deleted. Cloud authentication is refreshed after observation, before
+reading final logs. Missing log-read permission fails closed; it never grants IAM access automatically.
+
+The preflight and log verifier require explicit `PROJECT_ID`, `REGION`, `SERVICE`,
+`ARTIFACT_REPOSITORY`, `PRODUCTION_URL`, `EXPECTED_GITHUB_SHA`, `MURMUR_LIVE_EXPECTED_VERSION`, and
+`RUNNER_TEMP`. The observer uses `MURMUR_LIVE_URL`, `MURMUR_LIVE_OPERATOR_TOKEN`,
+`MURMUR_LIVE_EXPECTED_SHA`, and `MURMUR_LIVE_EXPECTED_VERSION`, with explicit
+`MURMUR_VERIFY_PRODUCTION_STREAM=1` opt-in. The workflow supplies them; credentials must not be
+passed as command-line arguments. JSON evidence contains only allowlisted verification metadata
+and a hashed session correlation. No other tenant's inbox is used by this opt-in observer.
+
 The canary obtains and masks the operator credential through the deploy
 identity. It creates a short-lived tenant credential, verifies operator/admin/
 agent tool separation, intra-tenant direct and broadcast delivery,
@@ -367,8 +414,8 @@ credential and leaves its uniquely named tenants suspended for inspection.
 
 Application rollback is safe only when the target revision supports the current
 `tenant_contract_version`. Contract version 2 is forward-only: do not redeploy a
-version-1 writer. Container images remain available for diagnosis after old
-Cloud Run revisions are drained.
+version-1 writer. Superseded Cloud Run revision definitions and container images
+remain available for diagnosis; direct revision tags are removed during traffic cutover.
 
 The orchestrator migrations are additive, but an older application does not understand their
 authority fields. Prefer a fixed-forward application rollout. Before any orchestrator credential or

@@ -246,20 +246,45 @@ test("workflow resumes runtime credentials through the reachable admin database"
   expect(deployPosition).toBeGreaterThan(applyPosition);
 });
 
-test("workflow always drains pre-lifecycle Cloud Run revisions", async (): Promise<void> => {
+test("workflow preserves revisions without bypassing writer drainage for contraction", async (): Promise<void> => {
   const workflow: string = await Bun.file(".github/workflows/deploy.yml").text();
-  const drainPosition: number = workflow.indexOf("Drain superseded Cloud Run revisions");
+  const preflightPosition: number = workflow.indexOf("Verify preserved revision compatibility");
+  const migrationPosition: number = workflow.indexOf("Apply migrations and verify shared Postgres");
+  expect(preflightPosition).toBeGreaterThan(-1);
+  expect(migrationPosition).toBeGreaterThan(preflightPosition);
+  expect(workflow).toContain("fetch-depth: 0");
+  expect(workflow).toContain("bash scripts/deploy/verify-preserved-revisions.sh");
+  const drainPosition: number = workflow.indexOf("Preserve superseded Cloud Run revisions");
   const finalizePosition: number = workflow.indexOf(
     "Finalize tenant-qualified database keys",
     drainPosition,
   );
   expect(drainPosition).toBeGreaterThan(-1);
   expect(finalizePosition).toBeGreaterThan(drainPosition);
-  const drainStep: string = workflow.slice(drainPosition, finalizePosition);
+  expect(workflow.slice(drainPosition, finalizePosition)).toContain(
+    "bash scripts/deploy/preserve-revisions.sh",
+  );
+  const drainStep: string = await Bun.file("scripts/deploy/preserve-revisions.sh").text();
   expect(drainStep).toContain("gcloud run services update-traffic");
-  expect(drainStep).toContain("gcloud run revisions delete");
+  expect(workflow).not.toContain("gcloud run revisions delete");
+  expect(drainStep).not.toContain("gcloud run revisions delete");
+  expect(drainStep).toContain('--to-revisions "$latest_revision=100"');
+  expect(drainStep).toContain("--clear-tags");
+  expect(drainStep).toContain("if [ \"$TENANT_CONTRACT_FINALIZE_REQUIRED\" = 'true' ]");
+  expect(drainStep).toContain("--limit 2");
+  expect(drainStep).not.toContain('--filter "metadata.name!=');
+  expect(drainStep).toContain('if [ "$revision_inventory" != "$latest_revision"');
+  expect(drainStep).toContain("independently verified writer drainage");
+  expect(drainStep).toContain("exit 1");
   expect(drainStep).not.toContain("ADOPTION_REQUIRED");
-  expect(drainStep).not.toContain("TENANT_CONTRACT_FINALIZE_REQUIRED");
+});
+
+test("automatic migrations preserve retained messages and broadcasts", async (): Promise<void> => {
+  const migrations: string = await Bun.file("scripts/deploy/apply-migrations.sh").text();
+  expect(migrations).not.toContain("prune-expired-before-migration");
+  expect(migrations).toContain(
+    'bunx supabase db push --db-url "$database_url" --include-all --yes',
+  );
 });
 
 test("every production revision publishes its exact source revision", async (): Promise<void> => {
