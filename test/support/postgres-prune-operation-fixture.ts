@@ -205,7 +205,34 @@ export class PostgresPruneFixture {
     if (sql.includes("WITH candidates AS MATERIALIZED")) {
       this.record(transaction, "page");
       this.fail("page");
-      return [];
+      if (!sql.includes("AS inbox_version")) return [];
+      this.record(transaction, "version");
+      this.fail("version");
+      // An empty aggregate/left-join snapshot still returns its high-water sentinel.
+      return [
+        {
+          estimated_page_bytes: 0,
+          inbox_version: 0,
+          branch_name: null,
+          broadcast_id: null,
+          client_name: null,
+          content: null,
+          created_at: null,
+          expires_at: null,
+          message_id: null,
+          message_kind: null,
+          orchestrator_policy_id: null,
+          read_at: null,
+          recipient_id: null,
+          recipient_generation: null,
+          repository_name: null,
+          sender_id: null,
+          sender_generation: null,
+          sender_authority: null,
+          sequence: null,
+          thread_id: null,
+        },
+      ];
     }
     if (sql.includes("AS version")) {
       this.record(transaction, "version");
