@@ -124,9 +124,10 @@ an existing slug, returns HTTP `409`. After safely storing `token.secret`, unset
 ## Configure the agent
 
 Keep the initial `tenant_admin` secret in a user-controlled owner connection. Use that connection
-to call `create_access_token` with `role: "agent"`; the trusted host collects the user's explicit
-approval for the exact grant. Put only the returned worker secret in the environment that launches
-the everyday agent:
+to call `create_access_token` with `role: "agent"` and, when delegation must be scoped, an exact
+`machine`, `repository`, or both; the trusted host collects approval for the exact grant. These are
+authenticated credential fields, not values inferred from registration metadata. Put only the
+returned worker secret in the environment that launches the everyday agent:
 
 ```bash
 export MURMUR_API_TOKEN='<ordinary agent token from your private secret store>'
@@ -134,9 +135,9 @@ murmur setup --user --url 'https://api.usemurmur.dev/mcp'
 ```
 
 Use `--claude`, `--codex`, `--opencode`, `--cursor`, or `--pi` to configure one host. Pi also needs
-`pi-mcp-adapter`, installed separately from Pi's official package catalog. Restart, call
-`get_setup_guide`, then `register_agent` with a stable agent ID. Never expose the owner credential to
-ordinary worker sessions to make administration tools appear. A trusted host supporting MCP form
+`pi-mcp-adapter`, installed separately from Pi's official package catalog. Restart, call the normal
+authenticated connection's `get_setup_guide`, then `register_agent` with a stable agent ID. Never
+expose the owner credential to ordinary worker sessions to make administration tools appear. A trusted host supporting MCP form
 elicitation can handle administration conversationally; otherwise use
 `murmur admin TOOL --arguments-file FILE` with `MURMUR_ADMIN_TOKEN` in a private interactive
 terminal. Keep credentials out of chat and logs. See [client support](client-support.md) for

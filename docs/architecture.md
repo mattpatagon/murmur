@@ -106,15 +106,17 @@ in-memory authorization code carries no Murmur credential and is bound to the ex
 issuer, redirect, MCP resource, scope, and S256 challenge. The token endpoint passes its client
 secret through the same authentication-capacity gate as `/mcp`, accepts only tenant principals,
 atomically consumes the code, and returns the unchanged Murmur token. Connector context is the
-generic, informational `connector` value; it never selects a tenant, role, repository grant, or
-orchestrator policy. The configured canonical HTTPS origin supplies issuer and resource identity
+generic, informational `connector` value; it never selects a tenant, role, machine/repository grant,
+or orchestrator policy. The configured canonical HTTPS origin supplies issuer and resource identity
 without trusting proxy headers. Public OAuth requests share global request capacity but leave one
 slot reserved for authenticated MCP, and authorization issuance remains below the number of codes
 that can stay live across its bounded expiry window.
 
 Strict multi-tenant authentication also derives a stable personal identity, optional
-credential-bound repository, and optional orchestrator agent binding. Those authenticated values
-select an orchestrator policy; request headers and MCP arguments cannot select another policy.
+credential-bound machine and repository, and optional orchestrator agent binding. Those
+authenticated values select one of eight policy forms; request headers, registration metadata, and
+MCP arguments cannot select another policy. A machine binding is a bearer-credential scope, not
+hardware attestation, so physical placement also depends on machine-controlled secret storage.
 Local, legacy, and hybrid modes omit the orchestration surface because they have no equivalent
 human-grant boundary.
 
@@ -126,9 +128,11 @@ collect real human input; possession of an administrator credential plus a malic
 administrator compromise. Signup separates the human-held owner credential from the worker token.
 The interactive terminal administration client supplies the same consent flow without a dashboard.
 
-The MCP's `get_setup_guide` returns bundled, bounded instructions and the actual connection's tool
-list without fetching repository content. Public client packages are built from the reviewed
-revision and served by the hosted deployment; installation does not require a source checkout.
+The MCP's `get_setup_guide` returns the same bundled, bounded, topic-selectable instructions through
+both anonymous `/setup/mcp` and every normal authenticated `/mcp` role. Its actual connection tool
+list remains role- and capability-specific; the guide never grants those tools. Public client
+packages are built from the reviewed revision and served by the hosted deployment; installation
+does not require a source checkout.
 
 Local stdio skips hosted authentication and HTTP admission but uses the same MCP application and
 MessageStore contract. Context is detected from Git or explicit environment values. Context a
@@ -190,8 +194,8 @@ message content remains in the database.
 
 Messages persist write-once provenance: authenticated sender authority, ordinary-versus-routed
 message kind, and the server-selected policy ID for an orchestration request. A routed ask resolves
-the effective personal/organization and repository/global policy and inserts the durable request in
-one transaction. Duplicate lookup precedes current-policy resolution, preserving the first stored
+the effective personal/organization policy with its authenticated machine/repository qualifiers and
+inserts the durable request in one transaction. Duplicate lookup precedes current-policy resolution, preserving the first stored
 message and policy identifier after clear, revocation, or rotation. Private human delegation text
 is stored separately under forced RLS and is returned only to tenant administrators or the exact
 assigned orchestrator credential.

@@ -9,8 +9,9 @@ authorization-code fields rather than claimed as a vendor guarantee.
 ## Hosted setup
 
 First, use an authenticated tenant-administrator Murmur client to call `create_access_token` with a
-descriptive name, role `agent`, and the narrowest useful repository binding. Copy the returned
-secret immediately; Murmur returns it once and stores only its SHA-256 hash.
+descriptive name, role `agent`, and the narrowest useful `machine`/`repository` bindings. Copy the
+returned secret immediately; Murmur returns it once and stores only its SHA-256 hash. A connector's
+machine binding is credential scope, not proof that the external service runs on that machine.
 
 Enter these values in the connector:
 
@@ -34,7 +35,7 @@ message, broadcast, or feedback, supply `context.repository`, `context.branch`, 
 `context.client: "connector"` in the tool call. `connector` is intentionally generic: the reused
 bearer token does not securely identify a later request as ChatGPT or Grok, and caller-declared
 context is informational rather than an authorization input. Credential-bound tenant, personal,
-repository, role, and orchestrator scope remain authoritative.
+machine, repository, role, and orchestrator scope remain authoritative.
 
 ## Flow and security properties
 

@@ -220,7 +220,7 @@ derived from a caller-generated 256-bit registration secret and only its hash is
 request retries return the same tenant and token, so a lost response does not require operator
 recovery. Agents then set `MURMUR_API_TOKEN` and run `murmur setup --user` against the hosted MCP URL.
 
-ChatGPT and Grok users do not run the local setup command. Create a dedicated repository-bound
+ChatGPT and Grok users do not run the local setup command. Create a dedicated narrowly bound
 `agent` token, place it only in the connector Client Secret field, use client ID `murmur`, scope
 `murmur`, the hosted `/oauth/authorize` and `/oauth/token` URLs, and select
 `client_secret_basic` or `client_secret_post`. Operator and bootstrap credentials are rejected.
@@ -282,22 +282,21 @@ pre-lifecycle application is unsupported after any identity advances beyond gene
 
 Human-delegated orchestration is enabled only with `MURMUR_AUTH_MODE=multi-tenant`. A tenant
 administrator creates an orchestrator token, records its one-time secret in the approved secret
-store, and then assigns organization, personal, organization+repository, or personal+repository
-policies. Create repository-bound agent tokens for repository-specific resolution; request headers
-do not choose a policy. Never place private decide-versus-escalate instructions in audit metadata,
-ordinary messages, deployment variables, or repository files.
+store, and assigns any organization/personal policy with optional machine and repository qualifiers.
+Create agent tokens with the matching `machine`/`repository` bindings; metadata and headers cannot
+select a policy. The eight-form precedence is documented in [orchestration.md](orchestration.md).
+Never place private instructions in audit metadata, messages, deployment variables, or repo files.
 
-Complete the application rollout on every replica before creating the first orchestrator token or
-policy. The additive schema supports an old binary during rollout only while no orchestration data
-has been created. Once an orchestrator credential or policy exists, a binary older than this
-release is not a supported rollback target: its authentication row parser does not recognize the
-role, and its credential cleanup can conflict with retained policy attribution.
+The workflow revokes policy `INSERT`/`UPDATE` from `murmur_app` before migrations and restores them
+only after every replica and final health check pass. Existing policy reads remain available while
+old replicas drain. A failed rollout stays frozen and must be fixed forward; follow the executable
+and verified procedure in [upgrading.md](upgrading.md). Create machine-bound data only afterward.
 
 Use `list_orchestrator_policies` to review scope, assignment, and updater attribution, following
 `next_cursor` until it is null so all bounded policy pages are reviewed. Rotation is:
 
-1. Revoke the old orchestrator access token.
-2. Create a new orchestrator token with the same reserved agent ID.
+1. Record its policy scopes, then revoke the old orchestrator access token.
+2. Create its replacement with the same reserved ID and intended machine/repository bindings.
 3. Reapply each intended policy to the new token key.
 4. Verify worker `get_orchestrator`, orchestrator `get_delegation`, and a durable routed ask.
 
@@ -451,13 +450,13 @@ Application rollback is safe only when the target revision supports the current
 version-1 writer. Superseded Cloud Run revision definitions and container images
 remain available for diagnosis; direct revision tags are removed during traffic cutover.
 
-The orchestrator migrations are additive, but an older application does not understand their
-authority fields. Prefer a fixed-forward application rollout. Before any orchestrator credential or
-policy has been created, deployment skew is limited to the expand phase described above. After
-either exists, only this release or a later schema-compatible binary is supported. If an emergency
-capability rollback is required, run that compatible binary in hybrid mode; do not deploy an older
-binary, drop policy, token-binding, or message-provenance columns, or claim historical
-authoritative messages became peers.
+The orchestrator migrations preserve existing rows, but an older application does not understand all authority or machine-scope fields. Prefer a fixed-forward rollout. Freeze every policy mutation
+before migration because the final uniqueness contract is incompatible with the old writer's
+four-column conflict target. During the machine expansion, old replicas use
+`authenticate_principal_v2` while new replicas require v3; they may drain reads only, and no
+machine-qualified data may be created until every replica is updated. After use, only this release or
+a later schema-compatible binary is supported. Emergency capability rollback uses a compatible
+binary in hybrid mode; never drop policy, binding, or provenance columns.
 
 Runtime database credentials are versioned. Before rolling back to a compatible
 revision that references an older version, explicitly re-enable that exact

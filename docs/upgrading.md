@@ -165,7 +165,7 @@ Stdio does not inherit HTTP request-ID, processing or byte-admission policy, but
 and compact tool text apply to both transports. Legacy SQLite E2E fields above the new commit bounds
 fail explicitly rather than being rewritten; see [broadcast compatibility](e2ee-broadcast-memory.md).
 
-### Earlier compatibility contracts
+### Compatibility contracts
 
 The connector-client expansion adds replacement message, broadcast, and feedback check constraints
 as `NOT VALID`, validates each table in its own bounded-lock migration, then swaps the validated
@@ -187,19 +187,37 @@ index build is interrupted, rerun the unchanged migration: it removes only a sam
 `INVALID` in `pg_index` before rebuilding it, while preserving a valid index. The hosted verifier
 asserts that no lifecycle index remains invalid and exercises both empty and populated upgrades.
 
-The orchestrator-authority expansion adds credential personal/repository identity, a distinct
-bound token role, forced-RLS policies, message provenance, and `authenticate_principal_v2`. Apply
-all three forward migrations before starting this application revision. The v1 authentication
-function remains unchanged for deployment skew, while this revision probes and consumes v2.
-Populated upgrades backfill existing credentials and messages to personal IDs and peer provenance.
-Do not edit those backfills or promote an existing peer agent row to orchestrator authority.
+The original orchestrator-authority expansion added personal/repository credential identity, a
+bound token role, forced-RLS policies, message provenance, and `authenticate_principal_v2`. The
+machine-scope expansion adds optional credential and policy `machine_name` fields plus
+`authenticate_principal_v3`, which returns the v2 fields and authenticated machine binding. Its
+expand, concurrent-index, and contract migrations all set statement and lock timeouts; interrupted
+concurrent builds discard only same-named invalid indexes when rerun. Apply all three forward
+migrations before starting this revision. V2 remains unchanged for draining old replicas; this
+revision requires v3. Existing credentials backfill to null and existing policies to an empty
+normalized machine, preserving their global semantics. Never derive a binding from agent IDs or
+metadata, edit a backfill, or promote a peer row to orchestrator authority.
 
-Finish rolling this application revision to every replica before creating the first orchestrator
-token or policy. The schema expansion alone remains compatible with the previous binary, but
-orchestration data does not: the previous authentication parser rejects the new role and its token
-cleanup may be blocked by retained policy attribution. After orchestration data exists, rollback is
-supported only to this release or a later schema-compatible binary, optionally running in hybrid
-mode. Do not mint during a mixed-version rollout.
+Freeze every `set_orchestrator_policy` and `clear_orchestrator_policy` mutation before applying the
+machine migrations, and keep the freeze through the mixed-version application rollout. The final
+contract migration replaces the four-column policy conflict target, so an old writer cannot safely
+mutate even a global policy afterward. Old replicas may drain reads and authenticate through v2
+only while no machine-qualified credential or policy exists. Finish rolling this revision to every
+replica before unfreezing policy changes or creating machine-bound data. After machine-qualified
+data exists, rollback is supported only to this release or a later schema-compatible binary,
+optionally running in hybrid mode. Restart clients after cutover so they reauthenticate with v3;
+verify machine-only, repository-only, combined, and global fallbacks.
+
+The production workflow enforces that freeze at the database role boundary. Before migrations it
+runs `scripts/deploy/set-orchestrator-policy-mutations.sh freeze`, which revokes only `INSERT` and
+`UPDATE` on `murmur.orchestrator_policies` from `murmur_app`; policy reads and ordinary tenant data
+remain available. It verifies the three effective table privileges after the bounded transaction.
+After every replica is deployed and final health passes, the workflow runs the same script with
+`unfreeze` to restore and verify `SELECT`, `INSERT`, and `UPDATE`. A failure leaves mutations frozen;
+fix forward and rerun the workflow, or run the unfreeze command only after independently proving
+every serving replica supports v3. Self-hosted operators pass their verified owner database URL as
+`MURMUR_POLICY_ADMIN_DATABASE_URL` and follow the same two commands. Never expose that URL in shell
+arguments or logs.
 
 Hook/server skew is additive across this rollout. This server returns the legacy message shape to
 the released `murmur-hook` 0.1.0 client, while the new hook accepts both legacy messages and the new
@@ -208,7 +226,8 @@ provenance fields. Complete the server rollout before relying on provenance-awar
 An application capability rollback may use hybrid mode, which authenticates retained database
 credentials but exposes no orchestration tools. It does not reverse the schema or erase provenance.
 After returning to strict multi-tenant mode, verify policy assignments because revoked tokens stay
-inactive until a tenant administrator rotates and reapplies them.
+inactive until a tenant administrator rotates and reapplies them. Preserve `personal_id`, `machine`,
+and `repository` intentionally during rotation; changing any qualifier can change effective routing.
 
 ## Release and rollback
 
