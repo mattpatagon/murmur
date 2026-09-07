@@ -2,6 +2,38 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.17.0.0] - 2026-09-07
+
+### Added
+
+- Bind agent and orchestrator credentials to a machine, a repository, both, or neither, and apply
+  the same four qualifier shapes to organization and personal orchestration policies. Routing uses
+  a deterministic eight-level precedence while existing unbound credentials and policies remain global.
+- Read the complete orchestration setup, policy, precedence, and existing-agent recovery guide
+  through the normal authenticated MCP endpoint for every role as well as the anonymous setup
+  endpoint.
+
+### Changed
+
+- Derive hosted machine and repository scope only from validated credentials, never caller metadata
+  or request context, and keep optional machine fields wire-compatible with older clients, local
+  vaults, and retained rows.
+- Apply machine-scope PostgreSQL changes through bounded expand, concurrent-index, and contract
+  phases. Production deployment revokes policy writes at the database before migration and restores
+  them only after the final contract and service health checks pass.
+
+### Fixed
+
+- Give Linux deployment-preservation tests a runner deadline longer than their deliberately bounded
+  child-process deadline, avoiding false failures on loaded hosts without relaxing production
+  command limits.
+
+### Security
+
+- Revalidate credential and policy machine/repository qualifiers at routed-message insertion,
+  serialize quota admission at exact concurrency boundaries, and reject attempts to choose a
+  tenant or machine through untrusted registration metadata.
+
 ## [0.16.1.0] - 2026-09-06
 
 ### Fixed
@@ -463,38 +495,6 @@ All notable changes to Murmur are documented in this file.
 - Snapshot sender and recipient generations at message creation so reopened identities cannot inherit an older inbox implicitly.
 - Enforce notice tenant isolation, creator-only withdrawal, bounded retention, and identical SQLite/PostgreSQL authorization behavior.
 
-## [0.5.1.0] - 2026-08-10
-
-### Fixed
-
-- Keep agent initialization and tool requests available while long-lived MCP streams use separate bounded global, tenant, and credential capacity.
-- Return an explicit one-second retry hint when stream capacity is exhausted, and document the independent stream limits.
-
-## [0.5.0.0] - 2026-08-10
-
-### Added
-
-- Catch quality regressions before review with strict source and per-file coverage, a 500-line cap, exact dependency checks, canonical ELv2 license verification, synchronized Bun pins, and a 72-hour package quarantine.
-- Diagnose hosted requests through one redacted completion event and optional bounded OTLP HTTP/protobuf tracing with server-owned correlation.
-- Verify Linux, macOS, and Windows behavior in CI through portable tests, production-entry-point builds, and a required host-to-Linux-container MCP test.
-- Find dedicated contributor and operator guides for security, support, architecture, observability, platform support, upgrades, agent rules, pull requests, and issue reporting.
-
-### Changed
-
-- Keep storage, hosted control-plane, MCP, HTTP admission, lifecycle, deployment, and integration-test responsibilities in focused modules under 500 lines.
-- Treat every Biome warning as a failure and enforce additional security, correctness, performance, and mutation-safety rules.
-- Run path discovery, configuration writes, coverage, package entry points, and test harnesses deterministically across operating systems.
-- Diagnose startup configuration failures through stable, safe operational error classes instead of generic exception names or rejected values.
-
-### Fixed
-
-- Retry concurrent cross-process SQLite sends safely: identical retries return the stored winner, while conflicting retries return `IdempotencyConflictError` instead of leaking a raw constraint failure.
-
-### Security
-
-- Correlate authentication, admission, capacity, rate, and session outcomes without recording hosted token formats, database URLs, sessions, message bodies, or exception text.
-- Start each request with a server-owned root span, preventing clients from forging audit correlation or remote sampling decisions through untrusted inbound trace context.
-
 ## Earlier releases
 
-See the [0.1.0.0–0.4.4.0 release history](docs/changelog-early-releases.md).
+See the [0.1.0.0–0.5.1.0 release history](docs/changelog-early-releases.md).
