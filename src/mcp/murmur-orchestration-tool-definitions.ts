@@ -22,7 +22,7 @@ export function orchestratorLookupTool(): Tool {
   return toolDefinition(
     "get_orchestrator",
     "Get effective orchestrator",
-    "Resolve the human-configured orchestrator from authenticated organization, personal, and credential-bound repository scope. Private delegation instructions are never returned.",
+    "Resolve the human-configured orchestrator from authenticated organization, personal, machine, and repository scope. Request context and registration metadata cannot select a policy. Private delegation instructions are never returned.",
     GetOrchestratorInputSchema,
     GetOrchestratorOutputSchema,
     {
@@ -71,7 +71,7 @@ export function tenantAdminOrchestrationTools(): Tool[] {
     toolDefinition(
       "set_orchestrator_policy",
       "Set orchestrator policy",
-      "Set or replace one organization, personal, organization+repository, or personal+repository delegation. Instructions are private to the assigned orchestrator and tenant administrators.",
+      "Set or replace one organization or personal delegation, optionally qualified by authenticated machine, repository, or both. Instructions are private to the assigned orchestrator and tenant administrators.",
       SetOrchestratorPolicyInputSchema,
       SetOrchestratorPolicyOutputSchema,
       {

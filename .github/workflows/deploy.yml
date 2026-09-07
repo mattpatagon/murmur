@@ -103,6 +103,10 @@ jobs:
         shell: bash
         run: bash scripts/deploy/verify-preserved-revisions.sh
 
+      - name: Freeze orchestrator policy mutations
+        shell: bash
+        run: bash scripts/deploy/set-orchestrator-policy-mutations.sh freeze
+
       - name: Apply migrations and verify shared Postgres
         shell: bash
         run: bash scripts/deploy/apply-migrations.sh
@@ -452,6 +456,10 @@ jobs:
             fi
             sleep 5
           done
+
+      - name: Unfreeze orchestrator policy mutations
+        shell: bash
+        run: bash scripts/deploy/set-orchestrator-policy-mutations.sh unfreeze
 
       - name: Disable superseded runtime database credentials
         shell: bash

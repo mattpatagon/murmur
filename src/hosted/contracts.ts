@@ -29,6 +29,12 @@ const TenantSlugSchema: z.ZodString = z
   .max(64)
   .regex(/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/u);
 const TenantDisplayNameSchema: z.ZodString = z.string().trim().min(1).max(200);
+const MachineSchema: z.ZodString = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u);
 const TokenRoleSchema: z.ZodEnum<{
   agent: "agent";
   orchestrator: "orchestrator";
@@ -45,6 +51,7 @@ const TenantStatusSchema: z.ZodEnum<{
 
 export type CreateTokenInput = {
   readonly expires_at?: string | undefined;
+  readonly machine?: string | undefined;
   readonly name: string;
   readonly personal_id?: string | undefined;
   readonly repository?: string | undefined;
@@ -90,6 +97,7 @@ export type IssuedTokenDto = {
   readonly agent_id: string | null;
   readonly expires_at: string | null;
   readonly key_id: string;
+  readonly machine?: string | null | undefined;
   readonly name: string;
   readonly personal_id: string;
   readonly repository: string | null;
@@ -105,6 +113,7 @@ export type TokenSummaryDto = {
   readonly expires_at: string | null;
   readonly key_id: string;
   readonly last_used_at: string | null;
+  readonly machine?: string | null | undefined;
   readonly name: string;
   readonly personal_id: string;
   readonly repository: string | null;
@@ -186,6 +195,7 @@ export type TenantStatusOutput = Record<string, unknown> & {
 
 export const CreateTokenInputSchema: z.ZodType<CreateTokenInput> = z.strictObject({
   expires_at: InstantSchema.optional(),
+  machine: MachineSchema.optional(),
   name: TokenNameSchema,
   personal_id: z.string().uuid().optional(),
   repository: z
@@ -258,6 +268,7 @@ export const IssuedTokenDtoSchema: z.ZodType<IssuedTokenDto> = z.strictObject({
   agent_id: z.string().min(1).max(200).nullable(),
   expires_at: InstantSchema.nullable(),
   key_id: KeyIdSchema,
+  machine: MachineSchema.nullable().optional(),
   name: TokenNameSchema,
   personal_id: z.string().uuid(),
   repository: z
@@ -278,6 +289,7 @@ export const TokenSummaryDtoSchema: z.ZodType<TokenSummaryDto> = z.strictObject(
   expires_at: InstantSchema.nullable(),
   key_id: KeyIdSchema,
   last_used_at: InstantSchema.nullable(),
+  machine: MachineSchema.nullable().optional(),
   name: TokenNameSchema,
   personal_id: z.string().uuid(),
   repository: z
@@ -376,6 +388,7 @@ export function toIssuedTokenDto(token: IssuedToken): IssuedTokenDto {
     agent_id: token.agentId === null ? null : token.agentId.value,
     expires_at: token.expiresAt === null ? null : token.expiresAt.toISOString(),
     key_id: token.keyId,
+    ...(token.machineName === null ? {} : { machine: token.machineName.value }),
     name: token.name,
     personal_id: token.personalId.value,
     repository: token.repositoryName === null ? null : token.repositoryName.value,
@@ -393,6 +406,7 @@ export function toTokenSummaryDto(token: TokenSummary): TokenSummaryDto {
     expires_at: token.expiresAt === null ? null : token.expiresAt.toISOString(),
     key_id: token.keyId,
     last_used_at: token.lastUsedAt === null ? null : token.lastUsedAt.toISOString(),
+    ...(token.machineName === null ? {} : { machine: token.machineName.value }),
     name: token.name,
     personal_id: token.personalId.value,
     repository: token.repositoryName === null ? null : token.repositoryName.value,

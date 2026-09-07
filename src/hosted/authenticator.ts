@@ -115,6 +115,7 @@ export class HostedAuthenticator {
         return {
           agentId: null,
           kind: "tenant",
+          machineName: null,
           personalId: null,
           repositoryName: null,
           role: "tenant_admin",

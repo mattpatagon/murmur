@@ -14,6 +14,7 @@ import {
   type BranchName,
   IdempotencyKey,
   Instant,
+  MachineName,
   MessageContent,
   RepositoryName,
   ThreadId,
@@ -86,6 +87,7 @@ const ORCHESTRATION_TOOL_NAMES: ReadonlySet<string> = new Set<string>([
 function scopeFromInput(input: OrchestratorScopeInput): OrchestratorScope {
   return {
     kind: input.scope_kind,
+    machineName: input.machine === undefined ? null : MachineName.parse(input.machine),
     personalId: input.scope_kind === "personal" ? PersonalId.parse(input.personal_id) : null,
     repositoryName: input.repository === undefined ? null : RepositoryName.parse(input.repository),
   };
@@ -131,6 +133,7 @@ export async function callOrchestrationTool(
         input.expires_at === undefined ? null : Instant.parse(input.expires_at),
         input.personal_id === undefined ? null : PersonalId.parse(input.personal_id),
         input.repository === undefined ? null : RepositoryName.parse(input.repository),
+        input.machine === undefined ? null : MachineName.parse(input.machine),
       );
       const output: CreateOrchestratorTokenOutput = CreateOrchestratorTokenOutputSchema.parse({
         token: toIssuedTokenDto(token),

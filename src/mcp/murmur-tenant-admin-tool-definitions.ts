@@ -22,7 +22,7 @@ export function tenantAdminTools(): Tool[] {
     toolDefinition(
       "create_access_token",
       "Create tenant access token",
-      "Create an agent or tenant-administrator token for the authenticated tenant. The secret is returned exactly once; store it securely.",
+      "Create an agent or tenant-administrator token for the authenticated tenant, optionally binding its machine and repository orchestration scope. The secret is returned exactly once; store it securely.",
       CreateTokenInputSchema,
       IssuedTokenOutputSchema,
       {

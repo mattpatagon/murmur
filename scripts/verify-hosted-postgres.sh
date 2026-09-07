@@ -32,6 +32,12 @@ psql "$admin_url" --set ON_ERROR_STOP=1 --command "
   \$block\$;
 "
 bunx supabase db push --db-url "$admin_url" --include-all --yes
+for policy_mutation_state in freeze unfreeze; do
+  MURMUR_POLICY_ADMIN_DATABASE_URL="$admin_url" \
+    MURMUR_DATABASE_TLS_INSECURE=1 \
+    bash scripts/deploy/set-orchestrator-policy-mutations.sh "$policy_mutation_state"
+done
+unset policy_mutation_state
 invalid_lifecycle_indexes="$(psql "$admin_url" --tuples-only --no-align --quiet \
   --command "select count(*) from pg_catalog.pg_index as index_state join pg_catalog.pg_class as index_class on index_class.oid = index_state.indexrelid join pg_catalog.pg_namespace as index_schema on index_schema.oid = index_class.relnamespace where index_schema.nspname = 'murmur' and index_class.relname in ('messages_recipient_generation_sequence', 'agents_open_activity', 'agents_closed_gc') and not index_state.indisvalid")"
 if [ "$invalid_lifecycle_indexes" != '0' ]; then

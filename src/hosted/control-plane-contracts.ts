@@ -11,6 +11,7 @@ import type {
   IdempotencyKey,
   Instant,
   JsonObject,
+  MachineName,
   MessageContent,
   RepositoryName,
   TenantId,
@@ -29,6 +30,7 @@ export type TenantStatus = "active" | "suspended";
 export type TenantPrincipal = {
   readonly agentId?: AgentId | null | undefined;
   readonly kind: "tenant";
+  readonly machineName?: MachineName | null | undefined;
   readonly personalId?: PersonalId | null | undefined;
   readonly repositoryName?: RepositoryName | null | undefined;
   readonly role: TenantTokenRole;
@@ -56,6 +58,7 @@ export type IssuedToken = {
   readonly agentId: AgentId | null;
   readonly expiresAt: Instant | null;
   readonly keyId: string;
+  readonly machineName: MachineName | null;
   readonly name: string;
   readonly personalId: PersonalId;
   readonly repositoryName: RepositoryName | null;
@@ -80,6 +83,7 @@ export type TokenSummary = {
   readonly keyId: string;
   readonly lastUsedAt: Instant | null;
   readonly name: string;
+  readonly machineName: MachineName | null;
   readonly personalId: PersonalId;
   readonly repositoryName: RepositoryName | null;
   readonly revokedAt: Instant | null;
@@ -122,6 +126,7 @@ export type HostedTlsConfiguration = PostgresTlsConfiguration;
 
 export type OrchestratorScope = {
   readonly kind: OrchestrationScopeKind;
+  readonly machineName: MachineName | null;
   readonly personalId: PersonalId | null;
   readonly repositoryName: RepositoryName | null;
 };
@@ -201,6 +206,7 @@ export interface HostedControlPlane {
     expiresAt: Instant | null,
     personalId: PersonalId | null,
     repositoryName: RepositoryName | null,
+    machineName: MachineName | null,
   ): Promise<IssuedToken>;
   createOrchestratorToken(
     principal: TenantPrincipal,
@@ -209,6 +215,7 @@ export interface HostedControlPlane {
     expiresAt: Instant | null,
     personalId: PersonalId | null,
     repositoryName: RepositoryName | null,
+    machineName: MachineName | null,
   ): Promise<IssuedToken>;
   setOrchestratorPolicy(
     principal: TenantPrincipal,

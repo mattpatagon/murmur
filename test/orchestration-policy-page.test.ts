@@ -39,6 +39,7 @@ function policyRow(
     created_by_token_id: "00000000-0000-4000-8000-000000000002",
     enabled: true,
     instructions,
+    machine_name: "m".repeat(200),
     orchestrator_agent_id: "a".repeat(200),
     orchestrator_token_id: "00000000-0000-4000-8000-000000000002",
     policy_id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
@@ -106,7 +107,7 @@ test("policy pages fit control-character instructions without building a giant w
       "utf8",
     ),
   );
-  expect(wireBytes({ items: policies, nextCursor: null })).toBe(10_881_930);
+  expect(wireBytes({ items: policies, nextCursor: null })).toBe(10_924_930);
   const { bytes, result }: ReturnType<typeof parseBudgetedPolicyPage> = parseBudgetedPolicyPage(
     budgetRows(rows),
     100,

@@ -70,7 +70,11 @@ test.skipIf(!postgresConfigured)(
       const policyId: string = await testTenant.configureOrchestrator(orchestratorId, repository);
       const authorization: E2eeWriteAuthorization = {
         boundSenderId: null,
-        orchestrationScope: { personalId: randomUUID(), repositoryName: repository },
+        orchestrationScope: {
+          machineName: null,
+          personalId: randomUUID(),
+          repositoryName: repository,
+        },
         provenance: {
           message_kind: "orchestration_request",
           orchestrator_policy_id: policyId,

@@ -16,11 +16,19 @@ export function hookOrchestrationState(structuredContent: unknown): HookOrchestr
   const output: GetOrchestratorOutput = parsed.data;
   if (output.caller_authority === "orchestrator") return { kind: "orchestrator" };
   if (output.orchestrator === null) return { kind: "none" };
+  const identity: string =
+    output.orchestrator.scope.scope_kind === "organization"
+      ? "organization"
+      : `personal ${output.orchestrator.scope.personal_id}`;
+  const machine: string =
+    output.orchestrator.scope.machine === undefined || output.orchestrator.scope.machine === null
+      ? "all machines"
+      : `machine ${output.orchestrator.scope.machine}`;
   const repository: string =
     output.orchestrator.scope.repository === null
-      ? "global"
+      ? "all repositories"
       : `repository ${output.orchestrator.scope.repository}`;
-  const scope: string = `${output.orchestrator.scope.scope_kind} ${repository}`;
+  const scope: string = `${identity}; ${machine}; ${repository}`;
   return { agentId: output.orchestrator.agent_id, kind: "configured", scope };
 }
 

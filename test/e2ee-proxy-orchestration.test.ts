@@ -57,7 +57,12 @@ const REPLY: string = "encrypted-orchestration-reply-🔏";
 const ORCHESTRATOR: EffectiveOrchestratorDto = {
   agent_id: ORCHESTRATOR_ID,
   policy_id: POLICY_ID,
-  scope: { personal_id: null, repository: "example/repo-a", scope_kind: "organization" },
+  scope: {
+    machine: null,
+    personal_id: null,
+    repository: "example/repo-a",
+    scope_kind: "organization",
+  },
 };
 
 class FixedClock implements Clock {

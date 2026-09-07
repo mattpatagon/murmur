@@ -6,9 +6,9 @@ import { z } from "zod";
 import type { OrchestratorPolicyId, PersonalId } from "../domain/orchestration.js";
 import type { AgentId, Instant, RepositoryName, TenantId } from "../domain/value-objects.js";
 import { POSTGRES_RUNTIME_POOL } from "../postgres-runtime.js";
-import { verifyPostgresStorageBudgetSchema } from "../storage/postgres-storage-budget-schema.js";
 import { type PostgresSslOptions, postgresSslOptions } from "../postgres-tls.js";
 import { logSafeError } from "../safe-errors.js";
+import { verifyPostgresStorageBudgetSchema } from "../storage/postgres-storage-budget-schema.js";
 import type {
   AdminAuditEvent,
   AskOrchestratorCommand,
@@ -80,6 +80,7 @@ import { issueOperatorToken, providedOperatorToken } from "./token-issuance.js";
 
 export type * from "./control-plane-contracts.js";
 
+type MachineName = Exclude<TenantPrincipal["machineName"], null | undefined>;
 export class PostgresHostedControlPlane implements HostedControlPlane {
   private readonly authenticator: HostedAuthenticator;
   private readonly database: Sql;
@@ -110,10 +111,6 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
 
   private ensureOpen(): void {
     if (this.closed) throw new Error("The hosted control plane is closed");
-  }
-
-  private async refreshCredentialAdmissions(): Promise<void> {
-    await this.authenticator.refresh();
   }
 
   public credentialAdmission(token: string): CredentialAdmission | null {
@@ -193,7 +190,7 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
         ${name}
       )
     `;
-    await this.refreshCredentialAdmissions();
+    await this.authenticator.refresh();
     return issued.token;
   }
 
@@ -215,7 +212,7 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
       z.array(BooleanRowSchema).parse(rawRows),
       "adopt legacy founding token",
     ).changed;
-    await this.refreshCredentialAdmissions();
+    await this.authenticator.refresh();
     return changed;
   }
 
@@ -236,7 +233,7 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
         ${expiresAt === null ? null : expiresAt.toISOString()}::timestamptz
       )
     `;
-    await this.refreshCredentialAdmissions();
+    await this.authenticator.refresh();
     return issued.token;
   }
 
@@ -288,7 +285,7 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
       z.array(NullableTokenIdRowSchema).parse(rawRows),
       "revoke operator token",
     ).token_id;
-    await this.refreshCredentialAdmissions();
+    await this.authenticator.refresh();
     return tokenId;
   }
 
@@ -299,6 +296,7 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
     expiresAt: Instant | null,
     personalId: PersonalId | null,
     repositoryName: RepositoryName | null,
+    machineName: MachineName | null,
   ): Promise<IssuedToken> {
     this.ensureOpen();
     const token: IssuedToken = await createPostgresTenantToken(
@@ -309,8 +307,9 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
       expiresAt,
       personalId,
       repositoryName,
+      machineName,
     );
-    await this.refreshCredentialAdmissions();
+    await this.authenticator.refresh();
     return token;
   }
 
@@ -326,7 +325,7 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
   public async revokeToken(principal: TenantPrincipal, keyId: string): Promise<string | null> {
     this.ensureOpen();
     const tokenId: string | null = await revokePostgresTenantToken(this.database, principal, keyId);
-    await this.refreshCredentialAdmissions();
+    await this.authenticator.refresh();
     return tokenId;
   }
 
@@ -337,6 +336,7 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
     expiresAt: Instant | null,
     personalId: PersonalId | null,
     repositoryName: RepositoryName | null,
+    machineName: MachineName | null,
   ): Promise<IssuedToken> {
     this.ensureOpen();
     const token: IssuedToken = await createPostgresOrchestratorToken(
@@ -347,8 +347,9 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
       expiresAt,
       personalId,
       repositoryName,
+      machineName,
     );
-    await this.refreshCredentialAdmissions();
+    await this.authenticator.refresh();
     return token;
   }
 
@@ -416,7 +417,7 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
     this.ensureOpen();
     const created: { readonly tenant: TenantSummary; readonly token: IssuedToken } =
       await createPostgresTenant(this.database, principal, slug, displayName);
-    await this.refreshCredentialAdmissions();
+    await this.authenticator.refresh();
     return created;
   }
   public async selfServiceRegisterTenant(
@@ -428,7 +429,7 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
     const created: { readonly tenant: TenantSummary; readonly token: IssuedToken } =
       await createSelfServicePostgresTenant(this.database, slug, displayName, registrationSecret);
     try {
-      await this.refreshCredentialAdmissions();
+      await this.authenticator.refresh();
     } catch (error: unknown) {
       logSafeError("Murmur self-service credential admission refresh failed", error);
     }
@@ -456,7 +457,7 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
       name,
       expiresAt,
     );
-    await this.refreshCredentialAdmissions();
+    await this.authenticator.refresh();
     return token;
   }
   private async changeTenantStatus(
@@ -471,7 +472,7 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
       functionName,
       tenantId,
     );
-    await this.refreshCredentialAdmissions();
+    await this.authenticator.refresh();
     return changed;
   }
   public async suspendTenant(principal: OperatorPrincipal, tenantId: TenantId): Promise<boolean> {

@@ -4,7 +4,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import postgres, { type Sql, type TransactionSql } from "postgres";
 import { z } from "zod";
 
-import { type AuthRowV2, AuthRowV2Schema } from "../src/hosted/control-plane-rows.js";
+import { type AuthRowV3, AuthRowV3Schema } from "../src/hosted/control-plane-rows.js";
 import { POSTGRES_RUNTIME_CONNECTION } from "../src/postgres-runtime.js";
 import { postgresSslOptions } from "../src/postgres-tls.js";
 import { adminDatabaseUrl, testTlsConfiguration } from "./support/hosted-mcp-harness.js";
@@ -41,9 +41,11 @@ async function withAuthFixture(run: (fixture: AuthFixture) => Promise<void>): Pr
         VALUES (${tenantId}::uuid, ${`${prefix}target`}, 'Authentication plan fixture')
       `;
       await transaction`
-        INSERT INTO murmur.access_tokens(token_id, tenant_id, key_id, secret_hash, token_role, name, last_used_at)
+        INSERT INTO murmur.access_tokens(
+          token_id, tenant_id, key_id, secret_hash, token_role, name, last_used_at, machine_name
+        )
         VALUES (${tokenId}::uuid, ${tenantId}::uuid, ${tokenId.replaceAll("-", "")}, ${hash},
-          'agent', 'Authentication plan fixture', pg_catalog.statement_timestamp())
+          'agent', 'Authentication plan fixture', pg_catalog.statement_timestamp(), 'build-host-01')
       `;
       await run({ transaction, prefix, tenantId, tokenId, hash });
       // Roll back all generated rows and lifecycle/accounting changes, including failed assertions.
@@ -56,13 +58,14 @@ async function withAuthFixture(run: (fixture: AuthFixture) => Promise<void>): Pr
   }
 }
 
-async function authentication(transaction: TransactionSql, hash: Buffer): Promise<AuthRowV2[]> {
+async function authentication(transaction: TransactionSql, hash: Buffer): Promise<AuthRowV3[]> {
   const raw: unknown = await transaction`
     SELECT principal_kind, token_id::text AS token_id, key_id, tenant_id::text AS tenant_id,
-      token_role, personal_id::text AS personal_id, repository_name, orchestrator_agent_id
-    FROM murmur.authenticate_principal_v2(${hash})
+      token_role, personal_id::text AS personal_id, repository_name, machine_name,
+      orchestrator_agent_id
+    FROM murmur.authenticate_principal_v3(${hash})
   `;
-  return z.array(AuthRowV2Schema).max(1).parse(raw);
+  return z.array(AuthRowV3Schema).max(1).parse(raw);
 }
 
 async function scannedTokenRows(transaction: TransactionSql): Promise<number> {
@@ -109,10 +112,11 @@ test.skipIf(!configured)(
       ]);
       const before: number = await scannedTokenRows(transaction);
       for (let attempt: number = 0; attempt < 3; attempt += 1) {
-        const principals: AuthRowV2[] = await authentication(transaction, fixture.hash);
+        const principals: AuthRowV3[] = await authentication(transaction, fixture.hash);
         expect(principals).toHaveLength(1);
         expect(principals[0]).toMatchObject({
           principal_kind: "tenant",
+          machine_name: "build-host-01",
           tenant_id: fixture.tenantId,
           token_id: fixture.tokenId,
         });
@@ -146,12 +150,14 @@ test.skipIf(!configured)(
       expect((await authentication(transaction, fixture.hash))[0]).toMatchObject({
         personal_id: fixture.tokenId,
         principal_kind: "tenant",
+        machine_name: "build-host-01",
         tenant_id: fixture.tenantId,
         token_role: "agent",
       });
       expect((await authentication(transaction, operatorHash))[0]).toMatchObject({
         personal_id: null,
         principal_kind: "operator",
+        machine_name: null,
         tenant_id: null,
         token_id: operatorId,
         token_role: null,

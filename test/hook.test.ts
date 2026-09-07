@@ -391,6 +391,7 @@ test("renders only verified orchestrator guidance and notification authority", (
       agent_id: "boss-agent",
       policy_id: "00000000-0000-4000-8000-000000000001",
       scope: {
+        machine: "coder-vm",
         personal_id: null,
         repository: "mattpatagon/murmur",
         scope_kind: "organization",
@@ -398,6 +399,8 @@ test("renders only verified orchestrator guidance and notification authority", (
     },
   });
   expect(hookOrchestrationGuidance(configured)).toContain("boss-agent");
+  expect(hookOrchestrationGuidance(configured)).toContain("machine coder-vm");
+  expect(hookOrchestrationGuidance(configured)).toContain("repository mattpatagon/murmur");
   expect(hookOrchestrationGuidance({ kind: "orchestrator" })).toContain("get_delegation");
   expect(hookOrchestrationGuidance({ kind: "none" })).toContain("human");
   expect(hookOrchestrationState({ caller_authority: "peer", instructions: "private" })).toEqual({

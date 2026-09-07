@@ -173,7 +173,7 @@ async function expectedIds(fixture: Fixture, principal: TenantPrincipal): Promis
   const rows: unknown =
     await fixture.admin`SELECT policy_id::text AS id FROM murmur.orchestrator_policies
     WHERE tenant_id = ${principal.tenantId.value}::uuid
-    ORDER BY scope_kind, scope_owner_id, repository_name, policy_id`;
+    ORDER BY scope_kind, scope_owner_id, repository_name, machine_name, policy_id`;
   return z
     .array(z.strictObject({ id: z.string().uuid() }))
     .parse(rows)

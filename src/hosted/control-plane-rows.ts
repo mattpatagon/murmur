@@ -6,6 +6,7 @@ import {
   Instant,
   type JsonObject,
   JsonObjectSchema,
+  MachineName,
   RepositoryName,
   TenantId,
 } from "../domain/value-objects.js";
@@ -32,12 +33,17 @@ export type AuthRowV2 = AuthRow & {
   readonly repository_name: string | null;
 };
 
+export type AuthRowV3 = AuthRowV2 & {
+  readonly machine_name: string | null;
+};
+
 export type TokenRow = {
   readonly agent_id: string | null;
   readonly created_at: string;
   readonly expires_at: string | null;
   readonly key_id: string;
   readonly last_used_at: string | null;
+  readonly machine_name: string | null;
   readonly name: string;
   readonly personal_id: string;
   readonly repository_name: string | null;
@@ -95,6 +101,18 @@ export const AuthRowV2Schema: z.ZodType<AuthRowV2> = z.strictObject({
   token_role: z.enum(["agent", "tenant_admin", "orchestrator"]).nullable(),
 });
 
+export const AuthRowV3Schema: z.ZodType<AuthRowV3> = z.strictObject({
+  key_id: z.string(),
+  machine_name: z.string().nullable(),
+  orchestrator_agent_id: z.string().nullable(),
+  personal_id: z.string().uuid().nullable(),
+  principal_kind: z.enum(["bootstrap", "operator", "tenant"]),
+  repository_name: z.string().nullable(),
+  tenant_id: z.string().uuid().nullable(),
+  token_id: z.string().uuid(),
+  token_role: z.enum(["agent", "tenant_admin", "orchestrator"]).nullable(),
+});
+
 export const OperatorTokenRowSchema: z.ZodType<OperatorTokenRow> = z.strictObject({
   created_at: z.string(),
   expires_at: z.string().nullable(),
@@ -111,6 +129,7 @@ export const TokenRowSchema: z.ZodType<TokenRow> = z.strictObject({
   expires_at: z.string().nullable(),
   key_id: z.string(),
   last_used_at: z.string().nullable(),
+  machine_name: z.string().nullable(),
   name: z.string(),
   personal_id: z.string().uuid(),
   repository_name: z.string().nullable(),
@@ -170,6 +189,7 @@ export function mapToken(row: TokenRow): TokenSummary {
   return {
     ...mapOperatorToken(row),
     agentId: row.agent_id === null ? null : AgentId.parse(row.agent_id),
+    machineName: row.machine_name === null ? null : MachineName.parse(row.machine_name),
     personalId: PersonalId.parse(row.personal_id),
     repositoryName: row.repository_name === null ? null : RepositoryName.parse(row.repository_name),
     role: row.token_role,

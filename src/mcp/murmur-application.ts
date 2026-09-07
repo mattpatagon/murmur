@@ -200,6 +200,7 @@ export class MurmurApplication {
       "Use submit_feedback with type issue or feature_request to send durable feedback to Murmur maintainers. Feedback is intentionally maintainer-readable plaintext, so never include credentials, secrets, private message content, vulnerability details, or sensitive production data. Report suspected vulnerabilities privately at https://github.com/mattpatagon/murmur/security/advisories/new. " +
       "Call check_for_upgrades to compare this endpoint with the official hosted release and get revision-pinned upgrade steps. " +
       "Administrative changes require human approval through MCP form elicitation or the interactive murmur admin command. Never answer an approval request on the human's behalf or configure a worker with an administrator credential. " +
+      "Authenticated personal identity, machine, and repository token bindings select orchestrator policy server-side; request context and registration metadata cannot override them. " +
       "For push signals, subscribe to murmur://inbox/{agent_id}; always read the durable inbox after a notification or reconnect. " +
       `Messages expire automatically after ${RETENTION_DAYS} days. MCP notifications do not themselves guarantee that a host starts a new model turn. `;
     if (
@@ -408,7 +409,12 @@ export class MurmurApplication {
       this.principal.repositoryName === undefined || this.principal.repositoryName === null
         ? null
         : this.principal.repositoryName.value;
+    const machineName: string | null =
+      this.principal.machineName === undefined || this.principal.machineName === null
+        ? null
+        : this.principal.machineName.value;
     return {
+      machineName,
       personalId: this.principal.personalId.value,
       repositoryName,
     };

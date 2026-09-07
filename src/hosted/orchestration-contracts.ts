@@ -23,6 +23,12 @@ const RepositorySchema: z.ZodString = z
   .min(3)
   .max(500)
   .regex(/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/u);
+const MachineSchema: z.ZodString = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u);
 const InstructionsSchema: z.ZodType<string> = z
   .string()
   .min(1)
@@ -33,6 +39,7 @@ const InstructionsSchema: z.ZodType<string> = z
   });
 
 export type OrchestratorScopeInput = {
+  readonly machine?: string | undefined;
   readonly personal_id?: string | undefined;
   readonly repository?: string | undefined;
   readonly scope_kind: "organization" | "personal";
@@ -60,6 +67,7 @@ function validateScopeInput(
 
 export const OrchestratorScopeInputSchema: z.ZodType<OrchestratorScopeInput> = z
   .strictObject({
+    machine: MachineSchema.optional(),
     personal_id: z.string().uuid().optional(),
     repository: RepositorySchema.optional(),
     scope_kind: OrchestrationScopeKindSchema,
@@ -69,6 +77,7 @@ export const OrchestratorScopeInputSchema: z.ZodType<OrchestratorScopeInput> = z
 export type CreateOrchestratorTokenInput = {
   readonly agent_id: string;
   readonly expires_at?: string | undefined;
+  readonly machine?: string | undefined;
   readonly name: string;
   readonly personal_id?: string | undefined;
   readonly repository?: string | undefined;
@@ -78,6 +87,7 @@ export const CreateOrchestratorTokenInputSchema: z.ZodType<CreateOrchestratorTok
   z.strictObject({
     agent_id: AgentIdSchema,
     expires_at: InstantSchema.optional(),
+    machine: MachineSchema.optional(),
     name: z.string().trim().min(1).max(200),
     personal_id: z.string().uuid().optional(),
     repository: RepositorySchema.optional(),
@@ -92,6 +102,7 @@ export const SetOrchestratorPolicyInputSchema: z.ZodType<SetOrchestratorPolicyIn
   .strictObject({
     instructions: InstructionsSchema,
     orchestrator_key_id: KeyIdSchema,
+    machine: MachineSchema.optional(),
     personal_id: z.string().uuid().optional(),
     repository: RepositorySchema.optional(),
     scope_kind: OrchestrationScopeKindSchema,
@@ -149,6 +160,7 @@ export const GetDelegationInputSchema: z.ZodType<GetDelegationInput> = z.strictO
 });
 
 export type ScopeDto = {
+  readonly machine?: string | null | undefined;
   readonly personal_id: string | null;
   readonly repository: string | null;
   readonly scope_kind: "organization" | "personal";
@@ -171,6 +183,7 @@ export type OrchestratorPolicyDto = EffectiveOrchestratorDto & {
 };
 
 const ScopeDtoSchema: z.ZodType<ScopeDto> = z.strictObject({
+  machine: MachineSchema.nullable().optional(),
   personal_id: z.string().uuid().nullable(),
   repository: RepositorySchema.nullable(),
   scope_kind: OrchestrationScopeKindSchema,
@@ -256,6 +269,7 @@ export const GetDelegationOutputSchema: z.ZodType<GetDelegationOutput> = z.stric
 
 function toScopeDto(scope: OrchestratorScope): ScopeDto {
   return {
+    ...(scope.machineName === null ? {} : { machine: scope.machineName.value }),
     personal_id: scope.personalId === null ? null : scope.personalId.value,
     repository: scope.repositoryName === null ? null : scope.repositoryName.value,
     scope_kind: scope.kind,

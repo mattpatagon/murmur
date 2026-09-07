@@ -215,6 +215,40 @@ test("workflow performs authoritative secret reads before applying migrations", 
   }
 });
 
+test("workflow freezes policy writers across migration and replica cutover", async (): Promise<void> => {
+  const workflow: string = await Bun.file(".github/workflows/deploy.yml").text();
+  const privilegeScript: string = await Bun.file(
+    "scripts/deploy/set-orchestrator-policy-mutations.sh",
+  ).text();
+  const freezePosition: number = workflow.indexOf("Freeze orchestrator policy mutations");
+  const migrationPosition: number = workflow.indexOf(
+    "Apply migrations and verify shared Postgres",
+    freezePosition,
+  );
+  const deployPosition: number = workflow.indexOf("Deploy Cloud Run revision", migrationPosition);
+  const healthPosition: number = workflow.indexOf(
+    "Verify production tenant contract and final health",
+    deployPosition,
+  );
+  const unfreezePosition: number = workflow.indexOf(
+    "Unfreeze orchestrator policy mutations",
+    healthPosition,
+  );
+  expect(freezePosition).toBeGreaterThan(-1);
+  expect(migrationPosition).toBeGreaterThan(freezePosition);
+  expect(deployPosition).toBeGreaterThan(migrationPosition);
+  expect(healthPosition).toBeGreaterThan(deployPosition);
+  expect(unfreezePosition).toBeGreaterThan(healthPosition);
+  expect(privilegeScript).toContain("revoke insert, update");
+  expect(privilegeScript).toContain("grant select, insert, update");
+  expect(privilegeScript).toContain("has_table_privilege");
+  expect(privilegeScript).toContain("lock_timeout = '5s'");
+  expect(privilegeScript).toContain("statement_timeout = '30s'");
+  expect(privilegeScript).toContain("export PGPASSWORD=");
+  expect(privilegeScript).not.toContain('psql "$database_url"');
+  expect(privilegeScript).not.toContain('echo "::add-mask::$database_url"');
+});
+
 test("workflow resumes runtime credentials through the reachable admin database", async (): Promise<void> => {
   const workflow: string = await Bun.file(".github/workflows/deploy.yml").text();
   const migrations: string = await Bun.file("scripts/deploy/apply-migrations.sh").text();

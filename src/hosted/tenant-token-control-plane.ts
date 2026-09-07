@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { AgentAuthorityConflictError } from "../domain/errors.js";
 import { PersonalId } from "../domain/orchestration.js";
-import type { AgentId, Instant, RepositoryName } from "../domain/value-objects.js";
+import type { AgentId, Instant, MachineName, RepositoryName } from "../domain/value-objects.js";
 import { setPostgresTenantContext } from "../storage/postgres-message-transactions.js";
 import type {
   IssuedToken,
@@ -72,6 +72,7 @@ export async function createPostgresTenantToken(
   expiresAt: Instant | null,
   requestedPersonalId: PersonalId | null,
   repositoryName: RepositoryName | null,
+  machineName: MachineName | null,
 ): Promise<IssuedToken> {
   if (role === "orchestrator") {
     throw new Error("Use create_orchestrator_token for orchestrator credentials");
@@ -91,12 +92,13 @@ export async function createPostgresTenantToken(
       personalId,
       repositoryName,
       null,
+      machineName,
     );
     await pruneInactiveTokens(transaction, principal);
     await transaction`
       INSERT INTO murmur.access_tokens(
         token_id, tenant_id, key_id, secret_hash, token_role, name, expires_at,
-        personal_id, repository_name, created_by_token_id
+        personal_id, repository_name, machine_name, created_by_token_id
       ) VALUES (
         ${issued.token.tokenId}::uuid,
         ${principal.tenantId.value}::uuid,
@@ -107,6 +109,7 @@ export async function createPostgresTenantToken(
         ${expiresAt === null ? null : expiresAt.toISOString()}::timestamptz,
         ${personalId.value}::uuid,
         ${repositoryName === null ? null : repositoryName.value},
+        ${machineName === null ? null : machineName.value},
         ${attributionTokenId(principal)}::uuid
       )
     `;
@@ -122,6 +125,7 @@ export async function createPostgresOrchestratorToken(
   expiresAt: Instant | null,
   requestedPersonalId: PersonalId | null,
   repositoryName: RepositoryName | null,
+  machineName: MachineName | null,
 ): Promise<IssuedToken> {
   return await database.begin(async (transaction: TransactionSql): Promise<IssuedToken> => {
     await setPostgresTenantContext(transaction, principal.tenantId);
@@ -181,6 +185,7 @@ export async function createPostgresOrchestratorToken(
       personalId,
       repositoryName,
       agentId,
+      machineName,
     );
     if (existing === undefined) {
       try {
@@ -211,7 +216,7 @@ export async function createPostgresOrchestratorToken(
     await transaction`
       INSERT INTO murmur.access_tokens(
         token_id, tenant_id, key_id, secret_hash, token_role, name, expires_at,
-        personal_id, repository_name, orchestrator_agent_id, created_by_token_id
+        personal_id, repository_name, machine_name, orchestrator_agent_id, created_by_token_id
       ) VALUES (
         ${issued.token.tokenId}::uuid,
         ${principal.tenantId.value}::uuid,
@@ -222,6 +227,7 @@ export async function createPostgresOrchestratorToken(
         ${expiresAt === null ? null : expiresAt.toISOString()}::timestamptz,
         ${personalId.value}::uuid,
         ${repositoryName === null ? null : repositoryName.value},
+        ${machineName === null ? null : machineName.value},
         ${agentId.value},
         ${attributionTokenId(principal)}::uuid
       )
@@ -241,7 +247,7 @@ export async function listPostgresTenantTokens(
     const rawRows: unknown = await transaction`
       SELECT
         token_id::text AS token_id, key_id, token_role, name,
-        personal_id::text AS personal_id, repository_name,
+        personal_id::text AS personal_id, repository_name, machine_name,
         orchestrator_agent_id AS agent_id,
         to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created_at,
         CASE WHEN expires_at IS NULL THEN NULL ELSE

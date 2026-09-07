@@ -2,7 +2,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 import { PersonalId } from "../domain/orchestration.js";
-import { Instant, RepositoryName, TenantId } from "../domain/value-objects.js";
+import { Instant, MachineName, RepositoryName, TenantId } from "../domain/value-objects.js";
 import {
   type BootstrapOperatorInput,
   BootstrapOperatorInputSchema,
@@ -109,6 +109,7 @@ export async function callTenantAdminTool(
         expiration(input.expires_at),
         input.personal_id === undefined ? null : PersonalId.parse(input.personal_id),
         input.repository === undefined ? null : RepositoryName.parse(input.repository),
+        input.machine === undefined ? null : MachineName.parse(input.machine),
       );
       const output: IssuedTokenOutput = IssuedTokenOutputSchema.parse({
         token: toIssuedTokenDto(token),

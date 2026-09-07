@@ -42,6 +42,7 @@ function maximumToken(pattern: string): TokenSummaryDto {
     expires_at: FIXTURE_INSTANT.toISOString(),
     key_id: "k".repeat(32),
     last_used_at: FIXTURE_INSTANT.toISOString(),
+    machine: "m".repeat(200),
     name: maximumText(pattern, 200),
     personal_id: FIXTURE_ID,
     repository: `a/${"b".repeat(498)}`,

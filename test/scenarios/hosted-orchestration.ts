@@ -27,13 +27,13 @@ import {
   post,
   toolNames,
 } from "../support/hosted-mcp-harness.js";
-import { verifyExpiredOrchestratorRotation } from "./hosted-orchestration-expiry.js";
 import { verifyFeedbackAuthorityBoundary } from "./hosted-feedback-security.js";
 import {
   verifyAskIdempotencyConflicts,
   verifyConcurrentSameScopePolicies,
   verifyPersonalPolicyOwnership,
 } from "./hosted-orchestration-completion.js";
+import { verifyExpiredOrchestratorRotation } from "./hosted-orchestration-expiry.js";
 import {
   createWorker,
   requireOrchestrator,
@@ -49,6 +49,7 @@ import {
   verifyReassignedDuplicate,
   type Worker,
 } from "./hosted-orchestration-helpers.js";
+import { verifyMachineScopedRouting } from "./hosted-orchestration-machine.js";
 import {
   verifyClearSerialization,
   verifyRevokeSerialization,
@@ -221,6 +222,11 @@ export async function verifyHostedOrchestration(
   expect(publicResolution).not.toHaveProperty("instructions");
 
   await verifyPolicyPagination(scenario);
+  await verifyMachineScopedRouting({
+    bossAgentId,
+    bossKeyId: boss.token.key_id,
+    scenario,
+  });
   const delegation: GetDelegationOutput = await callTool(
     url,
     boss.token.secret,
