@@ -89,9 +89,16 @@ export class LocalVaultSettings {
     const raw: unknown = statement.get(logicalId, now);
     if (raw === null) return null;
     const row: OrchestrationRouteRow = OrchestrationRouteRowSchema.parse(raw);
+    const parsed: EffectiveOrchestratorDto = EffectiveOrchestratorDtoSchema.parse(
+      JSON.parse(row.orchestrator_json),
+    );
+    const orchestrator: EffectiveOrchestratorDto =
+      parsed.scope.machine === undefined
+        ? { ...parsed, scope: { ...parsed.scope, machine: null } }
+        : parsed;
     return {
       expiresAt: row.expires_at,
-      orchestrator: EffectiveOrchestratorDtoSchema.parse(JSON.parse(row.orchestrator_json)),
+      orchestrator,
     };
   }
 

@@ -3,7 +3,7 @@
 Murmur uses standard MCP transports and keeps the durable coordination model independent of any
 one agent harness. The `client` value is validated provenance: a lowercase identifier beginning
 with a letter, followed by at most 31 lowercase letters, digits, or hyphens. It never selects a
-tenant, role, repository grant, or orchestrator policy.
+tenant, role, machine/repository grant, or orchestrator policy.
 
 ## Support levels
 

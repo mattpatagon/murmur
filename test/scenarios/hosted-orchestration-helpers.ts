@@ -43,7 +43,6 @@ import { callTool, callToolExpectingError, initialize } from "../support/hosted-
 import type { HostedTenantScenario } from "./hosted-tenant-provisioning.js";
 
 export type Worker = { readonly session: string; readonly token: IssuedTokenOutput };
-
 export function requireOrchestrator(output: GetOrchestratorOutput): EffectiveOrchestratorDto {
   if (output.orchestrator === null) throw new Error("Expected an effective orchestrator");
   return output.orchestrator;
@@ -52,7 +51,11 @@ export function requireOrchestrator(output: GetOrchestratorOutput): EffectiveOrc
 export async function createWorker(
   scenario: HostedTenantScenario,
   name: string,
-  options: { readonly personalId?: string; readonly repository?: string },
+  options: {
+    readonly machine?: string;
+    readonly personalId?: string;
+    readonly repository?: string;
+  },
 ): Promise<Worker> {
   const token: IssuedTokenOutput = await callTool(
     scenario.server.mcpUrl,
@@ -62,6 +65,7 @@ export async function createWorker(
     "create_access_token",
     {
       name,
+      ...(options.machine === undefined ? {} : { machine: options.machine }),
       ...(options.personalId === undefined ? {} : { personal_id: options.personalId }),
       ...(options.repository === undefined ? {} : { repository: options.repository }),
       role: "agent",

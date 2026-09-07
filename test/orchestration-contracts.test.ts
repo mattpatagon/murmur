@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-  ordinaryMessageProvenance,
   OrchestratorPolicyId,
+  ordinaryMessageProvenance,
   validateMessageProvenance,
 } from "../src/domain/orchestration.js";
 import { CreateTokenInputSchema } from "../src/hosted/contracts.js";
@@ -16,12 +16,25 @@ const PERSONAL_ID: string = "10000000-0000-4000-8000-000000000001";
 const POLICY_ID: string = "20000000-0000-4000-8000-000000000001";
 
 describe("orchestration boundary contracts", (): void => {
-  test("accepts exactly the four supported scope shapes", (): void => {
+  test("accepts all eight owner, repository, and machine scope shapes", (): void => {
     const scopes: readonly unknown[] = [
       { scope_kind: "organization" },
+      { machine: "build-host-01", scope_kind: "organization" },
       { repository: "mattpatagon/murmur", scope_kind: "organization" },
-      { personal_id: PERSONAL_ID, scope_kind: "personal" },
       {
+        machine: "build-host-01",
+        repository: "mattpatagon/murmur",
+        scope_kind: "organization",
+      },
+      { personal_id: PERSONAL_ID, scope_kind: "personal" },
+      { machine: "build-host-01", personal_id: PERSONAL_ID, scope_kind: "personal" },
+      {
+        personal_id: PERSONAL_ID,
+        repository: "mattpatagon/murmur",
+        scope_kind: "personal",
+      },
+      {
+        machine: "build-host-01",
         personal_id: PERSONAL_ID,
         repository: "mattpatagon/murmur",
         scope_kind: "personal",
@@ -37,6 +50,8 @@ describe("orchestration boundary contracts", (): void => {
       { personal_id: PERSONAL_ID, scope_kind: "organization" },
       { scope_kind: "personal" },
       { repository: "missing-slash", scope_kind: "organization" },
+      { machine: "contains spaces", scope_kind: "organization" },
+      { machine: "x".repeat(201), scope_kind: "organization" },
       { extra: true, scope_kind: "organization" },
     ];
     invalidScopes.forEach((scope: unknown): void => {

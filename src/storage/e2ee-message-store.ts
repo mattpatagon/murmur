@@ -26,6 +26,7 @@ import type { Awaitable, InboxSubscription } from "./message-store.js";
 export type EncryptedInboxUpdateHandler = (sequence: number) => Promise<void>;
 
 export type E2eeOrchestrationScope = {
+  readonly machineName: string | null;
   readonly personalId: string;
   readonly repositoryName: string | null;
 };

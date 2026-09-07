@@ -1,7 +1,9 @@
 # Orchestration policy pages
 
 Hosted `list_orchestrator_policies` returns a fitting prefix bounded by both the requested
-count (1–100) and an 8 MiB accounted response budget. Its output fields are unchanged.
+count (1–100) and an 8 MiB accounted response budget. Scope output includes nullable
+`repository`; `machine` is present for a machine-qualified scope and omitted for an unbound scope
+so released strict clients continue accepting global and repository-only rows.
 Continue using `next_cursor` until it is null, even when a page contains fewer than `limit`
 policies. No instructions are truncated and no policy is deleted.
 
@@ -9,14 +11,14 @@ policies. No instructions are truncated and no policy is deleted.
 
 Each row costs `13 × UTF-8 instruction bytes + 8 KiB`. A control character can consume six
 JSON bytes in structured content and seven in the separately escaped tool-text copy.
-The fixed allowance covers the SQL-bounded IDs, agent/repository fields, timestamps, JSON
+The fixed allowance covers the SQL-bounded IDs, agent/machine/repository fields, timestamps, JSON
 field names, cursor, envelope and the bounded overflow-row metadata. It is conservative
 accounting, not a physical heap measurement. All non-instruction string fields are bounded
 by UUID types, SQL checks or existing runtime value-object validation.
 
 With 8,192 instruction bytes per row, a page fits 73 policies. A count-only page of 100 valid
-policies with control-character instructions and maximum-length agent/repository fields
-would produce 10,881,930 tool-response bytes. The regression calculates that exactly one
+policies with control-character instructions and maximum-length agent/machine/repository fields
+would produce 10,924,930 tool-response bytes. The regression calculates that exactly one
 row at a time, checked against a small serialized response, without allocating that entire
 oversized wire representation.
 
@@ -36,16 +38,18 @@ positions and null payloads; their instructions never cross the database driver 
 The parser checks contiguous positions, unique IDs, payload identities, cumulative byte
 costs and a gap-free fitting prefix before returning any policies.
 
-Ordering remains `(scope_kind, scope_owner_id, repository_name, policy_id)`. The cursor is
+Ordering is `(scope_kind, scope_owner_id, repository_name, machine_name, policy_id)`. The cursor is
 still the last returned policy UUID, looked up within the same tenant using the existing
 tuple comparison. Missing, foreign-tenant and end cursors return empty pages. Disabled
 policies and policies whose tokens are revoked remain listed, as before. Each page has one
 statement snapshot; concurrent changes between successive pages retain the existing cursor
 semantics and are not a stable multi-request export snapshot.
 
-Tenant context, forced RLS, runtime-role privileges and tenant-qualified token joins are
-unchanged. No migrations, grants or security-definer functions are added. The implementation
-uses PostgreSQL 17's explicit [CTE materialization](https://www.postgresql.org/docs/17/queries-with.html#QUERIES-WITH-CTE-MATERIALIZATION)
+The page-budget mechanism does not add migrations, grants, or security-definer functions; its
+tenant context, forced RLS, runtime-role privileges, and tenant-qualified token joins are
+unchanged. Machine-scoped orchestration is installed by the separate forward migrations described
+in [upgrading.md](upgrading.md). The page implementation uses PostgreSQL 17's explicit
+[CTE materialization](https://www.postgresql.org/docs/17/queries-with.html#QUERIES-WITH-CTE-MATERIALIZATION)
 and retains the existing [RLS boundary](https://supabase.com/docs/guides/database/postgres/row-level-security).
 
 The focused unit regression and `test/orchestration-policy-page.postgres.test.ts` cover

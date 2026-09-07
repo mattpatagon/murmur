@@ -32,6 +32,7 @@ export async function verifyHostedControlPlaneSchema(database: Sql): Promise<voi
     SELECT
       to_regprocedure('murmur.authenticate_principal(bytea)') IS NOT NULL
       AND to_regprocedure('murmur.authenticate_principal_v2(bytea)') IS NOT NULL
+      AND to_regprocedure('murmur.authenticate_principal_v3(bytea)') IS NOT NULL
       AND to_regprocedure('murmur.active_credential_hints()') IS NOT NULL
       AND to_regprocedure(
         'murmur.self_service_create_tenant(uuid,text,text,uuid,text,bytea)'

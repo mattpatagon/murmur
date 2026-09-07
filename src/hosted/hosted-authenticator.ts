@@ -2,9 +2,9 @@ import type { Sql } from "postgres";
 import { z } from "zod";
 
 import { PersonalId } from "../domain/orchestration.js";
-import { AgentId, RepositoryName, TenantId } from "../domain/value-objects.js";
+import { AgentId, MachineName, RepositoryName, TenantId } from "../domain/value-objects.js";
 import type { CredentialAdmission, HostedPrincipal } from "./control-plane-contracts.js";
-import { type AuthRowV2, AuthRowV2Schema } from "./control-plane-rows.js";
+import { type AuthRowV3, AuthRowV3Schema } from "./control-plane-rows.js";
 import { CredentialAdmissionCache } from "./credential-admission-cache.js";
 import {
   credentialAdmissionKey,
@@ -13,7 +13,7 @@ import {
   hashTokenSecret,
 } from "./token-secret.js";
 
-const AuthRowsV2Schema: z.ZodType<AuthRowV2[]> = z.array(AuthRowV2Schema).max(1);
+const AuthRowsV3Schema: z.ZodType<AuthRowV3[]> = z.array(AuthRowV3Schema).max(1);
 
 export class HostedAuthenticator {
   private readonly admissions: CredentialAdmissionCache;
@@ -77,10 +77,10 @@ export class HostedAuthenticator {
     const rawRows: unknown = await this.database`
       SELECT principal_kind, token_id::text AS token_id, key_id,
         tenant_id::text AS tenant_id, token_role,
-        personal_id::text AS personal_id, repository_name, orchestrator_agent_id
-      FROM murmur.authenticate_principal_v2(${credentialHash})
+        personal_id::text AS personal_id, repository_name, machine_name, orchestrator_agent_id
+      FROM murmur.authenticate_principal_v3(${credentialHash})
     `;
-    const row: AuthRowV2 | undefined = AuthRowsV2Schema.parse(rawRows)[0];
+    const row: AuthRowV3 | undefined = AuthRowsV3Schema.parse(rawRows)[0];
     if (row === undefined) return null;
     if (row.principal_kind === "bootstrap") {
       if (
@@ -88,6 +88,7 @@ export class HostedAuthenticator {
         row.token_role !== null ||
         row.personal_id !== null ||
         row.repository_name !== null ||
+        row.machine_name !== null ||
         row.orchestrator_agent_id !== null
       ) {
         throw new Error("Bootstrap authentication returned tenant fields");
@@ -100,6 +101,7 @@ export class HostedAuthenticator {
         row.token_role !== null ||
         row.personal_id !== null ||
         row.repository_name !== null ||
+        row.machine_name !== null ||
         row.orchestrator_agent_id !== null
       ) {
         throw new Error("Operator authentication returned tenant fields");
@@ -118,6 +120,7 @@ export class HostedAuthenticator {
     return {
       agentId: row.orchestrator_agent_id === null ? null : AgentId.parse(row.orchestrator_agent_id),
       kind: "tenant",
+      machineName: row.machine_name === null ? null : MachineName.parse(row.machine_name),
       personalId: PersonalId.parse(row.personal_id),
       repositoryName:
         row.repository_name === null ? null : RepositoryName.parse(row.repository_name),

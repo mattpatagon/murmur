@@ -32,6 +32,7 @@ export async function listPostgresOrchestratorPolicies(
         const rawRows: unknown = await transaction`
       WITH candidate AS MATERIALIZED (
       SELECT policy.policy_id, policy.scope_kind, policy.scope_owner_id, policy.repository_name,
+        policy.machine_name,
         octet_length(policy.instructions) * ${POLICY_INSTRUCTIONS_MULTIPLIER}
           + ${POLICY_PAGE_ROW_BYTES} AS row_bytes
       FROM murmur.orchestrator_policies AS policy
@@ -41,16 +42,20 @@ export async function listPostgresOrchestratorPolicies(
       WHERE policy.tenant_id = ${principal.tenantId.value}::uuid
         AND (
           ${cursor}::uuid IS NULL
-          OR (policy.scope_kind, policy.scope_owner_id, policy.repository_name, policy.policy_id) > (
+          OR (
+            policy.scope_kind, policy.scope_owner_id, policy.repository_name,
+            policy.machine_name, policy.policy_id
+          ) > (
             SELECT
               cursor_policy.scope_kind, cursor_policy.scope_owner_id,
-              cursor_policy.repository_name, cursor_policy.policy_id
+              cursor_policy.repository_name, cursor_policy.machine_name, cursor_policy.policy_id
             FROM murmur.orchestrator_policies AS cursor_policy
             WHERE cursor_policy.tenant_id = ${principal.tenantId.value}::uuid
               AND cursor_policy.policy_id = ${cursor}::uuid
           )
         )
-      ORDER BY policy.scope_kind, policy.scope_owner_id, policy.repository_name, policy.policy_id
+      ORDER BY policy.scope_kind, policy.scope_owner_id, policy.repository_name,
+        policy.machine_name, policy.policy_id
       LIMIT ${boundedLimit + 1}
       ), metered AS MATERIALIZED (
         SELECT policy_id,
@@ -58,7 +63,7 @@ export async function listPostgresOrchestratorPolicies(
           sum(row_bytes) OVER policy_order AS estimated_page_bytes
         FROM candidate
         WINDOW policy_order AS (
-          ORDER BY scope_kind, scope_owner_id, repository_name, policy_id
+          ORDER BY scope_kind, scope_owner_id, repository_name, machine_name, policy_id
           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
         )
       ), fitting AS MATERIALIZED (
@@ -72,6 +77,7 @@ export async function listPostgresOrchestratorPolicies(
         SELECT
           policy.policy_id::text AS policy_id, policy.scope_kind,
           policy.scope_owner_id::text AS scope_owner_id, policy.repository_name,
+          policy.machine_name,
           policy.orchestrator_token_id::text AS orchestrator_token_id,
           token.orchestrator_agent_id, policy.instructions, policy.enabled,
           policy.created_by_token_id::text AS created_by_token_id,

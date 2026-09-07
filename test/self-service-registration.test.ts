@@ -51,6 +51,7 @@ function createdTenant(
       agentId: null,
       expiresAt: null,
       keyId: "tenant01",
+      machineName: null,
       name: "Initial tenant administrator",
       personalId: PersonalId.parse(TOKEN_ID),
       repositoryName: null,

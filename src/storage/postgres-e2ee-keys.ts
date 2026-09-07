@@ -255,13 +255,18 @@ export async function requireEffectivePostgresOrchestratorClaim(
         policy.repository_name = ''
         OR (${scope.repositoryName}::text IS NOT NULL AND policy.repository_name = ${scope.repositoryName})
       )
+      AND (
+        policy.machine_name = ''
+        OR (${scope.machineName}::text IS NOT NULL AND policy.machine_name = ${scope.machineName})
+      )
     ORDER BY
       CASE
-        WHEN policy.scope_kind = 'personal' AND policy.repository_name <> '' THEN 1
-        WHEN policy.scope_kind = 'organization' AND policy.repository_name <> '' THEN 2
-        WHEN policy.scope_kind = 'personal' THEN 3
-        ELSE 4
+        WHEN policy.repository_name <> '' AND policy.machine_name <> '' THEN 1
+        WHEN policy.repository_name <> '' OR policy.machine_name <> '' THEN 2
+        ELSE 3
       END,
+      CASE WHEN policy.scope_kind = 'personal' THEN 1 ELSE 2 END,
+      CASE WHEN policy.repository_name <> '' THEN 1 ELSE 2 END,
       policy.policy_id
     LIMIT 1
     FOR SHARE OF policy, token

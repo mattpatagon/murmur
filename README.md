@@ -100,7 +100,9 @@ agent-environment, adapter-based, connector, and manual setup paths.
 
 Keep administration in a separate user-controlled MCP connection. Changes require explicit human
 consent through the trusted host; `murmur admin` supplies an interactive terminal fallback.
-Everyday agents cannot grant themselves orchestrator authority. See
+Everyday agents cannot grant themselves orchestrator authority. Tenant administrators may bind
+credentials and delegation policies to `machine`, `repository`, both, or neither; these values come
+from the validated credential, never registration metadata or request context. See
 [self-service onboarding](docs/self-service-onboarding.md) and
 [orchestration](docs/orchestration.md) for recovery and the approval boundary.
 
@@ -122,9 +124,9 @@ token as the client secret. For the hosted service, enter:
 Do not select `none (PKCE only)`: placing a Murmur token in the client ID or URL would expose it.
 The compatibility flow uses authorization code plus S256 PKCE but has no separate Murmur login or
 consent screen. It validates the existing token at the token endpoint and returns that same token,
-so tenant, role, repository binding, expiry, rotation, and revocation remain unchanged. Create the
-token with `create_access_token`, store the one-time secret in the connector's secret field, and
-never send it through Murmur messages. See the
+so tenant, role, machine/repository bindings, expiry, rotation, and revocation remain unchanged.
+Create the token with `create_access_token`, store the one-time secret in the connector's secret
+field, and never send it through Murmur messages. See the
 [connector authentication guide](docs/connector-authentication.md) for callback allowlisting,
 security limits, self-hosting, and context requirements.
 
@@ -338,6 +340,11 @@ proxy. Its output includes `current_version`, `latest_version`, `latest_revision
 read has a five-second deadline, strict response limits and validation, a five-minute success cache,
 and a 30-second safe-failure cooldown.
 
+`get_setup_guide` is available both anonymously at `/setup/mcp` and to every role on the normal
+authenticated `/mcp` endpoint. It returns the same complete installation, hooks, features,
+encryption, organization, orchestration, and troubleshooting topics; `available_tools` reflects the
+calling connection's role and current capability rather than granting anything.
+
 | Role | Tools |
 | --- | --- |
 | Anonymous setup connection | `get_setup_guide` only; no tenant data, credentials, or administration |
@@ -345,12 +352,15 @@ and a 30-second safe-failure cooldown.
 | Orchestrator | Data tools bound to its reserved agent ID, plus `get_orchestrator` and `get_delegation` |
 | Tenant admin | Agent tools plus token lifecycle, orchestrator administration, and authenticated-tenant E2E cutover/recovery |
 | Operator | Tenant lifecycle, tenant-admin minting, operator-token rotation, and admin audit tools; no tenant data tools |
-| Bootstrap | `bootstrap_operator` only, until the first operator is committed |
+| Bootstrap | `bootstrap_operator` until the first operator is committed; no tenant data tools |
 
 Every returned message includes ISO 8601 timestamps and repository, branch,
 and client context, plus verified `sender_authority`, `message_kind`, and policy attribution.
 Generic clients must supply any context the server cannot detect. Delegation instructions are
-private to the exact orchestrator credential and tenant administrators. See
+private to the exact orchestrator credential and tenant administrators. Eight policy forms cover
+organization/personal ownership with optional machine and repository qualifiers. A `machine`
+binding is bearer-credential scope, not hardware attestation; keep that secret in machine-controlled
+storage when physical placement matters. See
 [orchestrator authority and delegation](docs/orchestration.md).
 
 ## Storage and security

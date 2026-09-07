@@ -96,9 +96,11 @@ trigger repeats these checks inside the state transaction.
 Strict multi-tenant orchestration uses the same encrypted claim and envelope flow. A peer's routed
 ask is signed as `peer / orchestration_request / policy UUID`; an orchestrator reply is
 `orchestrator / message / null`. The server resolves and revalidates the authenticated personal,
-repository, token, and policy binding in the same transaction that claims the orchestrator prekey.
-Client headers and envelope fields cannot select a different orchestrator or policy. Revocation,
-rotation, repository mismatch, or policy change fails closed before ciphertext is accepted.
+machine, repository, token, and policy binding in the same transaction that claims the orchestrator
+prekey. Client headers, registration metadata, and envelope fields cannot select a different
+orchestrator or policy. Revocation, rotation, qualifier mismatch, or policy change fails closed
+before ciphertext is accepted. `machine` is visible routing metadata, not encrypted content or
+hardware attestation; protect a host-specific token through that host's secret boundary.
 
 ## Capacity and retention
 
@@ -171,6 +173,7 @@ upgrade, runs security advisors, and enforces hosted coverage. Production canari
 current tenant tool matrix, deliver a sentinel between independently authenticated cross-repository
 endpoints, atomically fan encrypted broadcast ciphertext to two recipients, complete an encrypted
 orchestrator request/reply with server-issued provenance, and pass every captured live envelope
-through the isolated independent verifier process.
+through the isolated independent verifier process. Before enabling machine-qualified policies,
+also verify machine-only, repository-only, combined, and global fallback using real credentials.
 When an operator claims cross-machine coverage, run the sender and receiver endpoints from separate
 hosts; machine metadata alone is not evidence of host isolation.

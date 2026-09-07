@@ -7,7 +7,7 @@ import { RETENTION_DAYS } from "../domain/contracts.js";
 import { AgentAuthorityError, IdempotencyConflictError } from "../domain/errors.js";
 import type { Message } from "../domain/models.js";
 import { type OrchestratorPolicyId, PersonalId } from "../domain/orchestration.js";
-import { type AgentId, RepositoryName, ThreadId } from "../domain/value-objects.js";
+import { type AgentId, MachineName, RepositoryName, ThreadId } from "../domain/value-objects.js";
 import {
   firstRow,
   type MessageRow,
@@ -43,6 +43,10 @@ function repositoryName(principal: TenantPrincipal): RepositoryName | null {
   return principal.repositoryName === undefined ? null : principal.repositoryName;
 }
 
+function machineName(principal: TenantPrincipal): MachineName | null {
+  return principal.machineName === undefined ? null : principal.machineName;
+}
+
 function scopeOwnerId(principal: TenantPrincipal, scope: OrchestratorScope): string {
   if (scope.kind === "organization") return principal.tenantId.value;
   if (scope.personalId === null) throw new Error("A personal scope requires a personal identity");
@@ -73,6 +77,7 @@ function parsePolicies(rawRows: unknown): OrchestratorPolicy[] {
 }
 
 type StoredPolicyScopeRow = {
+  readonly machine_name: string;
   readonly policy_id: string;
   readonly repository_name: string;
   readonly scope_kind: "organization" | "personal";
@@ -80,6 +85,7 @@ type StoredPolicyScopeRow = {
 };
 
 const StoredPolicyScopeRowSchema: z.ZodType<StoredPolicyScopeRow> = z.strictObject({
+  machine_name: z.string(),
   policy_id: z.string().uuid(),
   repository_name: z.string(),
   scope_kind: z.enum(["organization", "personal"]),
@@ -98,14 +104,15 @@ export async function setPostgresOrchestratorPolicy(
     await ensurePersonalScopeExists(transaction, principal, scope);
     const ownerId: string = scopeOwnerId(principal, scope);
     const repository: string = scope.repositoryName === null ? "" : scope.repositoryName.value;
+    const machine: string = scope.machineName === null ? "" : scope.machineName.value;
     const rawRows: unknown = await transaction`
         INSERT INTO murmur.orchestrator_policies(
           tenant_id, scope_kind, scope_owner_id, repository_name,
-          orchestrator_token_id, instructions, enabled,
+          machine_name, orchestrator_token_id, instructions, enabled,
           created_by_token_id, updated_by_token_id
         )
         SELECT
-          ${principal.tenantId.value}::uuid, ${scope.kind}, ${ownerId}::uuid, ${repository},
+          ${principal.tenantId.value}::uuid, ${scope.kind}, ${ownerId}::uuid, ${repository}, ${machine},
           token.token_id, ${instructions}, true,
           ${principal.tokenId}::uuid, ${principal.tokenId}::uuid
         FROM murmur.access_tokens AS token
@@ -114,7 +121,7 @@ export async function setPostgresOrchestratorPolicy(
           AND token.token_role = 'orchestrator'
           AND token.revoked_at IS NULL
           AND (token.expires_at IS NULL OR token.expires_at > pg_catalog.statement_timestamp())
-        ON CONFLICT(tenant_id, scope_kind, scope_owner_id, repository_name) DO UPDATE SET
+        ON CONFLICT(tenant_id, scope_kind, scope_owner_id, repository_name, machine_name) DO UPDATE SET
           orchestrator_token_id = excluded.orchestrator_token_id,
           instructions = excluded.instructions,
           enabled = true,
@@ -122,7 +129,7 @@ export async function setPostgresOrchestratorPolicy(
           updated_at = pg_catalog.statement_timestamp()
         RETURNING
           policy_id::text AS policy_id, scope_kind, scope_owner_id::text AS scope_owner_id,
-          repository_name, orchestrator_token_id::text AS orchestrator_token_id,
+          repository_name, machine_name, orchestrator_token_id::text AS orchestrator_token_id,
           (
             SELECT token.orchestrator_agent_id
             FROM murmur.access_tokens AS token
@@ -151,6 +158,7 @@ export async function clearPostgresOrchestratorPolicy(
     await setPostgresTenantContext(transaction, principal.tenantId);
     const ownerId: string = scopeOwnerId(principal, scope);
     const repository: string = scope.repositoryName === null ? "" : scope.repositoryName.value;
+    const machine: string = scope.machineName === null ? "" : scope.machineName.value;
     const rawRows: unknown = await transaction`
       UPDATE murmur.orchestrator_policies
       SET enabled = false,
@@ -160,6 +168,7 @@ export async function clearPostgresOrchestratorPolicy(
         AND scope_kind = ${scope.kind}
         AND scope_owner_id = ${ownerId}::uuid
         AND repository_name = ${repository}
+        AND machine_name = ${machine}
         AND enabled
       RETURNING policy_id::text AS policy_id
     `;
@@ -175,13 +184,15 @@ async function resolveInTransaction(
   const personalId: PersonalId = requirePersonalId(principal);
   const repository: RepositoryName | null = repositoryName(principal);
   const repositoryValue: string | null = repository === null ? null : repository.value;
+  const machine: MachineName | null = machineName(principal);
+  const machineValue: string | null = machine === null ? null : machine.value;
   const lockingClause: Fragment = lockAuthority
     ? transaction`FOR SHARE OF policy, token`
     : transaction``;
   const rawRows: unknown = await transaction`
     SELECT
       policy.policy_id::text AS policy_id, policy.scope_kind,
-      policy.scope_owner_id::text AS scope_owner_id, policy.repository_name,
+      policy.scope_owner_id::text AS scope_owner_id, policy.repository_name, policy.machine_name,
       policy.orchestrator_token_id::text AS orchestrator_token_id,
       token.orchestrator_agent_id, policy.instructions, policy.enabled,
       policy.created_by_token_id::text AS created_by_token_id,
@@ -205,13 +216,18 @@ async function resolveInTransaction(
         policy.repository_name = ''
         OR (${repositoryValue}::text IS NOT NULL AND policy.repository_name = ${repositoryValue})
       )
+      AND (
+        policy.machine_name = ''
+        OR (${machineValue}::text IS NOT NULL AND policy.machine_name = ${machineValue})
+      )
     ORDER BY
       CASE
-        WHEN policy.scope_kind = 'personal' AND policy.repository_name <> '' THEN 1
-        WHEN policy.scope_kind = 'organization' AND policy.repository_name <> '' THEN 2
-        WHEN policy.scope_kind = 'personal' THEN 3
-        ELSE 4
+        WHEN policy.repository_name <> '' AND policy.machine_name <> '' THEN 1
+        WHEN policy.repository_name <> '' OR policy.machine_name <> '' THEN 2
+        ELSE 3
       END,
+      CASE WHEN policy.scope_kind = 'personal' THEN 1 ELSE 2 END,
+      CASE WHEN policy.repository_name <> '' THEN 1 ELSE 2 END,
       policy.policy_id
     LIMIT 1
     ${lockingClause}
@@ -285,7 +301,8 @@ async function existingRequest(
       policy.policy_id::text AS policy_id,
       policy.scope_kind,
       policy.scope_owner_id::text AS scope_owner_id,
-      policy.repository_name
+      policy.repository_name,
+      policy.machine_name
     FROM murmur.orchestrator_policies AS policy
     WHERE policy.tenant_id = ${principal.tenantId.value}::uuid
       AND policy.policy_id = ${message.orchestratorPolicyId.value}::uuid
@@ -299,6 +316,7 @@ async function existingRequest(
     policyId: message.orchestratorPolicyId,
     scope: {
       kind: rowPolicy.scope_kind,
+      machineName: rowPolicy.machine_name === "" ? null : MachineName.parse(rowPolicy.machine_name),
       personalId:
         rowPolicy.scope_kind === "personal" ? PersonalId.parse(rowPolicy.scope_owner_id) : null,
       repositoryName:
@@ -432,7 +450,7 @@ export async function getPostgresDelegation(
       return await transaction`
         SELECT
           policy.policy_id::text AS policy_id, policy.scope_kind,
-          policy.scope_owner_id::text AS scope_owner_id, policy.repository_name,
+          policy.scope_owner_id::text AS scope_owner_id, policy.repository_name, policy.machine_name,
           policy.orchestrator_token_id::text AS orchestrator_token_id,
           token.orchestrator_agent_id, policy.instructions, policy.enabled,
           policy.created_by_token_id::text AS created_by_token_id,

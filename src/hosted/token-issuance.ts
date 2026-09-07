@@ -4,6 +4,7 @@ import { PersonalId } from "../domain/orchestration.js";
 import {
   type AgentId,
   type Instant,
+  type MachineName,
   type RepositoryName,
   TenantId,
 } from "../domain/value-objects.js";
@@ -13,8 +14,8 @@ import type {
   TenantTokenRole,
 } from "./control-plane-contracts.js";
 import {
-  generateTokenSecret,
   deriveRegistrationTokenSecret,
+  generateTokenSecret,
   type HostedTokenPrefix,
   type HostedTokenSecret,
   parseOperatorTokenSecret,
@@ -43,6 +44,7 @@ export function issueToken(
   personalId: PersonalId | null,
   repositoryName: RepositoryName | null,
   agentId: AgentId | null,
+  machineName: MachineName | null = null,
 ): IssuedTokenMaterial {
   const issued: ReturnType<typeof issueSecret> = issueSecret("mur");
   const selectedPersonalId: PersonalId = personalId ?? PersonalId.parse(issued.tokenId);
@@ -52,6 +54,7 @@ export function issueToken(
       agentId,
       expiresAt,
       keyId: issued.keyId,
+      machineName,
       name,
       personalId: selectedPersonalId,
       repositoryName,
@@ -87,6 +90,7 @@ export function issueSelfServiceToken(
       agentId: null,
       expiresAt: null,
       keyId: issued.keyId,
+      machineName: null,
       name: "Initial tenant administrator",
       personalId: PersonalId.parse(tokenId),
       repositoryName: null,

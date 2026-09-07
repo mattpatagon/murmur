@@ -117,3 +117,32 @@ test("client slug constraints are staged, bounded, and restart-safe", async (): 
   expect(finalization.match(/drop constraint/gu)).toHaveLength(3);
   expect(finalization.match(/rename constraint/gu)).toHaveLength(3);
 });
+
+test("machine orchestration migration preserves old scopes with bounded expand/index/contract phases", async (): Promise<void> => {
+  const expansion: string = await Bun.file(
+    "supabase/migrations/20260907190000_machine_bound_orchestration_expand.sql",
+  ).text();
+  const indexes: string = await Bun.file(
+    "supabase/migrations/20260907190001_machine_bound_orchestration_indexes.sql",
+  ).text();
+  const contract: string = await Bun.file(
+    "supabase/migrations/20260907190002_machine_bound_orchestration_contract.sql",
+  ).text();
+  for (const contents of [expansion, contract]) {
+    expect(contents.match(/^begin;$/gmu)).toHaveLength(1);
+    expect(contents.match(/^commit;$/gmu)).toHaveLength(1);
+    expect(contents).toContain("set local lock_timeout = '5s'");
+    expect(contents).toContain("set local statement_timeout");
+  }
+  expect(expansion).toContain("add column machine_name text");
+  expect(expansion).toContain("add column machine_name text not null default ''");
+  expect(expansion).toContain("authenticate_principal_v3");
+  expect(expansion).toContain("authenticate_principal_v2(p_secret_hash)");
+  expect(expansion).not.toContain("drop function murmur.authenticate_principal_v2");
+  expect(expansion.indexOf("pg_advisory_xact_lock")).toBeLessThan(expansion.indexOf("if exists"));
+  expect(indexes).toContain("set statement_timeout = '15min'");
+  expect(indexes.match(/create (?:unique )?index concurrently/gu)).toHaveLength(2);
+  expect(indexes.match(/not index_state.indisvalid/gu)).toHaveLength(2);
+  expect(contract).toContain("unique using index orchestrator_policies_scope_machine_unique");
+  expect(contract).toContain("rename to orchestrator_policies_resolution");
+});

@@ -46,6 +46,7 @@ export function tokenSummary(name: string = "example"): TokenSummary {
     expiresAt: null,
     keyId: "abcdefgh",
     lastUsedAt: null,
+    machineName: null,
     name,
     personalId: PersonalId.parse(FIXTURE_ID),
     repositoryName: null,

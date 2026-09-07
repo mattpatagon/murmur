@@ -124,6 +124,45 @@ for migration in supabase/migrations/2026081016*.sql; do
   fi
 done
 
+psql "$upgrade_url" --set ON_ERROR_STOP=1 <<'SQL'
+insert into murmur.access_tokens(
+  token_id, tenant_id, key_id, secret_hash, token_role, name,
+  personal_id, orchestrator_agent_id
+) values (
+  '41000000-0000-4000-8000-000000000011',
+  '00000000-0000-4000-8000-000000000001',
+  'UpgradeO1',
+  decode(repeat('43', 32), 'hex'),
+  'orchestrator',
+  'Pre-machine orchestrator credential',
+  '41000000-0000-4000-8000-000000000010',
+  'upgrade-orchestrator'
+);
+
+insert into murmur.orchestrator_policies(
+  tenant_id, scope_kind, scope_owner_id, orchestrator_token_id,
+  instructions, created_by_token_id, updated_by_token_id
+) values (
+  '00000000-0000-4000-8000-000000000001',
+  'organization',
+  '00000000-0000-4000-8000-000000000001',
+  '41000000-0000-4000-8000-000000000011',
+  'Preserved global policy',
+  '41000000-0000-4000-8000-000000000010',
+  '41000000-0000-4000-8000-000000000010'
+);
+SQL
+
+for machine_migration in \
+  '20260907190000_machine_bound_orchestration_expand.sql' \
+  '20260907190001_machine_bound_orchestration_indexes.sql' \
+  '20260907190002_machine_bound_orchestration_contract.sql'
+do
+  cp "supabase/migrations/$machine_migration" \
+    "$work_directory/supabase/migrations/$machine_migration"
+done
+bunx supabase db push --workdir "$work_directory" --db-url "$upgrade_url" --include-all --yes
+
 lifecycle_backfill="$(psql "$upgrade_url" --tuples-only --no-align --set ON_ERROR_STOP=1 \
   --command "select (select count(*) from murmur.agent_sessions) || '|' || (select count(*) from murmur.agent_sessions where session_key = 'backfill' and generation = 1) || '|' || usage.agent_count || '|' || usage.retained_agent_count from murmur.tenant_resource_usage as usage where tenant_id = '00000000-0000-4000-8000-000000000001'")"
 if [ "$lifecycle_backfill" != '3|3|3|3' ]; then
@@ -147,6 +186,34 @@ v2_authentication="$(psql "$upgrade_url" --tuples-only --no-align --set ON_ERROR
   --command "select (select count(*) from jsonb_object_keys(to_jsonb(authenticated))) || '|' || authenticated.principal_kind || '|' || authenticated.token_id::text || '|' || authenticated.personal_id::text || '|' || coalesce(authenticated.repository_name, '') || '|' || coalesce(authenticated.orchestrator_agent_id, '') from murmur.authenticate_principal_v2(decode(repeat('42', 32), 'hex')) as authenticated")"
 if [ "$v2_authentication" != '8|tenant|41000000-0000-4000-8000-000000000010|41000000-0000-4000-8000-000000000010||' ]; then
   echo "Authentication v2 did not preserve the upgraded credential: $v2_authentication" >&2
+  exit 1
+fi
+v3_authentication="$(psql "$upgrade_url" --tuples-only --no-align --set ON_ERROR_STOP=1 \
+  --command "select (select count(*) from jsonb_object_keys(to_jsonb(authenticated))) || '|' || authenticated.principal_kind || '|' || authenticated.token_id::text || '|' || authenticated.personal_id::text || '|' || coalesce(authenticated.repository_name, '') || '|' || coalesce(authenticated.machine_name, '') || '|' || coalesce(authenticated.orchestrator_agent_id, '') from murmur.authenticate_principal_v3(decode(repeat('42', 32), 'hex')) as authenticated")"
+if [ "$v3_authentication" != '9|tenant|41000000-0000-4000-8000-000000000010|41000000-0000-4000-8000-000000000010|||' ]; then
+  echo "Authentication v3 did not preserve the upgraded credential: $v3_authentication" >&2
+  exit 1
+fi
+preserved_machine_scope="$(psql "$upgrade_url" --tuples-only --no-align --set ON_ERROR_STOP=1 \
+  --command "select (token.machine_name is null)::text || '|' || (policy.machine_name = '')::text from murmur.access_tokens as token cross join murmur.orchestrator_policies as policy where token.token_id = '41000000-0000-4000-8000-000000000010' and policy.orchestrator_token_id = '41000000-0000-4000-8000-000000000011'")"
+if [ "$preserved_machine_scope" != 'true|true' ]; then
+  echo "Existing credentials or policies did not retain global machine scope: $preserved_machine_scope" >&2
+  exit 1
+fi
+if psql "$upgrade_url" --set ON_ERROR_STOP=1 --command "
+  insert into murmur.orchestrator_policies(
+    tenant_id, scope_kind, scope_owner_id, orchestrator_token_id,
+    instructions, created_by_token_id, updated_by_token_id
+  ) values (
+    '00000000-0000-4000-8000-000000000001', 'organization',
+    '00000000-0000-4000-8000-000000000001',
+    '41000000-0000-4000-8000-000000000011', 'Old writer must be frozen',
+    '41000000-0000-4000-8000-000000000010',
+    '41000000-0000-4000-8000-000000000010'
+  ) on conflict (tenant_id, scope_kind, scope_owner_id, repository_name)
+  do update set instructions = excluded.instructions
+" >/dev/null 2>&1; then
+  echo 'Old four-column policy writer unexpectedly remained active after contract migration' >&2
   exit 1
 fi
 

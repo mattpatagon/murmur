@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { OrchestratorPolicyId, PersonalId } from "../domain/orchestration.js";
-import { AgentId, Instant, RepositoryName } from "../domain/value-objects.js";
+import { AgentId, Instant, MachineName, RepositoryName } from "../domain/value-objects.js";
 import type {
   EffectiveOrchestrator,
   OrchestratorPolicy,
@@ -13,6 +13,7 @@ export type OrchestratorPolicyRow = {
   readonly created_by_token_id: string;
   readonly enabled: boolean;
   readonly instructions: string;
+  readonly machine_name: string;
   readonly orchestrator_agent_id: string;
   readonly orchestrator_token_id: string;
   readonly policy_id: string;
@@ -28,6 +29,7 @@ export const OrchestratorPolicyRowSchema: z.ZodType<OrchestratorPolicyRow> = z.s
   created_by_token_id: z.string().uuid(),
   enabled: z.boolean(),
   instructions: z.string(),
+  machine_name: z.string(),
   orchestrator_agent_id: z.string(),
   orchestrator_token_id: z.string().uuid(),
   policy_id: z.string().uuid(),
@@ -41,6 +43,7 @@ export const OrchestratorPolicyRowSchema: z.ZodType<OrchestratorPolicyRow> = z.s
 function mapScope(row: OrchestratorPolicyRow): OrchestratorScope {
   return {
     kind: row.scope_kind,
+    machineName: row.machine_name === "" ? null : MachineName.parse(row.machine_name),
     personalId: row.scope_kind === "personal" ? PersonalId.parse(row.scope_owner_id) : null,
     repositoryName: row.repository_name === "" ? null : RepositoryName.parse(row.repository_name),
   };

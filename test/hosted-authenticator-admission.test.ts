@@ -4,7 +4,7 @@ import postgres, { type Sql } from "postgres";
 
 import { TenantId } from "../src/domain/value-objects.js";
 import type { HostedPrincipal } from "../src/hosted/control-plane-contracts.js";
-import type { AuthRowV2 } from "../src/hosted/control-plane-rows.js";
+import type { AuthRowV3 } from "../src/hosted/control-plane-rows.js";
 import { HostedAuthenticator } from "../src/hosted/hosted-authenticator.js";
 import {
   credentialAdmissionKey,
@@ -41,9 +41,10 @@ class AuthenticationDatabase {
   }
 }
 
-function tenantRow(token: HostedTokenSecret, tenantId: TenantId): AuthRowV2 {
+function tenantRow(token: HostedTokenSecret, tenantId: TenantId): AuthRowV3 {
   return {
     key_id: token.keyId,
+    machine_name: "build-host-01",
     orchestrator_agent_id: null,
     personal_id: randomUUID(),
     principal_kind: "tenant",
@@ -75,7 +76,8 @@ test("successful database authentication warms only the full credential and auth
   database.result = [tenantRow(token, tenantId)];
   try {
     expect(authenticator.credentialAdmission(token.secret)).toBeNull();
-    await authenticator.authenticate(token.secret);
+    const principal: HostedPrincipal | null = await authenticator.authenticate(token.secret);
+    expect(principal).toMatchObject({ kind: "tenant", machineName: { value: "build-host-01" } });
     expect(database.hashes[0]).toEqual(token.hash);
     expect(authenticator.credentialAdmission(token.secret)).toEqual({
       key: credentialAdmissionKey(token.secret),
@@ -102,7 +104,7 @@ test("malformed or unavailable authentication removes cached admission", async (
   const database: AuthenticationDatabase = new AuthenticationDatabase();
   const authenticator: HostedAuthenticator = new HostedAuthenticator(database.database);
   const token: HostedTokenSecret = generateTokenSecret("mur");
-  const row: AuthRowV2 = tenantRow(token, TenantId.parse(randomUUID()));
+  const row: AuthRowV3 = tenantRow(token, TenantId.parse(randomUUID()));
   try {
     database.result = [row];
     await authenticator.authenticate(token.secret);
@@ -156,6 +158,7 @@ test("operator and bootstrap hints never acquire tenant admission capacity", asy
         {
           ...tenantRow(token, TenantId.parse(randomUUID())),
           personal_id: null,
+          machine_name: null,
           principal_kind: kind,
           tenant_id: null,
           token_role: null,

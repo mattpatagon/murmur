@@ -24,7 +24,9 @@ message authoritative.
   than silently promoting an identity whose inbox or metadata peers may already control; a revoked
   or expired orchestrator credential may be rotated onto its already-reserved ID.
 - Message authority is derived from the authenticated credential and stored with each delivery.
-  Sender IDs, registration metadata, repository headers, and message content never confer it.
+  Sender IDs, registration metadata, machine/repository headers, and message content never confer
+  it. Machine-qualified delegation uses an immutable machine value on the validated credential; it
+  is not inferred from a claimed agent ID or registration metadata.
 - Local and legacy modes have no authenticated human-grant boundary, so they remain peer-only.
   Verified orchestration is a documented hosted multi-tenant security boundary.
 - Orchestrator content remains below system, developer, human-user, safety, and repository
@@ -59,17 +61,18 @@ murmur admin set_orchestrator_policy --arguments-file policy.json
 ```
 
 Set `MURMUR_ADMIN_TOKEN` from the human's secret store in that terminal. It is separate from the
-worker's `MURMUR_API_TOKEN`. `grant.json` contains only the proposed agent ID and credential name:
+worker's `MURMUR_API_TOKEN`. `grant.json` contains the proposed agent ID, credential name, and any
+intended credential bindings:
 
 ```json
-{"agent_id":"organization-coordinator","name":"Organization coordinator"}
+{"agent_id":"build-1-coordinator","name":"Build machine coordinator","machine":"build-1","repository":"owner/repository"}
 ```
 
 After reviewing and approving the grant, save the returned one-time credential in the designated
 orchestrator's secret store. Use its `key_id` in `policy.json`:
 
 ```json
-{"scope_kind":"organization","orchestrator_key_id":"<returned key_id>","instructions":"Coordinate tasks; escalate production changes and spending to me."}
+{"scope_kind":"organization","machine":"build-1","repository":"owner/repository","orchestrator_key_id":"<returned key_id>","instructions":"Coordinate this repository and machine; escalate production changes to me."}
 ```
 
 The terminal prints the exact request and requires the human to type `approve`. It rejects pipes
@@ -91,32 +94,70 @@ The supplied ID must already belong to a token in the same tenant; cross-tenant 
 rejected. New identities get a generated personal ID. The authenticated principal, never an
 orchestration tool argument, supplies the caller's personal ID.
 
-Repository-specific orchestration is available only to repository-bound access tokens. The tenant
-administrator binds an exact validated repository when issuing or rotating the token, and the v2
-authentication result carries it. An unbound token can resolve only personal or organization global
-policies. Client headers and per-call message context remain useful message metadata but never
-select an orchestrator policy, preventing an agent from shopping among repository policies.
+Machine- and repository-specific orchestration is available only to access tokens issued with the
+matching bindings. A tenant administrator may bind an exact validated `machine`, `repository`,
+both, or neither when issuing or rotating an agent, tenant-admin, or orchestrator credential.
+Existing and legacy credentials remain unbound after migration. The authenticated principal
+carries these values; an unbound token resolves only global organization or personal policies.
 
-The tenant is the organization scope. A policy has an organization or personal owner plus an
-optional repository. This produces four configuration levels, resolved in this order:
+The public JSON field is `machine`; `machine_name` is an internal database column. Agent IDs,
+registration `metadata.machine`, headers, per-call context, environment values, and filesystem
+paths remain useful operational metadata but cannot supply or override a credential binding. This
+prevents policy shopping. It does not prove which physical computer presented a bearer token:
+machine placement must also be enforced by keeping that secret in the named machine's workload
+identity or protected secret store.
 
-1. personal + repository
-2. organization + repository
-3. personal
-4. organization
+The tenant is the organization scope. A policy has an organization or personal owner plus optional,
+independent machine and repository qualifiers. This produces eight forms, resolved in this order:
 
-Repository-specific intent wins over a general preference, and personal intent wins at equal
-specificity. Missing or disabled policies fall through to the next level. Resolution is stable and
-returns at most one effective policy.
+1. personal + machine + repository
+2. organization + machine + repository
+3. personal + repository
+4. personal + machine
+5. organization + repository
+6. organization + machine
+7. personal, with neither qualifier
+8. organization, with neither qualifier
+
+Both qualifiers beat one; repository-only beats machine-only; personal beats organization at equal
+qualifier specificity. Missing, disabled, expired, or revoked assignments fall through in that
+order. A machine-only credential can match machine and global scopes but never repository scopes;
+a repository-only credential behaves symmetrically. A credential bound to both may use every
+applicable fallback. Resolution is stable and returns at most one effective policy.
+
+Issue the worker with exactly one of these four credential argument shapes:
+
+```json
+{"name":"Global worker","role":"agent"}
+{"name":"Machine worker","role":"agent","machine":"build-1"}
+{"name":"Repository worker","role":"agent","repository":"owner/repository"}
+{"name":"Machine and repository worker","role":"agent","machine":"build-1","repository":"owner/repository"}
+```
+
+Then choose the matching organization or personal policy. Add the returned orchestrator `key_id`
+as `orchestrator_key_id` and the approved delegation text as `instructions` to the selected object:
+
+```json
+{"scope_kind":"organization"}
+{"scope_kind":"personal","personal_id":"<worker personal_id>"}
+{"scope_kind":"organization","machine":"build-1"}
+{"scope_kind":"personal","personal_id":"<worker personal_id>","machine":"build-1"}
+{"scope_kind":"organization","repository":"owner/repository"}
+{"scope_kind":"personal","personal_id":"<worker personal_id>","repository":"owner/repository"}
+{"scope_kind":"organization","machine":"build-1","repository":"owner/repository"}
+{"scope_kind":"personal","personal_id":"<worker personal_id>","machine":"build-1","repository":"owner/repository"}
+```
 
 ```text
 authenticated token
   |-- tenant_id ------------------------------ organization scope
   |-- personal_id ---------------------------- personal scope
+  |-- credential-bound machine --------------- optional machine qualifier
   `-- credential-bound repository ------------ optional repository qualifier
                   |
                   v
-     personal+repo > org+repo > personal > org
+ personal+both > org+both > personal+repo > personal+machine
+     > org+repo > org+machine > personal > organization
                   |
                   v
         one active orchestrator policy or none
@@ -126,8 +167,8 @@ authenticated token
 
 Forward-only PostgreSQL migrations add:
 
-- `access_tokens.personal_id`, backfilled from `token_id` for existing credentials, plus an
-  optional credential-bound repository;
+- `access_tokens.personal_id`, backfilled from `token_id` for existing credentials, plus optional
+  credential-bound machine and repository values;
 - the `orchestrator` token role and a required bound agent ID for that role;
 - a partial uniqueness rule for unrevoked orchestrator credentials plus mint-time expiry cleanup,
   so one agent ID cannot have competing active credentials;
@@ -138,9 +179,9 @@ Forward-only PostgreSQL migrations add:
 
 Each policy stores a bounded human instruction string, the selected orchestrator token, its scope,
 enabled state, creator/updater token IDs, and timestamps. Organization scopes use the tenant as the
-scope owner; personal scopes use a human-granted personal ID. A normalized empty repository value
-represents a global policy. The unique key explicitly contains tenant, scope kind, scope owner, and
-repository, preventing organization/personal UUID collisions.
+scope owner; personal scopes use a human-granted personal ID. Normalized empty machine/repository
+values represent missing qualifiers. The unique key explicitly contains tenant, scope kind, scope
+owner, machine, and repository, preserving all eight combinations without owner collisions.
 
 New tables are private, forced-RLS tables. Runtime access remains through `murmur_app`, with tenant
 context set inside the transaction. Policy resolution joins only active, unexpired orchestrator
@@ -148,10 +189,11 @@ tokens in the current tenant, so revocation or expiry immediately disables autho
 rewriting retained messages. Policy changes and orchestrator grants retain bounded, content-free
 actor attribution; delegation instruction text is never copied into audit metadata.
 
-Authentication evolves through an expand/cutover sequence. A new `authenticate_principal_v2`
-function returns personal ID, bound repository, and bound orchestrator agent ID while the existing
-function remains unchanged for old app instances. The new binary probes and consumes v2 only. A
-later release may remove v1 after deployment skew is impossible; this release does not contract it.
+The machine expansion adds `authenticate_principal_v3`, which returns the v2 fields plus the bound
+machine. The v2 function remains unchanged for old app instances during rolling drain; the new
+binary requires and consumes v3. Existing token machine values backfill to null and existing policy
+machine values to the normalized empty value, so they retain global semantics. This forward
+migration does not reinterpret metadata as authority.
 
 SQLite advances its schema for the immutable message and agent authority fields. It accepts only
 peer authority because SQLite has no authenticated administrator boundary.
@@ -161,7 +203,7 @@ peer authority because SQLite has no authenticated administrator boundary.
 Tenant administrators receive these tools:
 
 - `create_orchestrator_token`: mint a one-time secret bound to an exact reserved agent ID;
-- `set_orchestrator_policy`: create or replace one of the four scoped policies;
+- `set_orchestrator_policy`: create or replace one of the eight scoped policies;
 - `clear_orchestrator_policy`: disable one exact scope without deleting its audit fields;
 - `list_orchestrator_policies`: inspect configuration without returning token secrets.
 
@@ -172,7 +214,7 @@ unbounded response.
 Tenant agents and administrators receive:
 
 - `get_orchestrator`: resolve the effective policy from authenticated personal/organization
-  identity and credential-bound repository without exposing the private delegation instructions;
+  identity and credential-bound machine/repository without exposing private instructions;
 - `ask_orchestrator`: resolve the recipient server-side and persist a typed orchestration request in
   the same tenant transaction. It requires an idempotency key and fails safely when no active policy
   exists instead of silently asking an arbitrary peer. A retry finds the stored request before
@@ -220,6 +262,12 @@ override higher-priority instructions.
 Generic MCP clients that do not run the hook still receive the server instructions, tool
 descriptions, typed fields, and explicit lookup/request tools.
 
+If you have only an existing `agent` token, you cannot create or promote an orchestrator. Repository
+or hosted-service ownership is not Murmur tenant authority. Ask that tenant's administrator for a
+separate owner connection; if it is lost, a service operator can issue recovery access with
+`mint_tenant_admin_token`. Without either authority, signup creates a separate tenant and does not
+attach the old worker, policies, or retained messages.
+
 ## Failure and lifecycle behavior
 
 - A peer token cannot mint, configure, register as, or send authoritative content for an
@@ -230,6 +278,8 @@ descriptions, typed fields, and explicit lookup/request tools.
   credential and forced RLS.
 - A policy cannot reference a peer/admin token, a token in another tenant, or a mismatched bound
   agent ID.
+- A machine/repository-qualified policy cannot be selected through agent-controlled metadata or
+  context; the corresponding authenticated credential binding must match exactly.
 - Revoked, expired, or disabled policies are not resolved. Existing authoritative messages remain
   auditable but confer no continuing credential validity.
 - Clearing a policy disables routing but deliberately retains its instructions and attribution.
@@ -259,33 +309,35 @@ descriptions, typed fields, and explicit lookup/request tools.
 - Database rows, tool payloads, and hook responses are runtime-validated. Caller-safe errors do not
   expose instructions, token material, database details, or arbitrary exceptions.
 
-## Implementation plan
+## Implementation record
 
-1. Add domain value objects, roles, policy/request contracts, immutable message fields, and safe
-   errors. Keep public and private policy DTOs separate so workers cannot receive delegation text.
-2. Add forward PostgreSQL migrations for token identity/repository/binding, forced-RLS policy
-   storage, indexes/constraints, message provenance, and the parallel v2 authentication function.
-   Advance SQLite transactionally for the peer-only provenance fields.
-3. Extend both message-store adapters and broadcast/direct-send paths so authority, kind, and
-   policy IDs are validated, idempotency-compared, persisted, and mapped identically.
-4. Extend the hosted control plane with principal personal identity, orchestrator token issuance,
+The shipped feature is layered as follows:
+
+1. Domain value objects, roles, policy/request contracts, immutable message fields, and safe errors
+   keep public and private policy DTOs separate so workers cannot receive delegation text.
+2. Forward PostgreSQL migrations for token identity/machine/repository binding, forced-RLS
+   policy storage, indexes/constraints, message provenance, and versioned authentication functions.
+   pair with a transactional SQLite advance for peer-only provenance fields.
+3. Both message-store adapters and broadcast/direct-send paths validate, idempotency-compare,
+   persist, and map authority, kind, and policy IDs identically.
+4. The hosted control plane handles principal personal identity, orchestrator token issuance,
    policy CRUD/resolution, delegation reads, revocation behavior, and least-privilege queries.
-5. Add the four admin/worker/orchestrator tool groups, server-derived routing, bound-sender checks,
+5. Admin, worker, and orchestrator tool groups enforce server-derived routing, bound-sender checks,
    role-specific server instructions, and safe result schemas.
-6. Update the passive hook to resolve policy at session start, distinguish inbox authorities, and
-   inject the correct worker/orchestrator behavior without trusting message text.
-7. Update architecture, README, hosted deployment, upgrade, protocol, security, and operator docs.
-8. Run the full test plan and required repository gates, then obtain an independent implementation
-   review before shipping.
+6. The passive hook resolves policy at session start, distinguishes inbox authorities, and injects
+   the correct worker/orchestrator behavior without trusting message text.
+7. Architecture, README, hosted deployment, upgrade, protocol, security, and operator docs expose
+   the feature without requiring a repository checkout.
+8. The full verification plan and required repository gates run before release.
 
-## Test plan
+## Verification coverage
 
 ### Domain and tool contracts
 
-- Accept every valid scope form and reject missing/extra personal or repository fields, invalid
-  repositories, oversized instructions, malformed IDs, and unknown roles.
-- Accept and return rotation `personal_id` and exact credential repository bindings; reject attempts
-  to select repository policies from an unbound or mismatched credential.
+- Accept all eight scope forms and reject missing/extra personal, machine, or repository fields,
+  invalid qualifiers, oversized instructions, malformed IDs, and unknown roles.
+- Accept and return rotation `personal_id` and exact credential machine/repository bindings; reject
+  attempts to select qualified policies from an unbound or mismatched credential.
 - Prove public orchestrator lookup omits private instructions while delegation output includes them.
 - Snapshot tool exposure and annotations for peer, orchestrator, tenant-admin, operator, bootstrap,
   legacy, and local principals.
@@ -303,16 +355,16 @@ descriptions, typed fields, and explicit lookup/request tools.
 ### Hosted PostgreSQL and RLS coverage
 
 - Upgrade a populated pre-feature database and validate every new constraint and index.
-- Run old-app/new-schema skew tests: v1 authentication retains its exact old row shape while v2 is
-  installed, then the new app authenticates through v2.
+- Run old-app/new-schema skew tests: v2 authentication retains its exact old row shape while v3 is
+  installed, then the new app authenticates through v3.
 - Authenticate old tokens with backfilled personal IDs and all three tenant roles with new fields.
 - Prove orchestrator token/agent binding and ID reservation, unrevoked uniqueness, expired-token
   cleanup, expiry, revocation, and rotation.
 - Reject orchestrator issuance over a pre-existing peer agent row so no previously controlled inbox
   or metadata is silently promoted.
-- Exercise all four policy scopes, the documented precedence, disabled fallthrough, replacement,
-  concurrent updates, missing and credential-mismatched repositories, attempted policy shopping,
-  and stable ordering.
+- Exercise all eight policy scopes, the documented precedence, disabled fallthrough, replacement,
+  concurrent updates, missing and credential-mismatched qualifiers, attempted policy shopping, and
+  stable ordering.
 - Attempt direct cross-tenant reads/writes and function calls as `murmur_app`; verify forced RLS and
   tenant qualification for policies, tokens, agents, messages, idempotency, and broadcasts.
 - Prove operator and peer credentials cannot grant or inspect private delegation instructions.
@@ -331,6 +383,7 @@ descriptions, typed fields, and explicit lookup/request tools.
 - Run stdio/SQLite, shared PostgreSQL, and hosted HTTP flows through real MCP clients.
 - Configure each scope, resolve it from real authenticated sessions, ask the selected orchestrator,
   read the typed request, load its private delegation, reply, and verify authoritative provenance.
+  Prove metadata cannot impersonate a credential-bound machine.
 - Prove peer registration, direct sends, and broadcasts using a reserved orchestrator ID are
   rejected, and an orchestrator using another sender ID is rejected.
 - Verify idempotent orchestration requests require a key, preserve the first policy/recipient across
@@ -369,17 +422,17 @@ metric and above 80% per included source file, with no new exclusion or weakened
   host conversation.
 - Multiple simultaneous bosses for one effective scope. One deterministic authority avoids split
   decisions; a human can rotate the policy.
-- Trusting repository configuration files or agent metadata as grants. Agents can modify or claim
-  those values, so repository policy selection uses only a credential-bound repository.
+- Trusting machine/repository configuration files, headers, or agent metadata as grants. Agents can
+  modify or claim those values, so policy selection uses only credential-bound qualifiers.
 - Cross-replica eager session termination. Authority ends at policy resolution and the next
   authenticated request; notification streams never carry message bodies.
 
-## Outside review
+## Review record
 
 Claude Fable 5 at xhigh effort reviewed this plan read-only against the repository. Its verdict was
 `APPROVE WITH REQUIRED CHANGES`. The final plan incorporates all P0/P1 findings and the concrete
-P2/P3 hardening: strict multi-tenant gating, v2 authentication expansion without skew breakage,
-reserved agent IDs, credential-bound repositories, rotation-stable personal IDs, explicit audited
+P2/P3 hardening: strict multi-tenant gating, versioned authentication expansion without skew
+breakage, reserved agent IDs, credential-bound qualifiers, rotation-stable personal IDs, audited
 operator break-glass semantics, honest replica revocation bounds, required ask idempotency,
 transactional resolve-and-persist, expiry-aware uniqueness, untrusted inbound questions, write-once
 provenance, reserved-inbox quota behavior, and a scope-kind uniqueness discriminator.

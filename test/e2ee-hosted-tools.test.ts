@@ -312,7 +312,7 @@ test("resolves encrypted orchestration claims entirely from authenticated server
     resolveOrchestrator: async (): Promise<EffectiveOrchestratorDto> => ({
       agent_id: "orchestrator",
       policy_id: policyId,
-      scope: { personal_id: null, repository: null, scope_kind: "organization" },
+      scope: { machine: null, personal_id: null, repository: null, scope_kind: "organization" },
     }),
   };
   const output: CallToolResult | null = await callE2eeTool(

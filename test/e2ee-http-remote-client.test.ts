@@ -249,7 +249,12 @@ test("forwards every bounded encrypted and orchestration operation", async (): P
   const orchestrator: EffectiveOrchestratorDto = {
     agent_id: "bob",
     policy_id: "33333333-3333-4333-8333-333333333333",
-    scope: { personal_id: null, repository: "mattpatagon/murmur", scope_kind: "organization" },
+    scope: {
+      machine: null,
+      personal_id: null,
+      repository: "mattpatagon/murmur",
+      scope_kind: "organization",
+    },
   };
   const agent: AgentDto = {
     agent_id: "alice",
