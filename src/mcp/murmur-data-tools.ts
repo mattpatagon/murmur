@@ -174,7 +174,9 @@ async function waitForMessages(
     threadId: null,
     unreadOnly: false,
   };
-  let messages: readonly Message[] = await store.getMessages(query);
+  let messages: readonly Message[] = await store.getMessages(query, {
+    acknowledgement: "automatic",
+  });
   let timedOut: boolean = false;
   if (messages.length === 0) {
     let resolveUpdate: (() => void) | null = null;
@@ -193,7 +195,7 @@ async function waitForMessages(
       );
       const outcome: "timed_out" | "updated" = await Promise.race([updateOutcome, timeoutOutcome]);
       timedOut = outcome === "timed_out";
-      messages = await store.getMessages(query);
+      messages = await store.getMessages(query, { acknowledgement: "automatic" });
     } finally {
       await subscription.close();
     }
@@ -378,7 +380,10 @@ export async function callDataTool(
     case "get_messages": {
       const input: GetMessagesInput = GetMessagesInputSchema.parse(argumentsValue);
       const query: GetMessagesQuery = messagesQuery(input, context);
-      const { messages, inboxVersion }: InboxReadResult = await store.getMessagesWithVersion(query);
+      const { messages, inboxVersion }: InboxReadResult = await store.getMessagesWithVersion(
+        query,
+        { acknowledgement: "automatic" },
+      );
       const rawOutput: Record<string, unknown> = {
         agent_id: query.agentId.value,
         inbox_version: inboxVersion.value,

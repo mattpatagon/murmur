@@ -369,7 +369,30 @@ test("forwards every bounded encrypted and orchestration operation", async (): P
       agent_id: "bob",
       message_ids: [encryptedInput.envelope.header.message_id],
     }),
-  ).toMatchObject({ updated: 1 });
+  ).toEqual({ read_at: now.toISOString(), updated: 1 });
+  caller.response = toolOutput({
+    receipts: [
+      {
+        message_id: encryptedInput.envelope.header.message_id,
+        read_at: now.toISOString(),
+      },
+    ],
+    updated: 1,
+  });
+  expect(
+    await client.acknowledgeMessages({
+      agent_id: "bob",
+      message_ids: [encryptedInput.envelope.header.message_id],
+    }),
+  ).toEqual({
+    receipts: [
+      { message_id: encryptedInput.envelope.header.message_id, read_at: now.toISOString() },
+    ],
+    updated: 1,
+  });
+  const acknowledgementCall: RecordedCall | undefined = caller.calls.at(-1);
+  if (acknowledgementCall === undefined) throw new Error("Missing acknowledgement call");
+  expect(acknowledgementCall.name).toBe("acknowledge_encrypted_messages");
 
   caller.response = toolOutput({
     broadcast_id: "66666666-6666-4666-8666-666666666666",

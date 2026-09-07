@@ -10,6 +10,7 @@ import {
 } from "../e2ee/hosted-validation.js";
 import { MAX_E2EE_CIPHERTEXT_BYTES } from "../e2ee/wire-contracts.js";
 import type {
+  AcknowledgeEncryptedMessagesOutput,
   CancelEncryptedBroadcastInput,
   CancelEncryptedBroadcastOutput,
   ClaimEncryptionPrekeyInput,
@@ -47,6 +48,7 @@ import {
 } from "./sqlite-e2ee-broadcasts.js";
 import { claimSqliteEncryptionPrekey, publishSqliteAgentKeyBundle } from "./sqlite-e2ee-keys.js";
 import {
+  acknowledgeSqliteEncryptedMessages,
   existingSqliteEncryptedMessageOutput,
   getSqliteEncryptedInboxSummary,
   getSqliteEncryptedMessages,
@@ -207,6 +209,14 @@ export class SqliteE2eeMessageStore implements E2eeMessageStore {
     this.prune();
     this.renewReadSession(input.agent_id, input.session_key);
     return markSqliteEncryptedMessagesRead(this.database, input, this.clock.now());
+  }
+
+  public acknowledgeEncryptedMessages(
+    input: MarkMessagesReadInput,
+  ): AcknowledgeEncryptedMessagesOutput {
+    this.prune();
+    this.renewReadSession(input.agent_id, input.session_key);
+    return acknowledgeSqliteEncryptedMessages(this.database, input, this.clock.now());
   }
 
   public prepareEncryptedBroadcast(

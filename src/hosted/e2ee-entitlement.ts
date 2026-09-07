@@ -52,6 +52,7 @@ export const PLAINTEXT_READ_TOOL_NAMES: readonly string[] = [
 ];
 export const E2EE_KEY_PROVISIONING_TOOL_NAMES: readonly string[] = ["publish_agent_key_bundle"];
 export const E2EE_ENFORCED_TOOL_NAMES: readonly string[] = [
+  "acknowledge_encrypted_messages",
   "cancel_encrypted_broadcast",
   "claim_encryption_prekey",
   "claim_orchestrator_prekey",

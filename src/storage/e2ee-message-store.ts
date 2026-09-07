@@ -1,6 +1,7 @@
 import type { MarkMessagesReadInput, MarkMessagesReadOutput } from "../domain/contracts.js";
 import type { TenantId } from "../domain/value-objects.js";
 import type {
+  AcknowledgeEncryptedMessagesOutput,
   CancelEncryptedBroadcastInput,
   CancelEncryptedBroadcastOutput,
   ClaimEncryptionPrekeyInput,
@@ -49,6 +50,9 @@ export interface E2eeMessageStore {
     authorization?: E2eeWriteAuthorization,
   ): Awaitable<PutEncryptedMessageOutput>;
   getEncryptedMessages(input: GetEncryptedMessagesInput): Awaitable<EncryptedInboxOutput>;
+  acknowledgeEncryptedMessages(
+    input: MarkMessagesReadInput,
+  ): Awaitable<AcknowledgeEncryptedMessagesOutput>;
   markEncryptedMessagesRead(input: MarkMessagesReadInput): Awaitable<MarkMessagesReadOutput>;
   prepareEncryptedBroadcast(
     input: PrepareEncryptedBroadcastInput,

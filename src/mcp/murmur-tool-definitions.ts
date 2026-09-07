@@ -146,7 +146,7 @@ function dataTools(): Tool[] {
     toolDefinition(
       "get_messages",
       "Read agent inbox",
-      "Read an agent's durable inbox. Reading does not mark messages as read; supplying session_key renews that named lease.",
+      "Read an agent's durable current-generation inbox. Every successfully returned message is marked read in the same storage transaction, and its read_at value is the receipt timestamp. Supplying session_key renews that named lease.",
       GetMessagesInputSchema,
       InboxOutputSchema,
       {
@@ -159,7 +159,7 @@ function dataTools(): Tool[] {
     toolDefinition(
       "wait_for_messages",
       "Wait for agent messages",
-      "Compatibility fallback for hosts that do not surface resource subscriptions. Wait for inbox messages for up to 25 seconds; supplying session_key renews that named lease.",
+      "Compatibility fallback for hosts that do not surface resource subscriptions. Wait for inbox messages for up to 25 seconds; every successfully returned message is marked read before the response, and supplying session_key renews that named lease.",
       WaitForMessagesInputSchema,
       WaitForMessagesOutputSchema,
       {
@@ -172,7 +172,7 @@ function dataTools(): Tool[] {
     toolDefinition(
       "mark_messages_read",
       "Mark messages read",
-      "Mark specific messages as read, only when they belong to the supplied recipient agent.",
+      "Explicitly mark specific messages as read when they belong to the supplied recipient agent. Current get_messages and wait_for_messages calls already acknowledge messages they return.",
       MarkMessagesReadInputSchema,
       MarkMessagesReadOutputSchema,
       {

@@ -11,6 +11,7 @@ import {
 import { ordinaryClaimedProvenance } from "../e2ee/claimed-provenance.js";
 import { verifyHostedPublicBundle } from "../e2ee/hosted-validation.js";
 import type {
+  AcknowledgeEncryptedMessagesOutput,
   CancelEncryptedBroadcastInput,
   CancelEncryptedBroadcastOutput,
   ClaimEncryptionPrekeyInput,
@@ -44,6 +45,7 @@ import {
 } from "./postgres-e2ee-broadcast-finalize.js";
 import { preparePostgresEncryptedBroadcast } from "./postgres-e2ee-broadcast-prepare.js";
 import {
+  acknowledgePostgresEncryptedMessages,
   getPostgresEncryptedInboxSummary,
   getPostgresEncryptedMessages,
   markPostgresEncryptedMessagesRead,
@@ -190,6 +192,14 @@ export class PostgresE2eeMessageStore implements E2eeMessageStore {
     const now: Instant = this.clock.now();
     await this.prune(now);
     return await markPostgresEncryptedMessagesRead(this.database, this.tenantId, input, now);
+  }
+
+  public async acknowledgeEncryptedMessages(
+    input: MarkMessagesReadInput,
+  ): Promise<AcknowledgeEncryptedMessagesOutput> {
+    const now: Instant = this.clock.now();
+    await this.prune(now);
+    return await acknowledgePostgresEncryptedMessages(this.database, this.tenantId, input, now);
   }
 
   public async prepareEncryptedBroadcast(

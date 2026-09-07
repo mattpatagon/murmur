@@ -193,20 +193,33 @@ test.skipIf(!postgresConfigured)(
         idempotencyKey: IdempotencyKey.parse("paired-second-message"),
       });
       fixture.statements.length = 0;
-      const page: InboxReadResult = await fixture.store.getMessagesWithVersion({
-        ...query(fixture.reader),
-        limit: 1,
-        threadId: first.message.threadId,
-      });
-      expectInboxTransactions(fixture.statements, 9);
+      const page: InboxReadResult = await fixture.store.getMessagesWithVersion(
+        {
+          ...query(fixture.reader),
+          limit: 1,
+          threadId: first.message.threadId,
+        },
+        { acknowledgement: "automatic" },
+      );
+      expectInboxTransactions(fixture.statements, 10);
       expect(page.messages.map((message: Message): string => message.messageId.value)).toEqual([
         first.message.messageId.value,
       ]);
+      const pageMessage: Message | undefined = page.messages[0];
+      if (pageMessage === undefined) throw new Error("Expected acknowledged PostgreSQL message");
+      expect(pageMessage.readAt).toEqual(fixture.now);
       expect(page.inboxVersion.value).toBe(second.message.sequence.value);
-      await fixture.store.markMessagesRead({
-        agentId: fixture.reader,
-        messageIds: [first.message.messageId],
-      });
+      fixture.statements.length = 0;
+      const repeated: InboxReadResult = await fixture.store.getMessagesWithVersion(
+        {
+          ...query(fixture.reader),
+          limit: 1,
+          threadId: first.message.threadId,
+        },
+        { acknowledgement: "automatic" },
+      );
+      expectInboxTransactions(fixture.statements, 9);
+      expect(repeated.messages[0]).toEqual(pageMessage);
       const filtered: InboxReadResult = await fixture.store.getMessagesWithVersion({
         ...query(fixture.reader),
         threadId: first.message.threadId,

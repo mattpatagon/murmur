@@ -30,6 +30,7 @@ export class InboxReadFixture {
   public completionAction: (() => Promise<void>) | null = null;
   public pageAction: (() => Promise<void>) | null = null;
   public pageOverride: unknown[] | null = null;
+  public acknowledgementOverride: unknown[] | null = null;
   public snapshotOverride: unknown[] | null = null;
   public agent: AgentRow | null = {
     agent_id: READ_AGENT.value,
@@ -103,6 +104,11 @@ export class InboxReadFixture {
                 ? { ...row, inbox_version: this.version }
                 : row,
             );
+          }
+          if (text.includes("SET read_at = COALESCE")) {
+            return this.acknowledgementOverride === null
+              ? [{ message_id: this.row.message_id, read_at: READ_NOW.toISOString() }]
+              : this.acknowledgementOverride;
           }
           if (text.includes("AS version")) {
             return [{ version: this.version }];

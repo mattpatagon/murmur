@@ -10,6 +10,7 @@ import type { MarkMessagesReadInput, MarkMessagesReadOutput } from "../src/domai
 import type { TenantId } from "../src/domain/value-objects.js";
 import type { PublicAgentKeyBundleDto } from "../src/e2ee/wire-contracts.js";
 import type {
+  AcknowledgeEncryptedMessagesOutput,
   CancelEncryptedBroadcastInput,
   CancelEncryptedBroadcastOutput,
   ClaimEncryptionPrekeyInput,
@@ -19,6 +20,7 @@ import type {
   E2eeCapabilityOutput,
   EncryptedInboxOutput,
   EncryptedMessageDto,
+  EncryptedMessageReadReceiptDto,
   GetEncryptedMessagesInput,
   GetInboxSummaryInput,
   GetInboxSummaryOutput,
@@ -43,14 +45,12 @@ import type {
   EncryptedInboxUpdateHandler,
 } from "../src/storage/e2ee-message-store.js";
 import type { InboxSubscription } from "../src/storage/message-store.js";
-
 const TENANT_ID: string = "11111111-1111-4111-8111-111111111111";
 const NOW: string = "2026-08-10T17:00:00.000Z";
 const EXPIRES_AT: string = "2026-09-09T17:00:00.000Z";
 const ROOT_KEY_ID: string = `mrk_${"A".repeat(43)}`;
 const AGENT_KEY_ID: string = `mak_${"B".repeat(43)}`;
 const FALLBACK_PREKEY_ID: string = `mpk_${"C".repeat(43)}`;
-
 function bundle(agentId: string): PublicAgentKeyBundleDto {
   return {
     agent_certificate: {
@@ -77,7 +77,6 @@ function bundle(agentId: string): PublicAgentKeyBundleDto {
     root_public_key: "H".repeat(43),
   };
 }
-
 function entitlement(state: E2eeEntitlementRecord["state"]): E2eeEntitlementRecord {
   return parseE2eeEntitlementRecord({
     plaintextWritesBlocked: state === "enforced",
@@ -88,7 +87,6 @@ function entitlement(state: E2eeEntitlementRecord["state"]): E2eeEntitlementReco
     unreadPlaintextMessages: 0,
   });
 }
-
 function capability(state: E2eeEntitlementRecord["state"]): E2eeCapabilityOutput {
   return {
     caller_authority: "peer",
@@ -100,7 +98,6 @@ function capability(state: E2eeEntitlementRecord["state"]): E2eeCapabilityOutput
     wire_version: 1,
   };
 }
-
 class FakeE2eeStore implements E2eeMessageStore {
   public claimAuthorization: E2eeWriteAuthorization | null = null;
   public claimInput: ClaimEncryptionPrekeyInput | null = null;
@@ -108,11 +105,9 @@ class FakeE2eeStore implements E2eeMessageStore {
   public publishInput: PublishAgentKeyBundleInput | null = null;
   public putOutput: PutEncryptedMessageOutput | null = null;
   public watchCloseCount: number = 0;
-
   public scopeE2ee(_tenantId: TenantId): E2eeMessageStore {
     return this;
   }
-
   public publishAgentKeyBundle(input: PublishAgentKeyBundleInput): PublishAgentKeyBundleOutput {
     this.publishInput = input;
     return {
@@ -123,7 +118,6 @@ class FakeE2eeStore implements E2eeMessageStore {
       root_key_id: input.bundle.root_key_id,
     };
   }
-
   public claimEncryptionPrekey(
     input: ClaimEncryptionPrekeyInput,
     authorization?: E2eeWriteAuthorization,
@@ -148,22 +142,28 @@ class FakeE2eeStore implements E2eeMessageStore {
       recipient_id: input.recipient_id,
     };
   }
-
   public putEncryptedMessage(_input: PutEncryptedMessageInput): PutEncryptedMessageOutput {
     if (this.putOutput === null) throw new Error("fake message output is unavailable");
     return this.putOutput;
   }
-
   public getEncryptedMessages(input: GetEncryptedMessagesInput): EncryptedInboxOutput {
     const output: EncryptedInboxOutput | undefined = this.inboxes.shift();
     if (output !== undefined) return output;
     return { agent_id: input.agent_id, inbox_version: input.after_sequence, messages: [] };
   }
-
-  public markEncryptedMessagesRead(_input: MarkMessagesReadInput): MarkMessagesReadOutput {
-    return { read_at: NOW, updated: 1 };
+  public markEncryptedMessagesRead(input: MarkMessagesReadInput): MarkMessagesReadOutput {
+    return { read_at: NOW, updated: input.message_ids.length };
   }
-
+  public acknowledgeEncryptedMessages(
+    input: MarkMessagesReadInput,
+  ): AcknowledgeEncryptedMessagesOutput {
+    return {
+      receipts: input.message_ids.map(
+        (message_id: string): EncryptedMessageReadReceiptDto => ({ message_id, read_at: NOW }),
+      ),
+      updated: input.message_ids.length,
+    };
+  }
   public prepareEncryptedBroadcast(
     input: PrepareEncryptedBroadcastInput,
   ): PrepareEncryptedBroadcastOutput {
@@ -176,7 +176,6 @@ class FakeE2eeStore implements E2eeMessageStore {
       thread_id: input.thread_id === undefined ? "fake-broadcast-thread" : input.thread_id,
     };
   }
-
   public putEncryptedBroadcastDelivery(
     input: PutEncryptedBroadcastDeliveryInput,
   ): PutEncryptedBroadcastDeliveryOutput {
@@ -186,7 +185,6 @@ class FakeE2eeStore implements E2eeMessageStore {
       recipient_id: input.envelope.header.recipient_id,
     };
   }
-
   public commitEncryptedBroadcast(
     input: CommitEncryptedBroadcastInput,
   ): CommitEncryptedBroadcastOutput {
@@ -198,7 +196,6 @@ class FakeE2eeStore implements E2eeMessageStore {
       status: "stored",
     };
   }
-
   public cancelEncryptedBroadcast(
     _input: CancelEncryptedBroadcastInput,
   ): CancelEncryptedBroadcastOutput {
@@ -444,12 +441,15 @@ test("routes every enforced ciphertext mutation through bounded validated output
   expect(
     structured(
       await callE2eeTool(
-        "mark_messages_read",
+        "acknowledge_encrypted_messages",
         { agent_id: "bob", message_ids: [put.envelope.header.message_id] },
         routed,
       ),
     ),
-  ).toMatchObject({ updated: 1 });
+  ).toEqual({
+    receipts: [{ message_id: put.envelope.header.message_id, read_at: NOW }],
+    updated: 1,
+  });
   expect(
     structured(
       await callE2eeTool(

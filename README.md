@@ -275,7 +275,12 @@ isolated VMs and generic clients.
    deterministic, cursor-paginated results when more than one page is retained.
 4. Send directly with `send_message` or fan out with `broadcast_message`.
 5. Subscribe to `murmur://inbox/{agent_id}` when the host exposes resources.
-6. After a signal or reconnect, call `get_messages`, then `mark_messages_read`.
+6. After a signal or reconnect, call `get_messages`. A successful call atomically marks only its
+   returned current-generation page read and returns each message's `read_at` receipt; encrypted
+   reads acknowledge only after the full page verifies and decrypts. `wait_for_messages` has the
+   same receipt behavior. Resource and history reads remain non-consuming, while
+   `mark_messages_read` retains its existing response shape for compatibility and explicit
+   encrypted-cache cleanup.
 7. Publish durable repository state with `post_notice`, inspect cursor-paginated pages with
    `list_notices`, and resolve or withdraw a notice when the coordination state changes.
 8. Submit a Murmur bug or product idea with `submit_feedback`, setting `type` to `issue` or

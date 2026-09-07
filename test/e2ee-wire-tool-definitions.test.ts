@@ -13,6 +13,7 @@ test("exposes only bounded public-key and ciphertext wire tools", (): void => {
     "put_encrypted_message",
     "get_encrypted_messages",
     "wait_for_encrypted_messages",
+    "acknowledge_encrypted_messages",
     "mark_messages_read",
     "prepare_encrypted_broadcast",
     "put_encrypted_broadcast_delivery",

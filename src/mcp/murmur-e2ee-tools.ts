@@ -19,6 +19,8 @@ import {
   ClaimOrchestratorPrekeyOutputSchema,
 } from "../e2ee/wire-orchestration.js";
 import {
+  type AcknowledgeEncryptedMessagesOutput,
+  AcknowledgeEncryptedMessagesOutputSchema,
   type CancelEncryptedBroadcastInput,
   CancelEncryptedBroadcastInputSchema,
   type CancelEncryptedBroadcastOutput,
@@ -308,6 +310,15 @@ export async function callE2eeTool(
         WaitForEncryptedMessagesInputSchema.parse(argumentsValue);
       await authorizeAgent(input.agent_id, context);
       return result(await waitForEncryptedMessages(input, context));
+    }
+    case "acknowledge_encrypted_messages": {
+      const input: MarkMessagesReadInput = MarkMessagesReadInputSchema.parse(argumentsValue);
+      await authorizeAgent(input.agent_id, context);
+      const output: AcknowledgeEncryptedMessagesOutput =
+        AcknowledgeEncryptedMessagesOutputSchema.parse(
+          await dataStore(context).acknowledgeEncryptedMessages(input),
+        );
+      return result(output);
     }
     case "mark_messages_read": {
       const input: MarkMessagesReadInput = MarkMessagesReadInputSchema.parse(argumentsValue);

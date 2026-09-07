@@ -52,6 +52,7 @@ import {
 import { publishLocalIdentity } from "./proxy-identity.js";
 import { askEncryptedOrchestrator } from "./proxy-orchestration.js";
 import {
+  type EncryptedInboxReadOptions,
   markEncryptedMessagesRead,
   type ReceiveEncryptedMessagesResult,
   receiveEncryptedMessages,
@@ -91,8 +92,14 @@ export interface E2eeProxyOperations {
   getOrchestrator?(input: GetOrchestratorInput): Promise<GetOrchestratorOutput>;
   sendMessage(input: SendMessageInput): Promise<ProxySendMessageOutput>;
   broadcastMessage(input: BroadcastMessageInput): Promise<ProxyBroadcastOutput>;
-  getMessages(input: GetMessagesInput): Promise<ProxyInboxOutput>;
-  waitForMessages(input: WaitForMessagesInput): Promise<ProxyWaitForMessagesOutput>;
+  getMessages(
+    input: GetMessagesInput,
+    options: EncryptedInboxReadOptions,
+  ): Promise<ProxyInboxOutput>;
+  waitForMessages(
+    input: WaitForMessagesInput,
+    options: EncryptedInboxReadOptions,
+  ): Promise<ProxyWaitForMessagesOutput>;
   markMessagesRead(input: MarkMessagesReadInput): Promise<MarkMessagesReadOutput>;
   close(): Promise<void>;
 }
@@ -273,7 +280,10 @@ export class E2eeProxyService implements E2eeProxyOperations {
     return broadcastToProxyOutput(result, audience);
   }
 
-  public async getMessages(input: GetMessagesInput): Promise<ProxyInboxOutput> {
+  public async getMessages(
+    input: GetMessagesInput,
+    options: EncryptedInboxReadOptions,
+  ): Promise<ProxyInboxOutput> {
     this.#ensureOpen();
     const result: ReceiveEncryptedMessagesResult = await receiveEncryptedMessages(
       this.#dependencies.vault,
@@ -281,6 +291,7 @@ export class E2eeProxyService implements E2eeProxyOperations {
       this.#dependencies.clock,
       input,
       this.#dependencies.trustOnFirstUse,
+      options,
     );
     return ProxyInboxOutputSchema.parse({
       agent_id: result.agentId,
@@ -289,7 +300,10 @@ export class E2eeProxyService implements E2eeProxyOperations {
     });
   }
 
-  public async waitForMessages(input: WaitForMessagesInput): Promise<ProxyWaitForMessagesOutput> {
+  public async waitForMessages(
+    input: WaitForMessagesInput,
+    options: EncryptedInboxReadOptions,
+  ): Promise<ProxyWaitForMessagesOutput> {
     this.#ensureOpen();
     const result: WaitForDecryptedMessagesResult = await waitForDecryptedMessages(
       this.#dependencies.vault,
@@ -297,6 +311,7 @@ export class E2eeProxyService implements E2eeProxyOperations {
       this.#dependencies.clock,
       input,
       this.#dependencies.trustOnFirstUse,
+      options,
     );
     return ProxyWaitForMessagesOutputSchema.parse({
       agent_id: result.agentId,

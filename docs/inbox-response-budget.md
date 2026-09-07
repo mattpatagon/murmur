@@ -16,7 +16,9 @@ Retry with a lower `limit`, starting with 1 if necessary. For an oversized resou
 `get_messages` instead. After consuming a page, continue with `after_sequence` equal to the last
 returned message sequence (`tenant_sequence` on the encrypted wire API). The inbox's
 `inbox_version` is a notification high-water mark, not a pagination cursor; advancing directly
-to it can skip messages. Reading still does not mark messages as read.
+to it can skip messages. A successful current-generation `get_messages` or `wait_for_messages`
+page is acknowledged, while an oversized or otherwise pre-commit rejected page, historical read,
+or inbox resource read remains unread.
 
 ## Accounting
 

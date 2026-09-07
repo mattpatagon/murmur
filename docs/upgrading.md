@@ -150,7 +150,8 @@ new setup targets; use a forward fix rather than rolling back after new values h
 - Follow `next_cursor` on agent, notice and policy lists and `nextCursor` on `resources/list`, even
   when fewer items than requested arrive. For an oversized inbox, retry with a smaller `limit`
   (start with 1), then continue from the last returned sequence, never `inbox_version`. See
-  [inbox response budgets](inbox-response-budget.md). No message is silently truncated or acknowledged.
+  [inbox response budgets](inbox-response-budget.md). A message omitted by a failed oversized
+  page is neither silently truncated nor acknowledged.
 - Parse successful tool text as JSON; its indentation is no longer stable. Check the MCP result
   even when HTTP returns 200: processing and materialization overload use retryable code `-32003`.
   Honor retry hints with bounded backoff and preserve write idempotency keys.

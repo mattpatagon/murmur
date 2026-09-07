@@ -2,9 +2,15 @@ import { expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { CallToolResult, ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
+import { ZodError } from "zod";
 
-import { type InboxOutput, InboxOutputSchema } from "../src/domain/contracts.js";
-import { UnknownAgentError } from "../src/domain/errors.js";
+import {
+  type InboxOutput,
+  InboxOutputSchema,
+  type WaitForMessagesOutput,
+  WaitForMessagesOutputSchema,
+} from "../src/domain/contracts.js";
+import { StorageCorruptionError, UnknownAgentError } from "../src/domain/errors.js";
 import {
   type MessageHistoryOutput,
   MessageHistoryOutputSchema,
@@ -85,13 +91,16 @@ for (const method of ["get_messages", "get_message_history", "resources/read"]) 
         );
         expect(output.inbox_version).toBe(17);
         expect(output.messages).toHaveLength(1);
+        const received: InboxOutput["messages"][number] | undefined = output.messages[0];
+        if (received === undefined) throw new Error("Missing acknowledged inbox message");
+        expect(received.read_at).toBe(READ_NOW.toISOString());
       }
       expect(fixture.transactions).toHaveLength(2);
       expect(fixture.completedTransactions).toBe(2);
       expect(fixture.clockCalls).toBe(1);
       const paired: ReadStatement[] | undefined = fixture.transactions[1];
       if (paired === undefined) throw new Error("Missing paired read transaction");
-      expect(paired).toHaveLength(3);
+      expect(paired).toHaveLength(method === "get_messages" ? 4 : 3);
       const first: ReadStatement | undefined = paired[0];
       if (first === undefined) throw new Error("Missing tenant context query");
       expect(first.text).toContain("set_config");
@@ -134,6 +143,15 @@ for (const method of ["get_messages", "get_message_history", "resources/read"]) 
         expect(page.values).toContain("selected-thread");
         expect(page.values).toContain(true);
         expect(page.values).toContain(2);
+      }
+      const acknowledgement: ReadStatement | undefined = paired.find(
+        (statement: ReadStatement): boolean => statement.text.includes("SET read_at = COALESCE"),
+      );
+      if (method === "get_messages") {
+        if (acknowledgement === undefined) throw new Error("Missing automatic acknowledgement");
+        expect(JSON.stringify(acknowledgement.values)).toContain(fixture.row.message_id);
+      } else {
+        expect(acknowledgement).toBeUndefined();
       }
     } finally {
       try {
@@ -200,6 +218,112 @@ test("unknown agents fail before payload reads and oversized pages need no separ
   }
 });
 
+test("get_messages rejects an incomplete PostgreSQL acknowledgement receipt", async (): Promise<void> => {
+  const fixture: InboxReadFixture = new InboxReadFixture();
+  fixture.acknowledgementOverride = [];
+  try {
+    await expect(
+      callDataTool("get_messages", { agent_id: READ_AGENT.value }, fixture.context()),
+    ).rejects.toBeInstanceOf(StorageCorruptionError);
+  } finally {
+    await fixture.store.close();
+  }
+});
+
+test("get_messages preserves existing PostgreSQL receipts and acknowledges only unread rows", async (): Promise<void> => {
+  const fixture: InboxReadFixture = new InboxReadFixture();
+  const existingReadAt: string = READ_NOW.addMinutes(-5).toISOString();
+  const alreadyReadId: string = "44444444-4444-4444-8444-444444444444";
+  fixture.pageOverride = [
+    { ...fixture.row, estimated_page_bytes: READ_BYTES * 2 },
+    {
+      ...fixture.row,
+      estimated_page_bytes: READ_BYTES * 2,
+      message_id: alreadyReadId,
+      read_at: existingReadAt,
+      sequence: 4,
+    },
+  ];
+  try {
+    const output: CallToolResult | null = await callDataTool(
+      "get_messages",
+      { agent_id: READ_AGENT.value },
+      fixture.context(),
+    );
+    if (output === null) throw new Error("Missing inbox tool result");
+    const messages: InboxOutput["messages"] = InboxOutputSchema.parse(
+      output.structuredContent,
+    ).messages;
+    expect(
+      messages.map((message: InboxOutput["messages"][number]): string | null => message.read_at),
+    ).toEqual([READ_NOW.toISOString(), existingReadAt]);
+    const acknowledgement: ReadStatement | undefined = fixture
+      .statements()
+      .find((statement: ReadStatement): boolean => statement.text.includes("SET read_at"));
+    if (acknowledgement === undefined) throw new Error("Missing automatic acknowledgement");
+    const values: string = JSON.stringify(acknowledgement.values);
+    expect(values).toContain(fixture.row.message_id);
+    expect(values).not.toContain(alreadyReadId);
+  } finally {
+    await fixture.store.close();
+  }
+});
+
+test("get_messages rejects a PostgreSQL acknowledgement for the wrong message", async (): Promise<void> => {
+  const fixture: InboxReadFixture = new InboxReadFixture();
+  fixture.acknowledgementOverride = [
+    {
+      message_id: "55555555-5555-4555-8555-555555555555",
+      read_at: READ_NOW.toISOString(),
+    },
+  ];
+  try {
+    await expect(
+      callDataTool("get_messages", { agent_id: READ_AGENT.value }, fixture.context()),
+    ).rejects.toBeInstanceOf(StorageCorruptionError);
+  } finally {
+    await fixture.store.close();
+  }
+});
+
+test("get_messages rejects a malformed PostgreSQL acknowledgement receipt", async (): Promise<void> => {
+  const fixture: InboxReadFixture = new InboxReadFixture();
+  fixture.acknowledgementOverride = [{ message_id: fixture.row.message_id, read_at: null }];
+  try {
+    await expect(
+      callDataTool("get_messages", { agent_id: READ_AGENT.value }, fixture.context()),
+    ).rejects.toBeInstanceOf(ZodError);
+  } finally {
+    await fixture.store.close();
+  }
+});
+
+test("get_messages does not rewrite an already acknowledged PostgreSQL page", async (): Promise<void> => {
+  const fixture: InboxReadFixture = new InboxReadFixture();
+  fixture.row = { ...fixture.row, read_at: READ_NOW.toISOString() };
+  try {
+    const output: CallToolResult | null = await callDataTool(
+      "get_messages",
+      { agent_id: READ_AGENT.value },
+      fixture.context(),
+    );
+    if (output === null) throw new Error("Missing inbox tool result");
+    const parsed: InboxOutput = InboxOutputSchema.parse(output.structuredContent);
+    const received: InboxOutput["messages"][number] | undefined = parsed.messages[0];
+    if (received === undefined) throw new Error("Missing acknowledged inbox message");
+    expect(received.read_at).toBe(READ_NOW.toISOString());
+    expect(
+      fixture
+        .statements()
+        .some((statement: ReadStatement): boolean =>
+          statement.text.includes("SET read_at = COALESCE"),
+        ),
+    ).toBe(false);
+  } finally {
+    await fixture.store.close();
+  }
+});
+
 test("a returned page remains charged during blocked transaction completion after its response is canceled", async (): Promise<void> => {
   const fixture: InboxReadFixture = new InboxReadFixture();
   const entered: DeferredRead = deferred();
@@ -244,13 +368,26 @@ test("a populated wait_for_messages read does not fetch an unused inbox version"
       { agent_id: READ_AGENT.value },
       fixture.context(),
     );
-    expect(result).not.toBeNull();
+    if (result === null) throw new Error("Missing wait result");
+    const output: WaitForMessagesOutput = WaitForMessagesOutputSchema.parse(
+      result.structuredContent,
+    );
+    const message: WaitForMessagesOutput["messages"][number] | undefined = output.messages[0];
+    if (message === undefined) throw new Error("Missing acknowledged wait message");
+    expect(message.read_at).toBe(READ_NOW.toISOString());
     expect(
       fixture
         .statements()
         .some((statement: ReadStatement): boolean => statement.text.includes("AS version")),
     ).toBe(false);
     expect(fixture.transactions).toHaveLength(2);
+    expect(
+      fixture
+        .statements()
+        .some((statement: ReadStatement): boolean =>
+          statement.text.includes("SET read_at = COALESCE"),
+        ),
+    ).toBe(true);
   } finally {
     await fixture.store.close();
   }

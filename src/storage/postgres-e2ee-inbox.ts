@@ -11,6 +11,9 @@ import { SessionKey } from "../domain/lifecycle-values.js";
 import type { Agent } from "../domain/models.js";
 import { AgentId, type Instant, type TenantId } from "../domain/value-objects.js";
 import {
+  type AcknowledgeEncryptedMessagesOutput,
+  AcknowledgeEncryptedMessagesOutputSchema,
+  type EncryptedMessageReadReceiptDto,
   type EncryptedInboxOutput,
   EncryptedInboxOutputSchema,
   type EncryptedMessageDto,
@@ -173,15 +176,15 @@ export async function getPostgresEncryptedMessages(
   );
 }
 
-export async function markPostgresEncryptedMessagesRead(
+export async function acknowledgePostgresEncryptedMessages(
   database: Sql,
   tenantId: TenantId,
   inputValue: unknown,
   now: Instant,
-): Promise<MarkMessagesReadOutput> {
+): Promise<AcknowledgeEncryptedMessagesOutput> {
   const input: MarkMessagesReadInput = MarkMessagesReadInputSchema.parse(inputValue);
   return await database.begin(
-    async (transaction: TransactionSql): Promise<MarkMessagesReadOutput> => {
+    async (transaction: TransactionSql): Promise<AcknowledgeEncryptedMessagesOutput> => {
       await setPostgresTenantContext(transaction, tenantId);
       const agent: Agent = await readingAgent(
         transaction,
@@ -191,7 +194,7 @@ export async function markPostgresEncryptedMessagesRead(
         now,
       );
       if (input.message_ids.length === 0) {
-        return MarkMessagesReadOutputSchema.parse({ read_at: now.toISOString(), updated: 0 });
+        return AcknowledgeEncryptedMessagesOutputSchema.parse({ receipts: [], updated: 0 });
       }
       const raw: unknown = await transaction`
         UPDATE murmur.e2ee_messages
@@ -201,17 +204,36 @@ export async function markPostgresEncryptedMessagesRead(
           AND recipient_generation = ${agent.generation.value}
           AND message_id = ANY(${database.array(input.message_ids)}::uuid[])
           AND expires_at > ${now.toISOString()}::timestamptz
-        RETURNING message_id::text AS message_id
+        RETURNING message_id::text AS message_id,
+          to_char(read_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS read_at
       `;
-      const updated: { readonly message_id: string }[] = z
-        .array(z.strictObject({ message_id: z.string().uuid() }))
-        .parse(raw);
-      return MarkMessagesReadOutputSchema.parse({
-        read_at: now.toISOString(),
-        updated: updated.length,
+      const receipts: EncryptedMessageReadReceiptDto[] = z
+        .array(z.strictObject({ message_id: z.string().uuid(), read_at: z.iso.datetime() }))
+        .parse(raw)
+        .sort(
+          (left: EncryptedMessageReadReceiptDto, right: EncryptedMessageReadReceiptDto): number =>
+            left.message_id.localeCompare(right.message_id),
+        );
+      return AcknowledgeEncryptedMessagesOutputSchema.parse({
+        receipts,
+        updated: receipts.length,
       });
     },
   );
+}
+
+export async function markPostgresEncryptedMessagesRead(
+  database: Sql,
+  tenantId: TenantId,
+  inputValue: unknown,
+  now: Instant,
+): Promise<MarkMessagesReadOutput> {
+  const acknowledgement: AcknowledgeEncryptedMessagesOutput =
+    await acknowledgePostgresEncryptedMessages(database, tenantId, inputValue, now);
+  return MarkMessagesReadOutputSchema.parse({
+    read_at: now.toISOString(),
+    updated: acknowledgement.updated,
+  });
 }
 
 export async function getPostgresEncryptedInboxSummary(

@@ -227,26 +227,26 @@ export function e2eeProxyTools(): readonly Tool[] {
     toolDefinition(
       "get_messages",
       "Read encrypted agent inbox",
-      "Read ciphertext from Murmur, verify and decrypt locally, and return plaintext only to this endpoint.",
+      "Read ciphertext from Murmur, verify and decrypt the complete page locally, then mark every returned message read remotely. Plaintext stays on this endpoint and each returned read_at value confirms acknowledgement.",
       GetMessagesInputSchema,
       ProxyInboxOutputSchema,
       {
         destructiveHint: false,
         idempotentHint: true,
-        readOnlyHint: true,
+        readOnlyHint: false,
         title: "Read encrypted agent inbox",
       },
     ),
     toolDefinition(
       "wait_for_messages",
       "Wait for encrypted agent messages",
-      "Wait for ciphertext messages, then verify and decrypt them locally.",
+      "Wait for ciphertext messages, verify and decrypt the complete page locally, then mark every returned message read remotely. Verification or decryption failure leaves the page unread.",
       WaitForMessagesInputSchema,
       ProxyWaitForMessagesOutputSchema,
       {
         destructiveHint: false,
         idempotentHint: true,
-        readOnlyHint: true,
+        readOnlyHint: false,
         title: "Wait for encrypted agent messages",
       },
     ),
@@ -324,11 +324,11 @@ export async function callE2eeProxyTool(
     }
     case "get_messages": {
       const input: GetMessagesInput = GetMessagesInputSchema.parse(argumentsValue);
-      return toolResult(await operations.getMessages(input));
+      return toolResult(await operations.getMessages(input, { acknowledgement: "automatic" }));
     }
     case "wait_for_messages": {
       const input: WaitForMessagesInput = WaitForMessagesInputSchema.parse(argumentsValue);
-      return toolResult(await operations.waitForMessages(input));
+      return toolResult(await operations.waitForMessages(input, { acknowledgement: "automatic" }));
     }
     case "mark_messages_read": {
       const input: MarkMessagesReadInput = MarkMessagesReadInputSchema.parse(argumentsValue);

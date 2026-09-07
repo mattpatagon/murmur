@@ -53,6 +53,7 @@ import {
   ProxyWaitForMessagesOutputSchema,
 } from "../src/e2ee/proxy-contracts.js";
 import type { E2eeProxyOperations } from "../src/e2ee/proxy-service.js";
+import type { EncryptedInboxReadOptions } from "../src/e2ee/proxy-receive.js";
 import type { MurmurUpgradeChecker } from "../src/mcp/murmur-upgrade-checker.js";
 
 const NOW: string = "2026-08-10T20:00:00.000Z";
@@ -217,13 +218,19 @@ class FakeProxyOperations implements E2eeProxyOperations {
     };
   }
 
-  public async getMessages(_input: GetMessagesInput): Promise<ProxyInboxOutput> {
-    this.calls.push("get_messages");
+  public async getMessages(
+    _input: GetMessagesInput,
+    options: EncryptedInboxReadOptions,
+  ): Promise<ProxyInboxOutput> {
+    this.calls.push(`get_messages:${options.acknowledgement}`);
     return { agent_id: RECIPIENT_ID, inbox_version: 1, messages: [proxyMessage()] };
   }
 
-  public async waitForMessages(input: WaitForMessagesInput): Promise<ProxyWaitForMessagesOutput> {
-    this.calls.push("wait_for_messages");
+  public async waitForMessages(
+    input: WaitForMessagesInput,
+    options: EncryptedInboxReadOptions,
+  ): Promise<ProxyWaitForMessagesOutput> {
+    this.calls.push(`wait_for_messages:${options.acknowledgement}`);
     if (input.timeout_seconds === 5) {
       if (!this.#backgroundDelivered) {
         this.#backgroundDelivered = true;
@@ -235,9 +242,9 @@ class FakeProxyOperations implements E2eeProxyOperations {
     return { agent_id: RECIPIENT_ID, messages: [proxyMessage()], timed_out: false };
   }
 
-  public async markMessagesRead(_input: MarkMessagesReadInput): Promise<MarkMessagesReadOutput> {
+  public async markMessagesRead(input: MarkMessagesReadInput): Promise<MarkMessagesReadOutput> {
     this.calls.push("mark_messages_read");
-    return { read_at: NOW, updated: 1 };
+    return { read_at: NOW, updated: input.message_ids.length };
   }
 
   public async close(): Promise<void> {
@@ -396,8 +403,8 @@ test("local E2E MCP proxy preserves familiar data tools and verified plaintext o
       "submit_feedback",
       "send_message",
       "broadcast_message",
-      "get_messages",
-      "wait_for_messages",
+      "get_messages:automatic",
+      "wait_for_messages:automatic",
       "mark_messages_read",
       "close_agent",
     ]);
@@ -449,6 +456,8 @@ test("local E2E MCP proxy preserves familiar data tools and verified plaintext o
       proxyMessage(),
     );
     await client.unsubscribeResource({ uri: recipientUri });
+    expect(operations.calls).toContain("wait_for_messages:none");
+    expect(operations.calls).toContain("get_messages:none");
 
     const invalid: CallToolResult = await callTool(client, "send_message", {
       content: "",

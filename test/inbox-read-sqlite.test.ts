@@ -9,6 +9,7 @@ import {
   MessageHistoryOutputSchema,
 } from "../src/domain/history-contracts.js";
 import { AgentGeneration, SessionKey } from "../src/domain/lifecycle-values.js";
+import type { SendMessageResult } from "../src/domain/models.js";
 import {
   AgentId,
   DisplayName,
@@ -133,6 +134,131 @@ test("SQLite paired inbox reads keep unfiltered version and renew named sessions
         .query("SELECT count(*) AS count FROM agent_sessions WHERE session_key = 'never-created'")
         .get(),
     ).toEqual({ count: 0n });
+  });
+});
+
+test("get_messages atomically acknowledges only the returned SQLite page", async (): Promise<void> => {
+  await withFixture(async (fixture: Fixture): Promise<void> => {
+    const selected: SendMessageResult = fixture.store.sendMessage({
+      ...baseMessageCommand(),
+      idempotencyKey: IdempotencyKey.parse("automatic-receipt-selected"),
+      threadId: ThreadId.parse("selected"),
+    });
+    const other: SendMessageResult = fixture.store.sendMessage({
+      ...baseMessageCommand(),
+      idempotencyKey: IdempotencyKey.parse("automatic-receipt-other"),
+      threadId: ThreadId.parse("other"),
+    });
+    const receiptAt: Instant = NOW.addMinutes(5);
+    fixture.reset(receiptAt);
+
+    const output: InboxOutput = await read(fixture, {
+      limit: 1,
+      thread_id: "selected",
+      unread_only: true,
+    });
+
+    expect(output.messages).toHaveLength(1);
+    const received: MessageDto | undefined = output.messages[0];
+    if (received === undefined) throw new Error("Expected one automatically acknowledged message");
+    expect(received.message_id).toBe(selected.message.messageId.value);
+    expect(received.read_at).toBe(receiptAt.toISOString());
+    expect(fixture.calls()).toBe(1);
+    expect(
+      fixture.database
+        .query("SELECT read_at FROM messages WHERE message_id = ?")
+        .get(selected.message.messageId.value),
+    ).toEqual({ read_at: receiptAt.toISOString() });
+    expect(
+      fixture.database
+        .query("SELECT read_at FROM messages WHERE message_id = ?")
+        .get(other.message.messageId.value),
+    ).toEqual({ read_at: null });
+    fixture.database.run(`
+      CREATE TRIGGER reject_repeated_acknowledgement
+      BEFORE UPDATE OF read_at ON messages
+      BEGIN
+        SELECT RAISE(ABORT, 'already-read message was rewritten');
+      END
+    `);
+    const repeated: InboxOutput = await read(fixture, {
+      limit: 1,
+      thread_id: "selected",
+      unread_only: false,
+    });
+    expect(repeated.messages).toHaveLength(1);
+    const repeatedMessage: MessageDto | undefined = repeated.messages[0];
+    if (repeatedMessage === undefined) throw new Error("Expected repeated inbox message");
+    expect(repeatedMessage.read_at).toBe(receiptAt.toISOString());
+    expect(
+      (
+        await read(fixture, {
+          limit: 1,
+          thread_id: "selected",
+          unread_only: true,
+        })
+      ).messages,
+    ).toEqual([]);
+  });
+});
+
+test("SQLite rejects an automatic acknowledgement that cannot update every returned message", async (): Promise<void> => {
+  await withFixture(async (fixture: Fixture): Promise<void> => {
+    const sent: SendMessageResult = fixture.store.sendMessage({
+      ...baseMessageCommand(),
+      idempotencyKey: IdempotencyKey.parse("automatic-receipt-count-mismatch"),
+    });
+    fixture.database.run(`
+      CREATE TRIGGER ignore_automatic_acknowledgement
+      BEFORE UPDATE OF read_at ON messages
+      BEGIN
+        SELECT RAISE(IGNORE);
+      END
+    `);
+
+    await expect(read(fixture, { unread_only: true })).rejects.toThrow(
+      "Stored automatic message acknowledgement failed runtime validation",
+    );
+    expect(fixture.database.inTransaction).toBe(false);
+    expect(
+      fixture.database
+        .query("SELECT read_at FROM messages WHERE message_id = ?")
+        .get(sent.message.messageId.value),
+    ).toEqual({ read_at: null });
+  });
+});
+
+test("SQLite acknowledgement failure rolls back the read receipt", async (): Promise<void> => {
+  await withFixture(async (fixture: Fixture): Promise<void> => {
+    const sent: SendMessageResult = fixture.store.sendMessage({
+      ...baseMessageCommand(),
+      idempotencyKey: IdempotencyKey.parse("automatic-receipt-rollback"),
+    });
+    fixture.reset(NOW.addMinutes(5));
+    const query: Database["query"] = fixture.database.query.bind(fixture.database);
+    const queries: Mock<Database["query"]> = spyOn(fixture.database, "query");
+    queries.mockImplementation(function failAcknowledgement<
+      Result,
+      Bindings extends SQLQueryBindings | SQLQueryBindings[],
+    >(sql: string): ReturnType<typeof query<Result, Bindings>> {
+      if (sql.includes("UPDATE messages") && sql.includes("SET read_at = COALESCE")) {
+        throw new Error("Injected automatic acknowledgement failure");
+      }
+      return query<Result, Bindings>(sql);
+    });
+    try {
+      await expect(read(fixture, { unread_only: true })).rejects.toThrow(
+        "Injected automatic acknowledgement failure",
+      );
+    } finally {
+      queries.mockRestore();
+    }
+    expect(fixture.database.inTransaction).toBe(false);
+    expect(
+      fixture.database
+        .query("SELECT read_at FROM messages WHERE message_id = ?")
+        .get(sent.message.messageId.value),
+    ).toEqual({ read_at: null });
   });
 });
 

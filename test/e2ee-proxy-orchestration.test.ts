@@ -202,12 +202,15 @@ test("orchestrator requests and replies remain encrypted with signed server-issu
         (capture: CapturedRemoteCall): boolean => capture.tool === "get_orchestrator",
       ),
     ).toHaveLength(1);
-    const bossInbox: ProxyInboxOutput = await boss.getMessages({
-      after_sequence: 0,
-      agent_id: ORCHESTRATOR_ID,
-      limit: 100,
-      unread_only: false,
-    });
+    const bossInbox: ProxyInboxOutput = await boss.getMessages(
+      {
+        after_sequence: 0,
+        agent_id: ORCHESTRATOR_ID,
+        limit: 100,
+        unread_only: false,
+      },
+      { acknowledgement: "automatic" },
+    );
     expect(bossInbox.messages[0]).toMatchObject({
       content: QUESTION,
       encryption: asked.message.encryption,
@@ -225,12 +228,15 @@ test("orchestrator requests and replies remain encrypted with signed server-issu
       orchestrator_policy_id: null,
       sender_authority: "orchestrator",
     });
-    const peerInbox: ProxyInboxOutput = await peer.getMessages({
-      after_sequence: 0,
-      agent_id: PEER_ID,
-      limit: 100,
-      unread_only: false,
-    });
+    const peerInbox: ProxyInboxOutput = await peer.getMessages(
+      {
+        after_sequence: 0,
+        agent_id: PEER_ID,
+        limit: 100,
+        unread_only: false,
+      },
+      { acknowledgement: "automatic" },
+    );
     expect(peerInbox.messages[0]).toMatchObject({
       content: REPLY,
       encryption: replied.message.encryption,

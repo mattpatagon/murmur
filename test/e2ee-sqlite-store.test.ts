@@ -36,19 +36,21 @@ import type {
 import type { E2eeMessageStore } from "../src/storage/e2ee-message-store.js";
 import { SqliteMessageStore } from "../src/storage/sqlite-message-store.js";
 import { testE2eeBundleWithRevokedAgentKey } from "./support/e2ee-hosted-crypto.js";
-
 const NOW: string = "2026-08-10T20:00:00.000Z";
+const LATER: string = "2026-08-10T20:01:00.000Z";
 const CREATED: string = "2026-08-10T19:00:00.000Z";
 const KEY_EXPIRES: string = "2026-09-16T20:00:00.000Z";
 const AGENT_EXPIRES: string = "2026-11-08T20:00:00.000Z";
 const MESSAGE_EXPIRES: string = "2026-08-11T20:00:00.000Z";
-
 class FixedClock implements Clock {
+  private value: Instant = Instant.parse(NOW);
   public now(): Instant {
-    return Instant.parse(NOW);
+    return this.value;
+  }
+  public set(value: string): void {
+    this.value = Instant.parse(value);
   }
 }
-
 type Identity = {
   readonly agent: SigningKeyPair;
   readonly agentCertificate: AgentKeyCertificate;
@@ -58,11 +60,9 @@ type Identity = {
   readonly oneTimeCertificate: PrekeyCertificate;
   readonly root: SigningKeyPair;
 };
-
 function seed(value: number): Uint8Array {
   return new Uint8Array(32).fill(value);
 }
-
 async function identity(agentId: string, offset: number): Promise<Identity> {
   const root: SigningKeyPair = await createSigningKeyPair(seed(offset));
   const agent: SigningKeyPair = await createSigningKeyPair(seed(offset + 1));
@@ -115,7 +115,6 @@ async function identity(agentId: string, offset: number): Promise<Identity> {
     root,
   };
 }
-
 function bundle(value: Identity): ReturnType<typeof publicBundleToDto> {
   return publicBundleToDto(
     value.root.publicKey,
@@ -124,7 +123,6 @@ function bundle(value: Identity): ReturnType<typeof publicBundleToDto> {
     [value.oneTimeCertificate],
   );
 }
-
 function register(store: SqliteMessageStore, agentId: string, repository: string): void {
   store.registerAgent({
     agentId: AgentId.parse(agentId),
@@ -132,13 +130,11 @@ function register(store: SqliteMessageStore, agentId: string, repository: string
     metadata: { machine: `${agentId}-machine`, repository },
   });
 }
-
 function recipientKey(identityValue: Identity, claim: ClaimEncryptionPrekeyOutput): Uint8Array {
   return claim.prekey_class === "one_time"
     ? identityValue.oneTime.publicKey
     : identityValue.fallback.publicKey;
 }
-
 async function encryptedPut(
   sender: Identity,
   recipient: Identity,
@@ -183,9 +179,9 @@ async function encryptedPut(
   );
   return { claim_id: claim.claim_id, envelope: envelopeToDto(envelope) };
 }
-
 test("SQLite stores verified direct ciphertext with atomic retry and inbox semantics", async (): Promise<void> => {
-  const store: SqliteMessageStore = new SqliteMessageStore(":memory:", new FixedClock());
+  const clock: FixedClock = new FixedClock();
+  const store: SqliteMessageStore = new SqliteMessageStore(":memory:", clock);
   try {
     register(store, "alice", "mattpatagon/murmur");
     register(store, "bob", "mattpatagon/murmur");
@@ -230,17 +226,35 @@ test("SQLite stores verified direct ciphertext with atomic retry and inbox seman
       }),
     ).toMatchObject({ agent_id: "bob", inbox_version: 1, messages: [{ tenant_sequence: 1 }] });
     expect(
+      await encrypted.acknowledgeEncryptedMessages({
+        agent_id: "bob",
+        message_ids: [put.envelope.header.message_id],
+      }),
+    ).toEqual({
+      receipts: [{ message_id: put.envelope.header.message_id, read_at: NOW }],
+      updated: 1,
+    });
+    clock.set(LATER);
+    expect(
+      await encrypted.acknowledgeEncryptedMessages({
+        agent_id: "bob",
+        message_ids: [put.envelope.header.message_id],
+      }),
+    ).toEqual({
+      receipts: [{ message_id: put.envelope.header.message_id, read_at: NOW }],
+      updated: 1,
+    });
+    expect(
       await encrypted.markEncryptedMessagesRead({
         agent_id: "bob",
         message_ids: [put.envelope.header.message_id],
       }),
-    ).toMatchObject({ updated: 1 });
+    ).toEqual({ read_at: LATER, updated: 1 });
     expect(await encrypted.getEncryptedInboxSummary({ agent_id: "bob" })).toMatchObject({
       inbox_version: 1,
       newest_sequence: 1,
       unread_count: 0,
     });
-
     const relabeled: PutEncryptedMessageInput = {
       ...put,
       envelope: {
@@ -281,7 +295,6 @@ test("SQLite stores verified direct ciphertext with atomic retry and inbox seman
     store.close();
   }
 });
-
 test("SQLite preserves verified agent-key revocations across bundle rotation", async (): Promise<void> => {
   const store: SqliteMessageStore = new SqliteMessageStore(":memory:", new FixedClock());
   try {
@@ -289,7 +302,6 @@ test("SQLite preserves verified agent-key revocations across bundle rotation", a
     const original: Identity = await identity("alice", 61);
     const encrypted: E2eeMessageStore = store.scopeE2ee(TenantId.founding());
     await encrypted.publishAgentKeyBundle({ agent_id: "alice", bundle: bundle(original) });
-
     const replacementAgent: SigningKeyPair = await createSigningKeyPair(seed(70));
     const replacementCertificate: AgentKeyCertificate = await createAgentKeyCertificate(
       {
@@ -350,7 +362,6 @@ test("SQLite preserves verified agent-key revocations across bundle rotation", a
     store.close();
   }
 });
-
 test("SQLite keeps encrypted broadcasts invisible until complete atomic commit", async (): Promise<void> => {
   const store: SqliteMessageStore = new SqliteMessageStore(":memory:", new FixedClock());
   try {
@@ -461,7 +472,6 @@ test("SQLite keeps encrypted broadcasts invisible until complete atomic commit",
     expect(
       await encrypted.commitEncryptedBroadcast({ broadcast_id: prepared.broadcast_id }),
     ).toMatchObject({ duplicate: true });
-
     const cancelled: PrepareEncryptedBroadcastOutput = await encrypted.prepareEncryptedBroadcast({
       audience: { repository: "mattpatagon/murmur" },
       context: {
