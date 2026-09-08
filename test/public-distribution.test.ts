@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import packageMetadata from "../package.json" with { type: "json" };
+import { buildDistribution } from "../scripts/build-distribution.js";
 import {
   distributionDownloadPath,
   distributionPackageVersion,
@@ -69,6 +70,20 @@ test("public download verifies release, digest, size and safe package identity",
     );
     expect(distributionPackageVersion("1.2.3.4")).toBe("1.2.3-build.4");
     expect((): string => distributionDownloadPath("1.2.3.4", "../private")).toThrow();
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("public distribution advertises native fx setup in its packaged README", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-distribution-fx-"));
+  try {
+    await buildDistribution(directory, REVISION);
+    const archive: Bun.Archive = new Bun.Archive(readFileSync(join(directory, "murmur.tgz")));
+    const files: Map<string, Blob> = await archive.files();
+    const readme: Blob | undefined = files.get("package/README.md");
+    if (readme === undefined) throw new Error("Public distribution README is missing");
+    expect(await readme.text()).toContain("Claude Code, Codex, fx, OpenCode, Cursor, and Pi");
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }

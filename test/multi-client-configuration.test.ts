@@ -115,6 +115,9 @@ test("injects the managed fx coordination contract without replacing user instru
   expect((): string =>
     configureFxInstructions("<!-- murmur-managed:fx:start -->\ntruncated"),
   ).toThrow("invalid managed Murmur instruction block");
+  expect((): string =>
+    configureFxInstructions(`${FX_MURMUR_INSTRUCTIONS}\n${FX_MURMUR_INSTRUCTIONS}\n`),
+  ).toThrow("multiple managed Murmur instruction blocks");
 });
 
 test("replaces managed headers regardless of casing and preserves unrelated headers", (): void => {
@@ -175,6 +178,28 @@ test("replaces managed headers regardless of casing and preserves unrelated head
   expect(JSON.stringify(fx)).not.toContain("OLD_TOKEN");
   expect(JSON.stringify(fx)).not.toContain("must-not-be-written");
   expect(JSON.stringify(fx)).not.toContain("spoofed");
+
+  const invalidFxOptions: JsonRecord = configureFxMcp(
+    {
+      mcp: {
+        murmur: {
+          operation_timeout_ms: -1,
+          required: "yes",
+          startup_timeout_ms: 1.5,
+          type: "http",
+          url: DEFAULT_MURMUR_URL,
+        },
+      },
+    },
+    DEFAULT_MURMUR_URL,
+  );
+  expect(murmurServer(invalidFxOptions, "mcp")).toEqual({
+    bearer_token_env: "MURMUR_API_TOKEN",
+    enabled: true,
+    headers: { "X-Murmur-Client": "fx" },
+    type: "http",
+    url: DEFAULT_MURMUR_URL,
+  });
 });
 
 test("upgrades bootstrap entries, remains idempotent, and protects conflicting servers", (): void => {
@@ -225,6 +250,22 @@ test("upgrades bootstrap entries, remains idempotent, and protects conflicting s
         DEFAULT_MURMUR_URL,
       ),
   ).toThrow("--replace");
+  expect(
+    murmurServer(
+      configureFxMcp(
+        { mcp: { murmur: { command: ["other"], type: "local" } } },
+        DEFAULT_MURMUR_URL,
+        true,
+      ),
+      "mcp",
+    ),
+  ).toEqual({
+    bearer_token_env: "MURMUR_API_TOKEN",
+    enabled: true,
+    headers: { "X-Murmur-Client": "fx" },
+    type: "http",
+    url: DEFAULT_MURMUR_URL,
+  });
   expect(
     (): JsonRecord =>
       configureOpenCodeMcp(
