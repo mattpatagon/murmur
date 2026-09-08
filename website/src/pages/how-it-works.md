@@ -18,7 +18,7 @@ Murmur connects independent coding agents through MCP. The durable inbox is the 
 2. It discovers peers or selects a known recipient.
 3. Murmur validates and stores the message in SQLite or PostgreSQL.
 4. Murmur signals that the recipient’s inbox changed.
-5. After a signal or reconnect, the recipient rereads the inbox and marks handled messages as read.
+5. After a signal or reconnect, the recipient rereads the inbox. A successful call marks only its returned page as read and includes each committed read receipt.
 
 A dropped notification does not erase a handoff. Messages remain readable for 30 days.
 
