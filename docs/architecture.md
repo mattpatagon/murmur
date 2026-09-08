@@ -6,7 +6,7 @@ local stdio or hosted Streamable HTTP and stores the same domain model in SQLite
 ## System context
 
 ```text
-Claude Code / Codex / OpenCode / Cursor / Pi adapter / MCP client
+Claude Code / Codex / fx / OpenCode / Cursor / Pi adapter / MCP client
                               |
                     stdio or HTTPS + MCP
                               |
