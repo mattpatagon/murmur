@@ -88,9 +88,12 @@ test("configures all supported clients at user scope without copying the API tok
       readFileSync(join(directory, ".config", "opencode", "opencode.json"), "utf8"),
       readFileSync(join(directory, ".cursor", "mcp.json"), "utf8"),
       readFileSync(join(directory, ".config", "mcp", "mcp.json"), "utf8"),
+      readFileSync(join(directory, ".omp", "agent", "mcp.json"), "utf8"),
+      readFileSync(join(directory, ".omp", "agent", "extensions", "murmur.ts"), "utf8"),
     ].join("\n");
     expect(combined).toContain("MURMUR_API_TOKEN");
     expect(combined).toContain('client: "fx"');
+    expect(combined).toContain("murmur-managed:omp");
     expect(combined).not.toContain("must-not-be-written");
     expect(result.stdout).toContain("pi-mcp-adapter");
   } finally {

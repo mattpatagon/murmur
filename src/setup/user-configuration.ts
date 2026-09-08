@@ -22,6 +22,7 @@ import {
   MURMUR_TOKEN_ENV,
   type MurmurClient,
   type SetupClient,
+  supportsLifecycleHooks,
 } from "./client-configuration.js";
 import { configureCodexMcp } from "./codex-configuration.js";
 import { configureClaudeE2eeMcp, configureCodexE2eeMcp } from "./e2ee-client-configuration.js";
@@ -31,6 +32,8 @@ import {
   configureCursorMcp,
   configureFxE2eeMcp,
   configureFxMcp,
+  configureOmpE2eeMcp,
+  configureOmpMcp,
   configureOpenCodeE2eeMcp,
   configureOpenCodeMcp,
   configurePiE2eeMcp,
@@ -39,7 +42,15 @@ import {
   type JsonRecord,
   readJsonRecord,
 } from "./json-client-configuration.js";
+import { configureOmpExtension } from "./omp-extension.js";
 export { configureFxInstructions, FX_MURMUR_INSTRUCTIONS } from "./fx-instructions.js";
+export {
+  configureOmpExtension,
+  OMP_EXTENSION_MARKER,
+  type OmpExtensionOptions,
+  ompExtensionSource,
+  ompHookCommand,
+} from "./omp-extension.js";
 
 export type { MurmurClient, SetupClient } from "./client-configuration.js";
 export { DEFAULT_MURMUR_URL, MURMUR_TOKEN_ENV } from "./client-configuration.js";
@@ -49,6 +60,8 @@ export {
   configureCursorMcp,
   configureFxE2eeMcp,
   configureFxMcp,
+  configureOmpE2eeMcp,
+  configureOmpMcp,
   configureOpenCodeE2eeMcp,
   configureOpenCodeMcp,
   configurePiE2eeMcp,
@@ -68,6 +81,8 @@ export type UserConfigurationPaths = {
   readonly cursorMcp: string;
   readonly fxInstructions: string;
   readonly fxMcp: string;
+  readonly ompExtension: string;
+  readonly ompMcp: string;
   readonly opencodeConfig: string;
   readonly piMcp: string;
 };
@@ -198,6 +213,21 @@ export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
+// Oh My Pi resolves its agent directory from PI_CODING_AGENT_DIR, then an active named profile,
+// then ~/.omp/agent. Setup follows the same order so a profile-scoped host sees its own entry.
+function ompAgentDirectoryPath(
+  environment: NodeJS.ProcessEnv,
+  home: string,
+  joinTargetPath: PathJoin,
+): string {
+  const configuredDirectory: string | null = environmentPath(environment, "PI_CODING_AGENT_DIR");
+  if (configuredDirectory !== null) return configuredDirectory;
+  const profile: string | null =
+    environmentPath(environment, "OMP_PROFILE") ?? environmentPath(environment, "PI_PROFILE");
+  if (profile !== null) return joinTargetPath(home, ".omp", "profiles", profile, "agent");
+  return joinTargetPath(home, ".omp", "agent");
+}
+
 export function defaultUserConfigurationPaths(
   environment: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
@@ -211,6 +241,7 @@ export function defaultUserConfigurationPaths(
   );
   const codexHome: string = configuredCodexHome ?? joinTargetPath(home, ".codex");
   const claudeDirectory: string = configuredClaudeDirectory ?? joinTargetPath(home, ".claude");
+  const ompAgentDirectory: string = ompAgentDirectoryPath(environment, home, joinTargetPath);
   return {
     claudeMcp:
       configuredClaudeDirectory === null
@@ -222,6 +253,8 @@ export function defaultUserConfigurationPaths(
     cursorMcp: joinTargetPath(home, ".cursor", "mcp.json"),
     fxInstructions: joinTargetPath(home, ".fx", "AGENTS.md"),
     fxMcp: joinTargetPath(home, ".fx", "mcp.json"),
+    ompExtension: joinTargetPath(ompAgentDirectory, "extensions", "murmur.ts"),
+    ompMcp: joinTargetPath(ompAgentDirectory, "mcp.json"),
     opencodeConfig: joinTargetPath(home, ".config", "opencode", "opencode.json"),
     piMcp: joinTargetPath(home, ".config", "mcp", "mcp.json"),
   };
@@ -273,11 +306,8 @@ export function installUserConfiguration(options: {
   if (vaultPath !== undefined && (!e2ee || !isAbsolute(vaultPath))) {
     throw new Error("A custom E2E vault path requires E2E setup and an absolute path");
   }
-  if (
-    (options.clients.includes("codex") || options.clients.includes("claude")) &&
-    hookExecutable === undefined
-  ) {
-    throw new Error("Claude and Codex setup requires the local hook executable");
+  if (options.clients.some(supportsLifecycleHooks) && hookExecutable === undefined) {
+    throw new Error("Claude, Codex, and Oh My Pi setup requires the local hook executable");
   }
 
   if (options.clients.includes("codex") && hookExecutable !== undefined) {
@@ -313,6 +343,20 @@ export function installUserConfiguration(options: {
       paths.claudeSettings,
       (current: JsonRecord): JsonRecord =>
         configureHooks(current, "claude", hookExecutable, e2ee, vaultPath),
+    );
+  }
+
+  if (options.clients.includes("omp") && hookExecutable !== undefined) {
+    addJsonWrite(
+      pendingWrites,
+      paths.ompMcp,
+      (current: JsonRecord): JsonRecord =>
+        e2ee && proxyExecutable !== undefined
+          ? configureOmpE2eeMcp(current, url, proxyExecutable, replace, vaultPath)
+          : configureOmpMcp(current, url, replace),
+    );
+    addTextWrite(pendingWrites, paths.ompExtension, (current: string): string =>
+      configureOmpExtension(current, { e2ee, hookExecutable, url, vaultPath }, replace),
     );
   }
 

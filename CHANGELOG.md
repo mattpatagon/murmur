@@ -2,6 +2,17 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Configure Oh My Pi as a first-class Murmur client with `murmur setup --user` or `--omp`. Setup
+  writes a native `mcp.json` entry in the active agent directory (honoring `PI_CODING_AGENT_DIR`
+  and `OMP_PROFILE`), supports the local E2E proxy shape, and installs a managed
+  `extensions/murmur.ts` that runs `murmur-hook --client omp` from `session_start`,
+  `before_agent_start`, `tool_result`, `agent_end`, and `session_shutdown`, injecting hook output
+  as coordination context without waking an idle model.
+
 ## [0.19.0.0] - 2026-09-08
 
 ### Added
@@ -460,41 +471,6 @@ All notable changes to Murmur are documented in this file.
 - Serialize hosted E2E writes with entitlement transitions and credential or tenant revocation so in-flight work cannot survive a completed security-state change or restore plaintext tools.
 - Enforce strict peer verification and encrypted-tool autodetection with no plaintext downgrade when encryption, trust, server capability, or independent validation fails.
 
-## [0.7.1.0] - 2026-08-10
-
-### Changed
-
-- Harden orchestrator-authority release verification for cross-tenant personal policies, conflicting request retries, concurrent policy replacement, and retained provenance after hybrid rollback.
-
-### Fixed
-
-- Ensure deterministic PostgreSQL race tests release pending requests and database resources when lock acquisition fails.
-
-## [0.7.0.0] - 2026-08-10
-
-### Added
-
-- Grant a named agent human-delegated orchestrator authority with a dedicated, agent-bound credential that ordinary agents cannot self-claim.
-- Route agent questions through organization, repository, personal, or personal-repository policies while keeping the human's delegation instructions private from callers.
-- Let orchestrators inspect the exact delegation behind a routed question and reply through the durable inbox with verified authority provenance.
-- Show verified orchestrator senders in inbox notifications and expose authority on agent discovery, messages, broadcasts, and history.
-
-### Changed
-
-- Give tenant administrators bounded, cursor-paginated controls to create and revoke orchestrator credentials and to set, list, replace, or clear routing policies.
-- Keep local SQLite mode peer-only while accepting retained authority provenance across hook and server deployment skew.
-
-### Fixed
-
-- Serialize routing with policy replacement, clearing, token revocation, and credential expiry so an admitted question cannot be stranded with stale authority.
-- Rotate expired orchestrator credentials without exhausting token capacity, preserve policy-referenced audit rows, and make identical policy retries timestamp-stable.
-- Preserve lifecycle generations on routed messages and keep reserved inactive orchestrator identities discoverable through explicit lifecycle filters.
-
-### Security
-
-- Derive orchestrator authority only from validated credentials, enforce tenant-qualified provenance with forced RLS and composite foreign keys, and reject peer attempts to spoof or take over delegated identities.
-- Revalidate the selected policy, credential binding, revocation, role, and expiry at message insertion while keeping operator credentials outside tenant messaging.
-
 ## Earlier releases
 
-See the [0.1.0.0–0.6.0.0 release history](docs/changelog-early-releases.md).
+See the [0.1.0.0–0.7.1.0 release history](docs/changelog-early-releases.md).

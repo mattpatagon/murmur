@@ -45,6 +45,8 @@ function configurationPaths(directory: string): UserConfigurationPaths {
     cursorMcp: join(directory, ".cursor", "mcp.json"),
     fxInstructions: join(directory, ".fx", "AGENTS.md"),
     fxMcp: join(directory, ".fx", "mcp.json"),
+    ompExtension: join(directory, ".omp", "agent", "extensions", "murmur.ts"),
+    ompMcp: join(directory, ".omp", "agent", "mcp.json"),
     opencodeConfig: join(directory, ".config", "opencode", "opencode.json"),
     piMcp: join(directory, ".config", "mcp", "mcp.json"),
   };
@@ -355,23 +357,24 @@ test("keeps local E2E setup repeatable and recovers conflicts only with replace"
   }
 });
 
-test("installs all six targets atomically and does not require hooks for other clients", (): void => {
+test("installs all seven targets atomically and does not require hooks for other clients", (): void => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-multi-client-"));
   const paths: UserConfigurationPaths = configurationPaths(directory);
   try {
     mkdirSync(join(directory, ".cursor"), { recursive: true });
     writeFileSync(paths.cursorMcp, JSON.stringify({ mcpServers: { other: { command: "other" } } }));
     const changed: readonly string[] = installUserConfiguration({
-      clients: ["claude", "codex", "fx", "opencode", "cursor", "pi"],
+      clients: ["claude", "codex", "fx", "opencode", "cursor", "pi", "omp"],
       hookExecutable: "/usr/local/bin/murmur-hook",
       paths,
     });
-    expect(changed).toHaveLength(9);
+    expect(changed).toHaveLength(11);
+    expect(readFileSync(paths.ompExtension, "utf8")).toStartWith("// murmur-managed:omp");
     expect(readFileSync(paths.fxInstructions, "utf8")).toContain("Murmur coordination for fx");
     expect(readFileSync(paths.cursorMcp, "utf8")).toContain('"other"');
     expect(
       installUserConfiguration({
-        clients: ["claude", "codex", "fx", "opencode", "cursor", "pi"],
+        clients: ["claude", "codex", "fx", "opencode", "cursor", "pi", "omp"],
         hookExecutable: "/usr/local/bin/murmur-hook",
         paths,
       }),

@@ -2,8 +2,8 @@
 
 Murmur supports current GitHub-hosted Linux/Ubuntu, macOS, and Windows environments with Bun 1.3.14
 or newer. The portable surface includes package installation, strict verification, local SQLite,
-configuration for Claude Code, Codex, fx, OpenCode, Cursor, and Pi's MCP adapter, stdio package entry
-points, HTTP logic, and production builds.
+configuration for Claude Code, Codex, fx, OpenCode, Cursor, Pi's MCP adapter, and Oh My Pi, stdio package
+entry points, HTTP logic, and production builds.
 
 ## CI contract
 
@@ -64,7 +64,9 @@ setup resolves:
 - macOS and Linux from `HOME` and each managed client's documented user configuration layout;
 - explicit `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, and hook executable overrides when supplied;
 - fx's private MCP profile at `~/.fx/mcp.json` and managed instruction block in
-  `~/.fx/AGENTS.md`.
+  `~/.fx/AGENTS.md`;
+- Oh My Pi's agent directory from `PI_CODING_AGENT_DIR`, then `OMP_PROFILE` or `PI_PROFILE`, then
+  `~/.omp/agent`, holding `mcp.json` and the managed `extensions/murmur.ts`.
 
 The setup command validates every selected output before writing any file, preserves unrelated
 settings, and stores the name `MURMUR_API_TOKEN`, never its value. Project configuration contains no
@@ -72,7 +74,8 @@ home-directory paths. New configuration files use mode `0600` on macOS and Linux
 enforce POSIX mode bits; existing configuration files preserve their current mode, while new files
 are written inside the selected user profile and inherit its Windows ACLs. Operators must keep that
 profile restricted to the intended account. See `murmur setup --help` before using `--replace`.
-Claude Code and Codex receive lifecycle hooks. fx receives a native MCP profile entry plus
+Claude Code and Codex receive lifecycle hooks. Oh My Pi receives a managed extension that runs the
+same hook from its session events. fx receives a native MCP profile entry plus
 machine-wide context instructions and uses subscribed-resource updates, explicit lifecycle calls,
 and `wait_for_messages`. OpenCode and Cursor receive native MCP entries. Pi
 receives the shared configuration used by its separately installed `pi-mcp-adapter`; Pi does not

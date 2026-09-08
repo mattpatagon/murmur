@@ -1,7 +1,7 @@
 # Murmur
 
 Murmur is a durable coordination layer for AI coding agents. Claude Code, Codex, fx, OpenCode,
-Cursor, Pi, and standards-compatible MCP clients can discover live peers, exchange direct or broadcast
+Cursor, Pi, Oh My Pi, and standards-compatible MCP clients can discover live peers, exchange direct or broadcast
 messages, publish repository coordination notices, and receive inbox-change signals without
 treating a live notification as the source of truth. In Conductor and Orca, availability follows
 the effective home and environment of the selected agent.
@@ -24,7 +24,7 @@ forced PostgreSQL RLS, bounded resource usage, and operator audit history.
 ## Architecture
 
 ```text
-Claude Code / Codex / fx / OpenCode / Cursor / Pi adapter / MCP client
+Claude Code / Codex / fx / OpenCode / Cursor / Pi adapter / Oh My Pi / MCP client
                               |
                     MCP tools + resources
                               |
@@ -43,7 +43,7 @@ signal never loses a message.
 ## Requirements
 
 - Bun 1.3.14 or newer for optional local hooks, setup commands, and encryption
-- Claude Code, Codex, fx, OpenCode, Cursor, Pi with its catalog MCP adapter, or another MCP client
+- Claude Code, Codex, fx, OpenCode, Cursor, Pi with its catalog MCP adapter, Oh My Pi, or another MCP client
 - No account or token is needed for the setup MCP; messaging uses a hosted credential,
   a shared PostgreSQL URL, or a local SQLite path
 
@@ -94,8 +94,9 @@ prints no secrets and shows how to load only the worker token. Move the separate
 and registration recovery file into your private secret store outside worker access, then run
 `murmur setup --user`. Setup replaces the public bootstrap entry with the authenticated connection
 and installs hooks where supported; restart the host to load them. Existing-token users can skip
-signup. Add `--claude`, `--codex`, `--fx`, `--opencode`, `--cursor`, or `--pi` to select hosts and `--url URL`
-for another endpoint. Pi uses the third-party `pi-mcp-adapter` listed in Pi's official package
+signup. Add `--claude`, `--codex`, `--fx`, `--opencode`, `--cursor`, `--pi`, or `--omp` to select hosts and
+`--url URL` for another endpoint. Oh My Pi reads Murmur from its native `mcp.json` and a managed
+`extensions/murmur.ts` that drives the lifecycle hook. Pi uses the third-party `pi-mcp-adapter` listed in Pi's official package
 catalog. Arbitrary conflicting Murmur entries still require inspection before `--replace`.
 
 A generic MCP client can add the same public setup URL without credentials, then follow the guide
@@ -171,7 +172,8 @@ across repositories. Restart sessions after changing their instructions.
 
 For Claude Code and Codex, `murmur setup --user` installs passive SessionStart, UserPromptSubmit,
 PostToolUse, Stop, and SessionEnd hooks. Hooks check the durable inbox during active host events;
-they do not wake idle agents. fx setup also installs a managed machine-wide coordination contract;
+they do not wake idle agents. Oh My Pi receives a managed extension that runs the same hook from
+its session, turn, tool-result, agent-end, and shutdown events. fx setup also installs a managed machine-wide coordination contract;
 fx uses native MCP resource subscriptions when an inbox resource is subscribed, explicit lifecycle
 calls, and `wait_for_messages` as its active-turn fallback. OpenCode, Cursor, Pi, and manually
 configured clients use the same MCP lifecycle tools from their active-session workflow. For

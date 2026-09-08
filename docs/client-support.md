@@ -15,6 +15,7 @@ tenant, role, machine/repository grant, or orchestrator policy.
 | OpenCode | `murmur setup --user --opencode` | Manual lifecycle | Native user-scoped MCP configuration. |
 | Cursor | `murmur setup --user --cursor` | Manual lifecycle | Native global MCP configuration. |
 | Pi | `murmur setup --user --pi` | Manual lifecycle | Writes the shared MCP file used by the `pi-mcp-adapter` package listed in Pi's official package catalog. Install that adapter separately with `pi install npm:pi-mcp-adapter`. Pi itself does not include MCP. |
+| Oh My Pi | `murmur setup --user --omp` | Automatic | Native `mcp.json` entry in the active agent directory plus a managed `extensions/murmur.ts` that runs `murmur-hook --client omp` from `session_start`, `before_agent_start`, `tool_result`, `agent_end`, and `session_shutdown`. Honors `PI_CODING_AGENT_DIR` and `OMP_PROFILE`. |
 | Conductor | Configure the effective agent environment | Agent-specific | Claude Code and Codex load their own MCP configuration. Cursor Composer uses Cursor's MCP configuration when the workspace is open in Cursor. Verify other harnesses in the home and environment Conductor launches. |
 | Orca | Configure the selected agent's effective home | Agent-specific | The system-default Codex account reads `~/.codex`; extra Orca-managed Codex accounts use isolated homes and each needs its own setup. Apply the same effective-home rule to other selected CLIs. |
 | Gemini CLI, GitHub Copilot, VS Code, Windsurf, Cline, Roo Code, Goose, Zed, Continue, and Kiro | Standard MCP configuration | Manual lifecycle | Connect with the host's documented Streamable HTTP or stdio MCP configuration and a distinct validated client identifier. |
@@ -22,7 +23,7 @@ tenant, role, machine/repository grant, or orchestrator policy.
 | Any other MCP host | Standard MCP configuration | Manual lifecycle | Use Streamable HTTP or stdio and a validated client identifier. |
 
 Running `murmur setup --user` without a client flag configures every directly managed target:
-Claude Code, Codex, fx, OpenCode, Cursor, and Pi. Select one or more flags when only particular hosts
+Claude Code, Codex, fx, OpenCode, Cursor, Pi, and Oh My Pi. Select one or more flags when only particular hosts
 should change. Setup validates every selected output before writing, upgrades the public bootstrap
 entry when safe, preserves unrelated configuration, and writes an environment-variable reference
 instead of a token value. A conflicting Murmur entry requires inspection or `--replace`.
@@ -30,6 +31,13 @@ instead of a token value. A conflicting Murmur entry requires inspection or `--r
 `pi-mcp-adapter` is a third-party package surfaced through Pi's official catalog. Review its source
 and permissions before installing it. Murmur writes only its standard configuration and never runs
 Pi's package installer.
+
+Oh My Pi ships its own MCP client and extension runtime, so it needs no adapter. Its extension
+receives the same hook output as Claude Code and Codex: coordination context and unread counts,
+never message bodies. The extension sets `MURMUR_MCP_URL` for the hook from the configured
+endpoint, so a self-hosted `--url` needs no extra environment for Oh My Pi. Oh My Pi also imports
+Claude Code's user MCP configuration; its native `murmur` entry takes precedence, so both hosts
+register with their own client identifier.
 
 ## Remote and encrypted connections
 
@@ -39,7 +47,7 @@ self-hosted deployment uses the same configuration with `--url https://YOUR-HOST
 
 `murmur setup --user --e2ee` replaces the remote entry with the local encryption proxy for every
 selected directly managed target. Private keys and plaintext remain in the endpoint vault. Only
-Claude Code and Codex receive automatic lifecycle hooks; other clients call `register_agent`,
+Claude Code, Codex, and Oh My Pi receive automatic lifecycle hooks; other clients call `register_agent`,
 `get_messages`, `end_session`, and `close_agent` through their own active-session workflow. fx can
 receive subscribed-resource updates and reconnect recovery, and uses `wait_for_messages` when its
 active surface does not deliver an update to the model. Neither mechanism wakes an idle model

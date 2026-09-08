@@ -21,6 +21,7 @@ const CLIENT_OPTIONS: readonly string[] = [
   "--codex",
   "--cursor",
   "--fx",
+  "--omp",
   "--opencode",
   "--pi",
 ];
@@ -64,6 +65,9 @@ export function parseSetupArguments(arguments_: readonly string[]): SetupArgumen
       case "--hook-executable":
         hookExecutable = nextArgument(arguments_, index, argument);
         index += 1;
+        break;
+      case "--omp":
+        clients.push("omp");
         break;
       case "--opencode":
         clients.push("opencode");
