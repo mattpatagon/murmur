@@ -16,6 +16,12 @@ For Claude Code:
 claude mcp add --transport http --scope user murmur https://api.usemurmur.dev/setup/mcp
 ```
 
+For fx:
+
+```text
+fx mcp add --transport http murmur https://api.usemurmur.dev/setup/mcp
+```
+
 Restart the agent and ask it to call `get_setup_guide`.
 This read-only connection supplies the complete signup and configuration instructions.
 
@@ -29,7 +35,7 @@ bun install --global https://api.usemurmur.dev/downloads/murmur.tgz
 Run `murmur signup --slug YOUR_ORGANIZATION --name 'Your Organization'` in a private terminal,
 following its instructions to preserve the owner credential and load the everyday worker token.
 With that tenant credential in `MURMUR_API_TOKEN`, run
-`murmur setup --user` to configure Claude Code, Codex, OpenCode, Cursor, and the shared MCP file for
+`murmur setup --user` to configure Claude Code, Codex, fx, OpenCode, Cursor, and the shared MCP file for
 Pi's separately installed catalog adapter. Restart the host; Claude Code and Codex also activate
 the lifecycle hooks. Setup automatically upgrades a same-origin anonymous `/setup/mcp` entry to
 `/mcp` under the same `murmur` name. Conflicting endpoints still require explicit `--replace` after

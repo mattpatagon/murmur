@@ -11,6 +11,7 @@ tenant, role, machine/repository grant, or orchestrator policy.
 | --- | --- | --- | --- |
 | Claude Code | `murmur setup --user --claude` | Automatic | Native user-scoped MCP and hook configuration. |
 | Codex | `murmur setup --user --codex` | Automatic | Native user-scoped MCP and hook configuration. |
+| fx | `murmur setup --user --fx` | Native change delivery + explicit lifecycle | Native `~/.fx/mcp.json` profile plus a managed coordination block in `~/.fx/AGENTS.md`. fx supports subscribed-resource updates and reconnect recovery; it uses `register_agent`, `end_session`, `close_agent`, and the bounded `wait_for_messages` fallback because it has no user hook API. |
 | OpenCode | `murmur setup --user --opencode` | Manual lifecycle | Native user-scoped MCP configuration. |
 | Cursor | `murmur setup --user --cursor` | Manual lifecycle | Native global MCP configuration. |
 | Pi | `murmur setup --user --pi` | Manual lifecycle | Writes the shared MCP file used by the `pi-mcp-adapter` package listed in Pi's official package catalog. Install that adapter separately with `pi install npm:pi-mcp-adapter`. Pi itself does not include MCP. |
@@ -21,7 +22,7 @@ tenant, role, machine/repository grant, or orchestrator policy.
 | Any other MCP host | Standard MCP configuration | Manual lifecycle | Use Streamable HTTP or stdio and a validated client identifier. |
 
 Running `murmur setup --user` without a client flag configures every directly managed target:
-Claude Code, Codex, OpenCode, Cursor, and Pi. Select one or more flags when only particular hosts
+Claude Code, Codex, fx, OpenCode, Cursor, and Pi. Select one or more flags when only particular hosts
 should change. Setup validates every selected output before writing, upgrades the public bootstrap
 entry when safe, preserves unrelated configuration, and writes an environment-variable reference
 instead of a token value. A conflicting Murmur entry requires inspection or `--replace`.
@@ -39,7 +40,22 @@ self-hosted deployment uses the same configuration with `--url https://YOUR-HOST
 `murmur setup --user --e2ee` replaces the remote entry with the local encryption proxy for every
 selected directly managed target. Private keys and plaintext remain in the endpoint vault. Only
 Claude Code and Codex receive automatic lifecycle hooks; other clients call `register_agent`,
-`get_messages`, `end_session`, and `close_agent` through their own active-session workflow.
+`get_messages`, `end_session`, and `close_agent` through their own active-session workflow. fx can
+receive subscribed-resource updates and reconnect recovery, and uses `wait_for_messages` when its
+active surface does not deliver an update to the model. Neither mechanism wakes an idle model
+turn.
+
+The fx profile applies to interactive fx and `fx ask`. `fx acp` deliberately does not inherit
+profile MCP servers: its editor or ACP client must pass the equivalent `mcpServers` entry, or the
+workspace must provide an approved `.mcp.json`. That configuration belongs to the ACP host and
+cannot be installed safely by a user-profile writer. Resource delivery is also identity-dependent:
+the host can subscribe only after `register_agent` returns `inbox_uri`; setup cannot pre-subscribe
+an unknown session identity. Explicit `get_messages` and `wait_for_messages` remain available on
+every active fx surface.
+
+fx can be configured with `context: false`, which intentionally disables AGENTS.md loading. Murmur
+preserves that user choice; in that mode the MCP tools and server guidance remain available, but
+the managed `~/.fx/AGENTS.md` contract is not injected into the model context.
 
 For a manual remote configuration, provide these values through the host's secret-aware fields:
 

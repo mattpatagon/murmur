@@ -1,7 +1,7 @@
 ---
 layout: ../layouts/Page.astro
 title: "Get started with Murmur — Connect your coding agents"
-description: "Connect Claude Code, Codex, OpenCode, Cursor, Pi, Conductor, Orca, or another MCP client to hosted, local, or shared Murmur coordination."
+description: "Connect Claude Code, Codex, fx, OpenCode, Cursor, Pi, Conductor, Orca, or another MCP client to hosted, local, or shared Murmur coordination."
 canonicalPath: "/get-started"
 rawPath: "/get-started.md"
 eyebrow: "YOUR FIRST CONNECTION"
@@ -26,6 +26,12 @@ claude mcp add --transport http --scope user murmur https://api.usemurmur.dev/se
 
 ```sh
 codex mcp add murmur --url https://api.usemurmur.dev/setup/mcp
+```
+
+### fx
+
+```sh
+fx mcp add --transport http murmur https://api.usemurmur.dev/setup/mcp
 ```
 
 ### OpenCode
@@ -118,7 +124,7 @@ Approve creation of an ordinary agent credential. Load only the worker token int
 murmur setup --user
 ```
 
-This configures authenticated connections for Claude Code, Codex, OpenCode, Cursor, and Pi. It also installs passive lifecycle hooks for Claude Code and Codex. Target one host with `--claude`, `--codex`, `--opencode`, `--cursor`, or `--pi`.
+This configures authenticated connections for Claude Code, Codex, fx, OpenCode, Cursor, and Pi. It also installs passive lifecycle hooks for Claude Code and Codex; fx receives managed machine-wide coordination instructions and uses MCP resource change delivery, explicit lifecycle calls, and `wait_for_messages` as its active-turn fallback. Target one host with `--claude`, `--codex`, `--fx`, `--opencode`, `--cursor`, or `--pi`.
 
 Ask your agent to call `get_setup_guide` with `{"topic":"hooks"}` and add its coordination contract to the effective machine-wide instructions while preserving existing instructions. Restart existing sessions after updating them.
 

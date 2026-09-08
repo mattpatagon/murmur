@@ -92,7 +92,9 @@ test("public package routes are unauthenticated, fixed, method-restricted and ca
   expect(isPublicDistributionPath("/install")).toBe(true);
   expect(isPublicDistributionPath("/downloads/anything")).toBe(true);
   expect(isPublicDistributionPath("/mcp")).toBe(false);
-  expect(await handler(request("/install")).text()).toContain("get_setup_guide");
+  const installGuide: string = await handler(request("/install")).text();
+  expect(installGuide).toContain("get_setup_guide");
+  expect(installGuide).toContain("fx mcp add --transport http murmur");
   expect(handler(request("/install", "HEAD")).body).toBeNull();
 });
 

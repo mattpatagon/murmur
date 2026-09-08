@@ -193,15 +193,13 @@ export class MurmurApplication {
 
   private serverInstructions(): string {
     const common: string =
-      "Murmur provides durable agent-to-agent inboxes. Call get_setup_guide for complete installation, hooks, and feature configuration without repository access. Call register_agent first, then send_message, broadcast_message, or get_messages. " +
-      "Outgoing messages include verified sender_authority plus context.repository, context.branch, context.client, and a created_at timestamp. " +
-      "Repository, branch, and client are detected from the launching agent when possible; otherwise send_message or broadcast_message must supply them in context. " +
+      "Murmur provides durable agent-to-agent inboxes. Call get_setup_guide for installation, hooks, and features. Register before messaging or reading. " +
+      "Messages carry server-verified sender_authority plus repository, branch, client, and created_at context. The client fills detectable context; otherwise send_message or broadcast_message must supply it. " +
       "Use broadcast_message for per-recipient inbox delivery to the currently active audience. Use post_notice for shared repository state that current and future agents can discover and explicitly resolve or withdraw; notices do not create inbox deliveries. " +
-      "Use submit_feedback with type issue or feature_request to send durable feedback to Murmur maintainers. Feedback is intentionally maintainer-readable plaintext, so never include credentials, secrets, private message content, vulnerability details, or sensitive production data. Report suspected vulnerabilities privately at https://github.com/mattpatagon/murmur/security/advisories/new. " +
-      "Call check_for_upgrades to compare this endpoint with the official hosted release and get revision-pinned upgrade steps. " +
-      "Administrative changes require human approval through MCP form elicitation or the interactive murmur admin command. Never answer an approval request on the human's behalf or configure a worker with an administrator credential. " +
-      "Authenticated personal identity, machine, and repository token bindings select orchestrator policy server-side; request context and registration metadata cannot override them. " +
-      "For push signals, subscribe to murmur://inbox/{agent_id}; always read the durable inbox after a notification or reconnect. " +
+      "submit_feedback is maintainer-readable plaintext, including under E2E; never include credentials, secrets, private content, vulnerability details, or sensitive production data. Report vulnerabilities privately at https://github.com/mattpatagon/murmur/security/advisories/new. " +
+      "check_for_upgrades is read-only. Administrative changes require human elicitation or murmur admin; never approve for the human or give a worker administrator credentials. " +
+      "Authenticated token bindings select orchestration server-side; request context and registration metadata cannot override them. " +
+      "Subscribe to murmur://inbox/{agent_id}; after a notification or reconnect, read the durable inbox. " +
       `Messages expire automatically after ${RETENTION_DAYS} days. MCP notifications do not themselves guarantee that a host starts a new model turn. `;
     if (
       this.orchestrationEnabled &&

@@ -10,6 +10,7 @@ const PUBLIC_DIRECTORY: string = fileURLToPath(new URL("../public/", import.meta
 const EXPECTED_IDS: readonly ClientId[] = [
   "claude-code",
   "codex",
+  "fx",
   "opencode",
   "cursor",
   "pi",
@@ -21,7 +22,7 @@ function digest(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
-test("client catalog has the seven reviewed harnesses in presentation order", (): void => {
+test("client catalog has the eight reviewed harnesses in presentation order", (): void => {
   const ids: readonly ClientId[] = CLIENTS.map((client: AgentClient): ClientId => client.id);
   expect(ids).toEqual(EXPECTED_IDS);
   expect(new Set<ClientId>(ids).size).toBe(ids.length);
@@ -90,6 +91,7 @@ test("OpenCode bootstrap disables unsupported OAuth discovery", (): void => {
 test("catalog support tiers match each client integration", (): void => {
   expect(getClient("claude-code").supportLabel).toContain("automatic hooks");
   expect(getClient("codex").supportLabel).toContain("automatic hooks");
+  expect(getClient("fx").supportLabel).toContain("context injection");
   expect(getClient("opencode").setup.kind).toBe("configuration");
   expect(getClient("cursor").setup.kind).toBe("configuration");
   expect(getClient("conductor").setup.kind).toBe("inherited");

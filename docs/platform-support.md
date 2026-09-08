@@ -2,7 +2,7 @@
 
 Murmur supports current GitHub-hosted Linux/Ubuntu, macOS, and Windows environments with Bun 1.3.14
 or newer. The portable surface includes package installation, strict verification, local SQLite,
-configuration for Claude Code, Codex, OpenCode, Cursor, and Pi's MCP adapter, stdio package entry
+configuration for Claude Code, Codex, fx, OpenCode, Cursor, and Pi's MCP adapter, stdio package entry
 points, HTTP logic, and production builds.
 
 ## CI contract
@@ -62,7 +62,9 @@ setup resolves:
 
 - Windows from `USERPROFILE` and Windows application directories;
 - macOS and Linux from `HOME` and each managed client's documented user configuration layout;
-- explicit `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, and hook executable overrides when supplied.
+- explicit `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, and hook executable overrides when supplied;
+- fx's private MCP profile at `~/.fx/mcp.json` and managed instruction block in
+  `~/.fx/AGENTS.md`.
 
 The setup command validates every selected output before writing any file, preserves unrelated
 settings, and stores the name `MURMUR_API_TOKEN`, never its value. Project configuration contains no
@@ -70,11 +72,18 @@ home-directory paths. New configuration files use mode `0600` on macOS and Linux
 enforce POSIX mode bits; existing configuration files preserve their current mode, while new files
 are written inside the selected user profile and inherit its Windows ACLs. Operators must keep that
 profile restricted to the intended account. See `murmur setup --help` before using `--replace`.
-Claude Code and Codex receive lifecycle hooks. OpenCode and Cursor receive native MCP entries. Pi
+Claude Code and Codex receive lifecycle hooks. fx receives a native MCP profile entry plus
+machine-wide context instructions and uses subscribed-resource updates, explicit lifecycle calls,
+and `wait_for_messages`. OpenCode and Cursor receive native MCP entries. Pi
 receives the shared configuration used by its separately installed `pi-mcp-adapter`; Pi does not
 ship MCP itself. Conductor and Orca use the selected agent's effective home and environment;
 isolated homes require their own configuration. The full support contract is
 [client support](client-support.md).
+
+Interactive fx and `fx ask` inherit the profile configuration. `fx acp` accepts MCP servers from
+its ACP client or an approved workspace `.mcp.json` and does not inherit `~/.fx/mcp.json`; the
+editor-side integration must supply that connection. An explicit fx `context: false` setting also
+disables AGENTS.md injection without disabling Murmur's MCP connection.
 
 The E2E vault uses the platform application-data directory unless `murmur setup --user --e2ee
 --vault-path PATH` selects an absolute file inside a dedicated non-root directory. Setup passes

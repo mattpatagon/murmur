@@ -2,11 +2,12 @@ export const DEFAULT_MURMUR_URL: string = "https://api.usemurmur.dev/mcp";
 export const MURMUR_TOKEN_ENV: string = "MURMUR_API_TOKEN";
 
 export type MurmurClient = "claude" | "codex";
-export type SetupClient = MurmurClient | "cursor" | "opencode" | "pi";
+export type SetupClient = MurmurClient | "cursor" | "fx" | "opencode" | "pi";
 
 export const DEFAULT_SETUP_CLIENTS: readonly SetupClient[] = [
   "claude",
   "codex",
+  "fx",
   "opencode",
   "cursor",
   "pi",

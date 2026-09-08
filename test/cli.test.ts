@@ -83,11 +83,14 @@ test("configures all supported clients at user scope without copying the API tok
       readFileSync(join(directory, "claude", "settings.json"), "utf8"),
       readFileSync(join(directory, "codex", "config.toml"), "utf8"),
       readFileSync(join(directory, "codex", "hooks.json"), "utf8"),
+      readFileSync(join(directory, ".fx", "AGENTS.md"), "utf8"),
+      readFileSync(join(directory, ".fx", "mcp.json"), "utf8"),
       readFileSync(join(directory, ".config", "opencode", "opencode.json"), "utf8"),
       readFileSync(join(directory, ".cursor", "mcp.json"), "utf8"),
       readFileSync(join(directory, ".config", "mcp", "mcp.json"), "utf8"),
     ].join("\n");
     expect(combined).toContain("MURMUR_API_TOKEN");
+    expect(combined).toContain('client: "fx"');
     expect(combined).not.toContain("must-not-be-written");
     expect(result.stdout).toContain("pi-mcp-adapter");
   } finally {
@@ -141,6 +144,11 @@ test("selects each hook-free client without requiring a hook executable", (): vo
     expect(cursor.exitCode).toBe(0);
     expect(existsSync(join(directory, ".cursor", "mcp.json"))).toBe(true);
 
+    const fx: CliResult = runCli(["setup", "--user", "--fx"], environment);
+    expect(fx.exitCode).toBe(0);
+    expect(existsSync(join(directory, ".fx", "mcp.json"))).toBe(true);
+    expect(existsSync(join(directory, ".fx", "AGENTS.md"))).toBe(true);
+
     const pi: CliResult = runCli(["setup", "--user", "--pi"], environment);
     expect(pi.exitCode).toBe(0);
     expect(pi.stdout).toContain("pi-mcp-adapter");
@@ -182,13 +190,15 @@ test("configures E2E clients through a local proxy without copying the token", (
       readFileSync(join(directory, "claude", "settings.json"), "utf8"),
       readFileSync(join(directory, "codex", "config.toml"), "utf8"),
       readFileSync(join(directory, "codex", "hooks.json"), "utf8"),
+      readFileSync(join(directory, ".fx", "AGENTS.md"), "utf8"),
+      readFileSync(join(directory, ".fx", "mcp.json"), "utf8"),
       readFileSync(join(directory, ".config", "opencode", "opencode.json"), "utf8"),
       readFileSync(join(directory, ".cursor", "mcp.json"), "utf8"),
       readFileSync(join(directory, ".config", "mcp", "mcp.json"), "utf8"),
     ].join("\n");
     expect(combined).toContain(proxyPath);
     expect(combined).toContain("--e2ee");
-    expect(combined.match(/custom vault/gu)).toHaveLength(15);
+    expect(combined.match(/custom vault/gu)).toHaveLength(16);
     expect(combined).not.toContain("must-not-be-written");
   } finally {
     rmSync(directory, { force: true, recursive: true });

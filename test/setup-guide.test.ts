@@ -50,6 +50,10 @@ test("a newly connected MCP client can retrieve complete setup without filesyste
     expect(text).toContain("https://api.usemurmur.dev/downloads/murmur.tgz");
     expect(text).not.toContain("git+https://");
     expect(text).toContain("murmur setup --user");
+    expect(text).toContain("fx mcp add --transport http murmur");
+    expect(text).toContain("~/.fx/mcp.json");
+    expect(text).toContain("managed ~/.fx/AGENTS.md block");
+    expect(text).toContain("current-checkout context contract");
     expect(text).toContain("SessionEnd");
     expect(text).toContain("AGENTS.override.md");
     expect(text).toContain("create_access_token");
@@ -70,6 +74,9 @@ test("a newly connected MCP client can retrieve complete setup without filesyste
     expect(text).toContain("user-controlled");
     expect(text).toContain("MURMUR_API_TOKEN");
     expect(client.getInstructions()).toContain("get_setup_guide");
+    const instructions: string | undefined = client.getInstructions();
+    if (instructions === undefined) throw new Error("Murmur server instructions were omitted");
+    expect(new TextEncoder().encode(instructions).byteLength).toBeLessThanOrEqual(2048);
     const invalid: CallToolResult = CallToolResultSchema.parse(
       await client.callTool({
         name: "get_setup_guide",
@@ -145,6 +152,9 @@ test("every authenticated tenant role gets the complete guide on normal MCP with
       expect(guide.sections).toHaveLength(7);
       expect(guide.available_tools).toEqual(tools.map((tool: Tool): string => tool.name).sort());
       expect(guide.available_tools).toContain("get_setup_guide");
+      const instructions: string | undefined = client.getInstructions();
+      if (instructions === undefined) throw new Error("Murmur server instructions were omitted");
+      expect(new TextEncoder().encode(instructions).byteLength).toBeLessThanOrEqual(2048);
       if (principal.role === "agent") expect(guide.available_tools).toContain("ask_orchestrator");
       if (principal.role === "tenant_admin") {
         expect(guide.available_tools).toContain("create_orchestrator_token");

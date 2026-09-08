@@ -25,9 +25,12 @@ import {
 } from "./client-configuration.js";
 import { configureCodexMcp } from "./codex-configuration.js";
 import { configureClaudeE2eeMcp, configureCodexE2eeMcp } from "./e2ee-client-configuration.js";
+import { configureFxInstructions } from "./fx-instructions.js";
 import {
   configureCursorE2eeMcp,
   configureCursorMcp,
+  configureFxE2eeMcp,
+  configureFxMcp,
   configureOpenCodeE2eeMcp,
   configureOpenCodeMcp,
   configurePiE2eeMcp,
@@ -36,6 +39,7 @@ import {
   type JsonRecord,
   readJsonRecord,
 } from "./json-client-configuration.js";
+export { configureFxInstructions, FX_MURMUR_INSTRUCTIONS } from "./fx-instructions.js";
 
 export type { MurmurClient, SetupClient } from "./client-configuration.js";
 export { DEFAULT_MURMUR_URL, MURMUR_TOKEN_ENV } from "./client-configuration.js";
@@ -43,6 +47,8 @@ export { configureCodexMcp } from "./codex-configuration.js";
 export {
   configureCursorE2eeMcp,
   configureCursorMcp,
+  configureFxE2eeMcp,
+  configureFxMcp,
   configureOpenCodeE2eeMcp,
   configureOpenCodeMcp,
   configurePiE2eeMcp,
@@ -60,6 +66,8 @@ export type UserConfigurationPaths = {
   readonly codexConfig: string;
   readonly codexHooks: string;
   readonly cursorMcp: string;
+  readonly fxInstructions: string;
+  readonly fxMcp: string;
   readonly opencodeConfig: string;
   readonly piMcp: string;
 };
@@ -212,6 +220,8 @@ export function defaultUserConfigurationPaths(
     codexConfig: joinTargetPath(codexHome, "config.toml"),
     codexHooks: joinTargetPath(codexHome, "hooks.json"),
     cursorMcp: joinTargetPath(home, ".cursor", "mcp.json"),
+    fxInstructions: joinTargetPath(home, ".fx", "AGENTS.md"),
+    fxMcp: joinTargetPath(home, ".fx", "mcp.json"),
     opencodeConfig: joinTargetPath(home, ".config", "opencode", "opencode.json"),
     piMcp: joinTargetPath(home, ".config", "mcp", "mcp.json"),
   };
@@ -226,6 +236,17 @@ function addJsonWrite(
   const next: JsonRecord = configure(current);
   if (JSON.stringify(next) === JSON.stringify(current)) return;
   pendingWrites.push({ content: `${JSON.stringify(next, null, 2)}\n`, path });
+}
+
+function addTextWrite(
+  pendingWrites: PendingWrite[],
+  path: string,
+  configure: (current: string) => string,
+): void {
+  const current: string = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const next: string = configure(current);
+  if (next === current) return;
+  pendingWrites.push({ content: next, path });
 }
 
 export function installUserConfiguration(options: {
@@ -304,6 +325,18 @@ export function installUserConfiguration(options: {
           ? configureOpenCodeE2eeMcp(current, url, proxyExecutable, replace, vaultPath)
           : configureOpenCodeMcp(current, url, replace),
     );
+  }
+
+  if (options.clients.includes("fx")) {
+    addJsonWrite(
+      pendingWrites,
+      paths.fxMcp,
+      (current: JsonRecord): JsonRecord =>
+        e2ee && proxyExecutable !== undefined
+          ? configureFxE2eeMcp(current, url, proxyExecutable, replace, vaultPath)
+          : configureFxMcp(current, url, replace),
+    );
+    addTextWrite(pendingWrites, paths.fxInstructions, configureFxInstructions);
   }
 
   if (options.clients.includes("cursor")) {

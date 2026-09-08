@@ -3,7 +3,7 @@ import { MURMUR_TOKEN_ENV, type SetupClient } from "./client-configuration.js";
 
 export type JsonRecord = Record<string, unknown>;
 
-type JsonClient = "cursor" | "opencode" | "pi";
+type JsonClient = "cursor" | "fx" | "opencode" | "pi";
 
 type JsonClientFormat = {
   readonly client: JsonClient;
@@ -11,6 +11,7 @@ type JsonClientFormat = {
 };
 
 const CURSOR_FORMAT: JsonClientFormat = { client: "cursor", rootKey: "mcpServers" };
+const FX_FORMAT: JsonClientFormat = { client: "fx", rootKey: "mcp" };
 const OPENCODE_FORMAT: JsonClientFormat = { client: "opencode", rootKey: "mcp" };
 const PI_FORMAT: JsonClientFormat = { client: "pi", rootKey: "mcpServers" };
 
@@ -39,6 +40,20 @@ function portableHeaders(existing: unknown): JsonRecord {
   );
 }
 
+function fxRemoteOptions(existing: unknown): JsonRecord {
+  if (!isRecord(existing)) return {};
+  const options: JsonRecord = {};
+  if (typeof existing["required"] === "boolean") options["required"] = existing["required"];
+  const timeoutNames: readonly string[] = ["startup_timeout_ms", "operation_timeout_ms"];
+  for (const name of timeoutNames) {
+    const value: unknown = existing[name];
+    if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+      options[name] = value;
+    }
+  }
+  return options;
+}
+
 function remoteServer(format: JsonClientFormat, url: string, existing: unknown): JsonRecord {
   const headers: JsonRecord = portableHeaders(isRecord(existing) ? existing["headers"] : undefined);
   if (format.client === "opencode") {
@@ -64,6 +79,16 @@ function remoteServer(format: JsonClientFormat, url: string, existing: unknown):
       url,
     };
   }
+  if (format.client === "fx") {
+    return {
+      ...fxRemoteOptions(existing),
+      bearer_token_env: MURMUR_TOKEN_ENV,
+      enabled: true,
+      headers: { ...headers, "X-Murmur-Client": "fx" },
+      type: "http",
+      url,
+    };
+  }
   return {
     auth: "bearer",
     bearerTokenEnv: MURMUR_TOKEN_ENV,
@@ -74,7 +99,9 @@ function remoteServer(format: JsonClientFormat, url: string, existing: unknown):
 
 function remoteShapeMatches(format: JsonClientFormat, existing: JsonRecord, url: string): boolean {
   if (existing["url"] !== url || existing["command"] !== undefined) return false;
-  return format.client !== "opencode" || existing["type"] === "remote";
+  if (format.client === "opencode") return existing["type"] === "remote";
+  if (format.client === "fx") return existing["type"] === "http";
+  return true;
 }
 
 function serverCollection(
@@ -83,19 +110,24 @@ function serverCollection(
   replace: boolean,
 ): { readonly result: JsonRecord; readonly servers: JsonRecord } {
   const result: JsonRecord = structuredClone(current);
-  const rawServers: unknown = result[format.rootKey];
+  const migrateFxAlias: boolean =
+    format.client === "fx" && result["mcp"] === undefined && result["mcpServers"] !== undefined;
+  const sourceKey: "mcp" | "mcpServers" = migrateFxAlias ? "mcpServers" : format.rootKey;
+  const rawServers: unknown = result[sourceKey];
   if (rawServers !== undefined && !isRecord(rawServers) && !replace) {
     throw new Error(
-      `${displayName(format)} has an invalid ${format.rootKey} configuration. Inspect it or rerun with --replace.`,
+      `${displayName(format)} has an invalid ${sourceKey} configuration. Inspect it or rerun with --replace.`,
     );
   }
   const servers: JsonRecord = isRecord(rawServers) ? structuredClone(rawServers) : {};
+  if (migrateFxAlias) result["mcpServers"] = undefined;
   return { result, servers };
 }
 
 function displayName(format: JsonClientFormat): string {
   if (format.client === "opencode") return "OpenCode";
   if (format.client === "cursor") return "Cursor";
+  if (format.client === "fx") return "fx";
   return "Pi";
 }
 
@@ -156,7 +188,7 @@ function localServer(
   vaultPath?: string | undefined,
 ): JsonRecord {
   const arguments_: readonly string[] = proxyArguments(url, format.client, vaultPath);
-  if (format.client === "opencode") {
+  if (format.client === "opencode" || format.client === "fx") {
     return { command: [executable, ...arguments_], enabled: true, type: "local" };
   }
   if (format.client === "cursor") {
@@ -179,12 +211,13 @@ function localShapeMatches(
     existing["url"] !== undefined ||
     existing["headers"] !== undefined ||
     existing["auth"] !== undefined ||
+    existing["bearer_token_env"] !== undefined ||
     existing["bearerTokenEnv"] !== undefined ||
     existing["oauth"] !== undefined
   ) {
     return false;
   }
-  if (format.client === "opencode") {
+  if (format.client === "opencode" || format.client === "fx") {
     return (
       existing["type"] === "local" &&
       existing["enabled"] === true &&
@@ -238,6 +271,14 @@ export function configureOpenCodeMcp(
   return configureRemoteJsonClient(current, OPENCODE_FORMAT, url, replace);
 }
 
+export function configureFxMcp(
+  current: JsonRecord,
+  url: string,
+  replace: boolean = false,
+): JsonRecord {
+  return configureRemoteJsonClient(current, FX_FORMAT, url, replace);
+}
+
 export function configureCursorMcp(
   current: JsonRecord,
   url: string,
@@ -262,6 +303,16 @@ export function configureOpenCodeE2eeMcp(
   vaultPath?: string | undefined,
 ): JsonRecord {
   return configureLocalJsonClient(current, OPENCODE_FORMAT, url, executable, replace, vaultPath);
+}
+
+export function configureFxE2eeMcp(
+  current: JsonRecord,
+  url: string,
+  executable: string,
+  replace: boolean = false,
+  vaultPath?: string | undefined,
+): JsonRecord {
+  return configureLocalJsonClient(current, FX_FORMAT, url, executable, replace, vaultPath);
 }
 
 export function configureCursorE2eeMcp(
