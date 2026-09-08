@@ -13,11 +13,13 @@ It does not cache expiration or agent existence, or remove validation.
 
 MCP page-and-version reads use the [paired inbox transaction](inbox-read-transactions.md), which
 computes the gated page and independent version in one statement snapshot. With the same preconditions,
-the pair uses nine protocol statements. Direct sends also release their fresh expiry preflight's
-pool lease before the operation transaction. When candidates exist, the preflight commits before the original
-bounded message and lifecycle cleanup transactions run. The operation then runs exactly once in
-a new tenant transaction. Cleanup remains committed if the operation later fails, and retained
-candidates do not cause a retry loop. See [expiry preflights](postgres-expiry-preflight.md).
+history and resource pairs use nine protocol statements; a current `get_messages` page uses ten
+when it adds an automatic acknowledgement statement and nine when every returned row already has a
+receipt. Direct sends also release their fresh expiry preflight's pool lease before the operation
+transaction. When candidates exist, the preflight commits before the original bounded message and
+lifecycle cleanup transactions run. The operation then runs exactly once in a new tenant
+transaction. Cleanup remains committed if the operation later fails, and retained candidates do
+not cause a retry loop. See [expiry preflights](postgres-expiry-preflight.md).
 
 Unknown readers still fail, including empty acknowledgements. Current generation, historical
 generation filters, tenant qualification, default-session behavior and existing named-session

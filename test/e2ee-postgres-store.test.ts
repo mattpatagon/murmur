@@ -341,12 +341,14 @@ test.skipIf(!postgresConfigured)(
       expect(await encrypted.putEncryptedMessage(put)).toMatchObject({ duplicate: true });
       expect(notifiedSequence).toBe(direct.message.tenant_sequence);
       expect(
-        await encrypted.markEncryptedMessagesRead({
+        await encrypted.acknowledgeEncryptedMessages({
           agent_id: bobId,
           message_ids: [put.envelope.header.message_id],
         }),
-      ).toMatchObject({ updated: 1 });
-
+      ).toEqual({
+        receipts: [{ message_id: put.envelope.header.message_id, read_at: now.toISOString() }],
+        updated: 1,
+      });
       const prepared: PrepareEncryptedBroadcastOutput = await encrypted.prepareEncryptedBroadcast({
         audience: { repository },
         context: { branch: "feature/e2ee-postgres", client: "codex", repository },

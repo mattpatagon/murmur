@@ -18,8 +18,6 @@ import {
   BroadcastMessageOutputSchema,
   type InboxOutput,
   InboxOutputSchema,
-  type MarkMessagesReadOutput,
-  MarkMessagesReadOutputSchema,
   type RegisterAgentOutput,
   RegisterAgentOutputSchema,
   type SendMessageOutput,
@@ -148,18 +146,33 @@ test("two MCP processes exchange a durable message and push an inbox update", as
     expect(inboxMessage.context.branch).toBe("feature/mcp-context");
     expect(inboxMessage.context.client).toBe("codex");
     expect(inboxMessage.created_at).toBe(sent.message.created_at);
+    expect(inboxMessage.read_at).toBeNull();
     expect(Object.hasOwn(inboxMessage, "broadcast_id")).toBe(false);
 
-    const marked: MarkMessagesReadOutput = await callValidated(
+    const received: InboxOutput = await callValidated(
       receiver.client,
-      "mark_messages_read",
+      "get_messages",
       {
+        after_sequence: 0,
         agent_id: "agent-b",
-        message_ids: [sent.message.message_id],
+        limit: 100,
+        unread_only: true,
       },
-      MarkMessagesReadOutputSchema,
+      InboxOutputSchema,
     );
-    expect(marked.updated).toBe(1);
+    const receipt: InboxOutput["messages"][number] | undefined = received.messages[0];
+    if (receipt === undefined || receipt.read_at === null) {
+      throw new Error("get_messages did not return an automatic read receipt");
+    }
+    expect(receipt.message_id).toBe(sent.message.message_id);
+    expect(Number.isNaN(Date.parse(receipt.read_at))).toBe(false);
+    const unread: InboxOutput = await callValidated(
+      receiver.client,
+      "get_messages",
+      { after_sequence: 0, agent_id: "agent-b", limit: 100, unread_only: true },
+      InboxOutputSchema,
+    );
+    expect(unread.messages).toEqual([]);
   } finally {
     await Promise.allSettled([sender.client.close(), receiver.client.close()]);
     rmSync(directory, { force: true, recursive: true });

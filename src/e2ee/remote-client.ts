@@ -24,6 +24,7 @@ import type {
   ClaimOrchestratorPrekeyOutput,
 } from "./wire-orchestration.js";
 import type {
+  AcknowledgeEncryptedMessagesOutput,
   CancelEncryptedBroadcastInput,
   CancelEncryptedBroadcastOutput,
   ClaimEncryptionPrekeyInput,
@@ -69,6 +70,7 @@ export interface E2eeRemoteClient {
   waitForEncryptedMessages(
     input: WaitForEncryptedMessagesInput,
   ): Promise<WaitForEncryptedMessagesOutput>;
+  acknowledgeMessages?(input: MarkMessagesReadInput): Promise<AcknowledgeEncryptedMessagesOutput>;
   markMessagesRead(input: MarkMessagesReadInput): Promise<MarkMessagesReadOutput>;
   prepareEncryptedBroadcast(
     input: PrepareEncryptedBroadcastInput,

@@ -8,6 +8,7 @@ import {
   ClaimOrchestratorPrekeyOutputSchema,
 } from "./wire-orchestration.js";
 import {
+  AcknowledgeEncryptedMessagesOutputSchema,
   CancelEncryptedBroadcastInputSchema,
   CancelEncryptedBroadcastOutputSchema,
   ClaimEncryptionPrekeyInputSchema,
@@ -127,6 +128,14 @@ export function encryptedWireToolDefinitions(): readonly Tool[] {
       WaitForEncryptedMessagesInputSchema,
       WaitForEncryptedMessagesOutputSchema,
       READ_ONLY,
+    ),
+    wireTool(
+      "acknowledge_encrypted_messages",
+      "Acknowledge encrypted messages",
+      "Mark encrypted message identifiers read and return one bounded authoritative receipt per matched message.",
+      MarkMessagesReadInputSchema,
+      AcknowledgeEncryptedMessagesOutputSchema,
+      IDEMPOTENT_WRITE,
     ),
     wireTool(
       "mark_messages_read",

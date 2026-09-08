@@ -2,8 +2,13 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ZodError } from "zod";
 import { assertNoE2eePlaintextLeak, type LeakScanResult } from "../scripts/e2ee-leak-detector.js";
-import type { MarkMessagesReadOutput, RegisterAgentOutput } from "../src/domain/contracts.js";
+import type {
+  MarkMessagesReadInput,
+  MarkMessagesReadOutput,
+  RegisterAgentOutput,
+} from "../src/domain/contracts.js";
 import type { SubmitFeedbackOutput } from "../src/domain/feedback-contracts.js";
 import type { Clock, Instant } from "../src/domain/value-objects.js";
 import {
@@ -17,6 +22,10 @@ import { LocalE2eeVault } from "../src/e2ee/local-vault.js";
 import type { StoredPrekey, StoredRootKey } from "../src/e2ee/local-vault-rows.js";
 import type { ProxyInboxOutput, ProxySendMessageOutput } from "../src/e2ee/proxy-contracts.js";
 import { E2eeProxyService } from "../src/e2ee/proxy-service.js";
+import type {
+  AcknowledgeEncryptedMessagesOutput,
+  EncryptedMessageReadReceiptDto,
+} from "../src/e2ee/wire-tools.js";
 import { MemoryE2eeBackend, MemoryE2eeRemote } from "./support/e2ee-memory-remote.js";
 
 const NOW_TEXT: string = "2026-08-10T20:00:00.000Z";
@@ -77,9 +86,10 @@ test("two local proxies exchange, verify, decrypt, retry, and acknowledge withou
     "example/repo-a",
     "feature/sender",
   );
+  const recipientRemote: MemoryE2eeRemote = new MemoryE2eeRemote(backend);
   const recipient: E2eeProxyService = service(
     recipientVault,
-    new MemoryE2eeRemote(backend),
+    recipientRemote,
     "example/repo-b",
     "feature/recipient",
   );
@@ -132,38 +142,125 @@ test("two local proxies exchange, verify, decrypt, retry, and acknowledge withou
 
     expect(privateOneTimePrekeys(recipientVault, RECIPIENT_ID)).toBe(20);
     expect(
-      await recipient.waitForMessages({
-        after_sequence: 0,
-        agent_id: RECIPIENT_ID,
-        timeout_seconds: 1,
-      }),
+      await recipient.waitForMessages(
+        {
+          after_sequence: 0,
+          agent_id: RECIPIENT_ID,
+          timeout_seconds: 1,
+        },
+        { acknowledgement: "automatic" },
+      ),
     ).toMatchObject({
       agent_id: RECIPIENT_ID,
       messages: [{ content: SENTINEL }],
       timed_out: false,
     });
     expect(privateOneTimePrekeys(recipientVault, RECIPIENT_ID)).toBe(19);
-    const inbox: ProxyInboxOutput = await recipient.getMessages({
-      after_sequence: 0,
-      agent_id: RECIPIENT_ID,
-      limit: 100,
-      unread_only: false,
-    });
+    const inbox: ProxyInboxOutput = await recipient.getMessages(
+      {
+        after_sequence: 0,
+        agent_id: RECIPIENT_ID,
+        limit: 100,
+        unread_only: false,
+      },
+      { acknowledgement: "automatic" },
+    );
     expect(inbox.messages).toHaveLength(1);
-    expect(inbox.messages[0]).toEqual(sent.message);
+    expect(inbox.messages[0]).toEqual({ ...sent.message, read_at: NOW_TEXT });
     expect(privateOneTimePrekeys(recipientVault, RECIPIENT_ID)).toBe(20);
+
+    const second: ProxySendMessageOutput = await sender.sendMessage({
+      content: `${SENTINEL}-second`,
+      idempotency_key: "direct-cross-machine-2",
+      recipient_id: RECIPIENT_ID,
+      sender_id: SENDER_ID,
+    });
+    const acknowledgeMessages: MemoryE2eeRemote["acknowledgeMessages"] =
+      recipientRemote.acknowledgeMessages;
+    if (acknowledgeMessages === undefined) throw new Error("Missing acknowledgement method");
+    const validAcknowledgeMessages: typeof acknowledgeMessages =
+      acknowledgeMessages.bind(recipientRemote);
+    Reflect.set(
+      recipientRemote,
+      "acknowledgeMessages",
+      async (): Promise<unknown> => ({ receipts: null, updated: 1 }),
+    );
+    await expect(
+      recipient.getMessages(
+        {
+          after_sequence: 0,
+          agent_id: RECIPIENT_ID,
+          limit: 100,
+          unread_only: false,
+        },
+        { acknowledgement: "automatic" },
+      ),
+    ).rejects.toBeInstanceOf(ZodError);
+    Reflect.set(
+      recipientRemote,
+      "acknowledgeMessages",
+      async (input: MarkMessagesReadInput): Promise<AcknowledgeEncryptedMessagesOutput> => ({
+        receipts: input.message_ids.map(
+          (): EncryptedMessageReadReceiptDto => ({
+            message_id: "99999999-9999-4999-8999-999999999999",
+            read_at: NOW_TEXT,
+          }),
+        ),
+        updated: input.message_ids.length,
+      }),
+    );
+    await expect(
+      recipient.getMessages(
+        { after_sequence: 0, agent_id: RECIPIENT_ID, limit: 100, unread_only: false },
+        { acknowledgement: "automatic" },
+      ),
+    ).rejects.toThrow("Encrypted message acknowledgement failed");
+    Reflect.set(recipientRemote, "acknowledgeMessages", validAcknowledgeMessages);
+    const acknowledgementsBefore: number = backend.captures.filter(
+      (capture: (typeof backend.captures)[number]): boolean =>
+        capture.tool === "acknowledge_encrypted_messages",
+    ).length;
+    const mixed: ProxyInboxOutput = await recipient.getMessages(
+      {
+        after_sequence: 0,
+        agent_id: RECIPIENT_ID,
+        limit: 100,
+        unread_only: false,
+      },
+      { acknowledgement: "automatic" },
+    );
+    expect(
+      mixed.messages.map(
+        (message: ProxyInboxOutput["messages"][number]): string | null => message.read_at,
+      ),
+    ).toEqual([NOW_TEXT, NOW_TEXT]);
+    const acknowledgements: (typeof backend.captures)[number][] = backend.captures.filter(
+      (capture: (typeof backend.captures)[number]): boolean =>
+        capture.tool === "acknowledge_encrypted_messages",
+    );
+    expect(acknowledgements).toHaveLength(acknowledgementsBefore + 1);
+    const automatic: (typeof backend.captures)[number] | undefined =
+      acknowledgements[acknowledgements.length - 1];
+    if (automatic === undefined) throw new Error("Missing encrypted acknowledgement capture");
+    expect(automatic.input).toEqual({
+      agent_id: RECIPIENT_ID,
+      message_ids: [second.message.message_id],
+    });
 
     const marked: MarkMessagesReadOutput = await recipient.markMessagesRead({
       agent_id: RECIPIENT_ID,
       message_ids: [sent.message.message_id],
     });
-    expect(marked.updated).toBe(1);
-    const unread: ProxyInboxOutput = await recipient.getMessages({
-      after_sequence: 0,
-      agent_id: RECIPIENT_ID,
-      limit: 100,
-      unread_only: true,
-    });
+    expect(marked).toEqual({ read_at: NOW_TEXT, updated: 1 });
+    const unread: ProxyInboxOutput = await recipient.getMessages(
+      {
+        after_sequence: 0,
+        agent_id: RECIPIENT_ID,
+        limit: 100,
+        unread_only: true,
+      },
+      { acknowledgement: "automatic" },
+    );
     expect(unread.messages).toEqual([]);
 
     const captures: string = JSON.stringify(backend.captures, null, 2);

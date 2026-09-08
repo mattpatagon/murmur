@@ -1,5 +1,6 @@
 import type { Sql, TransactionSql } from "postgres";
 import { z } from "zod";
+import { StorageCorruptionError } from "../domain/errors.js";
 import type { AgentGeneration } from "../domain/lifecycle-values.js";
 import type {
   Agent,
@@ -10,7 +11,7 @@ import type {
 } from "../domain/models.js";
 import {
   type AgentId,
-  type Instant,
+  Instant,
   type MessageId,
   Sequence,
   type TenantId,
@@ -25,7 +26,7 @@ import {
   PLAINTEXT_PAGE_CONTENT_MULTIPLIER,
   parsePostgresInboxPage,
 } from "./inbox-page-budget.js";
-import type { InboxReadResult } from "./message-store.js";
+import type { InboxReadOptions, InboxReadResult } from "./message-store.js";
 import {
   postgresAgentInTransaction,
   renewPostgresSessionInTransaction,
@@ -46,6 +47,19 @@ import {
   mapMessageRow,
 } from "./postgres-message-rows.js";
 import { setPostgresTenantContext } from "./postgres-message-transactions.js";
+
+type AcknowledgedMessageRow = {
+  readonly message_id: string;
+  readonly read_at: string;
+};
+
+const AcknowledgedMessageRowSchema: z.ZodType<AcknowledgedMessageRow> = z.strictObject({
+  message_id: z.string(),
+  read_at: z.string(),
+});
+const AcknowledgedMessageRowsSchema: z.ZodType<AcknowledgedMessageRow[]> = z.array(
+  AcknowledgedMessageRowSchema,
+);
 
 async function readingAgent(
   transaction: TransactionSql,
@@ -73,8 +87,14 @@ export async function getPostgresMessages(
   query: GetMessagesQuery,
   now: Instant,
   run: PostgresTenantTransactionRunner = createPostgresTenantTransactionRunner(database, tenantId),
+  options: InboxReadOptions = { acknowledgement: "none" },
 ): Promise<readonly Message[]> {
-  return (await readPostgresInbox(tenantId, query, now, false, run)).messages;
+  return (
+    await readPostgresInbox(database, tenantId, query, now, run, {
+      acknowledgement: options.acknowledgement,
+      includeVersion: false,
+    })
+  ).messages;
 }
 
 export async function getPostgresMessagesWithVersion(
@@ -83,16 +103,25 @@ export async function getPostgresMessagesWithVersion(
   query: GetMessagesQuery,
   now: Instant,
   run: PostgresTenantTransactionRunner = createPostgresTenantTransactionRunner(database, tenantId),
+  options: InboxReadOptions = { acknowledgement: "none" },
 ): Promise<InboxReadResult> {
-  return await readPostgresInbox(tenantId, query, now, true, run);
+  return await readPostgresInbox(database, tenantId, query, now, run, {
+    acknowledgement: options.acknowledgement,
+    includeVersion: true,
+  });
 }
 
+type PostgresInboxReadOptions = InboxReadOptions & {
+  readonly includeVersion: boolean;
+};
+
 async function readPostgresInbox(
+  database: Sql,
   tenantId: TenantId,
   query: GetMessagesQuery,
   now: Instant,
-  includeVersion: boolean,
   run: PostgresTenantTransactionRunner,
+  options: PostgresInboxReadOptions,
 ): Promise<InboxReadResult> {
   return await run(async (transaction: TransactionSql): Promise<InboxReadResult> => {
     const agent: Agent = await readingAgent(
@@ -110,12 +139,24 @@ async function readPostgresInbox(
     const reservation: MaterializationReservation =
       reserveMaterializationBytes(MAX_INBOX_PAGE_BYTES);
     try {
-      if (includeVersion) {
+      if (options.includeVersion) {
         const snapshot: Awaited<ReturnType<typeof getPostgresInboxSnapshot>> =
           await getPostgresInboxSnapshot(transaction, tenantId, query, now, generation);
-        const messages: Message[] = snapshot.rows.map(
+        const readMessages: Message[] = snapshot.rows.map(
           (row: MessageRow): Message => mapMessageRow(row),
         );
+        const messages: readonly Message[] =
+          options.acknowledgement === "automatic"
+            ? await acknowledgePostgresMessages(
+                database,
+                transaction,
+                tenantId,
+                query.agentId,
+                generation,
+                readMessages,
+                now,
+              )
+            : readMessages;
         reservation.settle(snapshot.estimatedBytes);
         return { messages, inboxVersion: snapshot.inboxVersion };
       }
@@ -167,13 +208,78 @@ async function readPostgresInbox(
         MessageRowSchema,
         { kind: "plaintext", limit: query.limit },
       );
-      const messages: Message[] = rows.map((row: MessageRow): Message => mapMessageRow(row));
+      const readMessages: Message[] = rows.map((row: MessageRow): Message => mapMessageRow(row));
+      const messages: readonly Message[] =
+        options.acknowledgement === "automatic"
+          ? await acknowledgePostgresMessages(
+              database,
+              transaction,
+              tenantId,
+              query.agentId,
+              generation,
+              readMessages,
+              now,
+            )
+          : readMessages;
       reservation.settle(estimatedBytes);
       return { messages, inboxVersion: Sequence.zero() };
     } catch (error: unknown) {
       reservation.fail();
       throw error;
     }
+  });
+}
+
+async function acknowledgePostgresMessages(
+  database: Sql,
+  transaction: TransactionSql,
+  tenantId: TenantId,
+  agentId: AgentId,
+  generation: number,
+  messages: readonly Message[],
+  now: Instant,
+): Promise<readonly Message[]> {
+  const unreadMessages: readonly Message[] = messages.filter(
+    (message: Message): boolean => message.readAt === null,
+  );
+  if (unreadMessages.length === 0) return messages;
+  const messageIds: string[] = unreadMessages.map(
+    (message: Message): string => message.messageId.value,
+  );
+  const raw: unknown = await transaction`
+    UPDATE murmur.messages
+    SET read_at = COALESCE(read_at, ${now.toISOString()}::timestamptz)
+    WHERE tenant_id = ${tenantId.value}::uuid
+      AND recipient_id = ${agentId.value}
+      AND recipient_generation = ${generation}
+      AND message_id = ANY(${database.array(messageIds)}::uuid[])
+      AND expires_at > ${now.toISOString()}::timestamptz
+    RETURNING message_id::text AS message_id,
+      to_char(read_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS read_at
+  `;
+  const rows: AcknowledgedMessageRow[] = AcknowledgedMessageRowsSchema.parse(raw);
+  if (rows.length !== unreadMessages.length) {
+    throw new StorageCorruptionError(
+      "automatic message acknowledgement",
+      new Error("Acknowledged message count does not match the returned inbox page"),
+    );
+  }
+  const readAtByMessageId: Map<string, Instant> = new Map(
+    rows.map((row: AcknowledgedMessageRow): [string, Instant] => [
+      row.message_id,
+      Instant.parse(row.read_at),
+    ]),
+  );
+  return messages.map((message: Message): Message => {
+    if (message.readAt !== null) return message;
+    const readAt: Instant | undefined = readAtByMessageId.get(message.messageId.value);
+    if (readAt === undefined) {
+      throw new StorageCorruptionError(
+        "automatic message acknowledgement",
+        new Error("Acknowledged message identifier is missing from the returned inbox page"),
+      );
+    }
+    return { ...message, readAt };
   });
 }
 

@@ -60,6 +60,8 @@ import {
   ClaimOrchestratorPrekeyOutputSchema,
 } from "./wire-orchestration.js";
 import {
+  type AcknowledgeEncryptedMessagesOutput,
+  AcknowledgeEncryptedMessagesOutputSchema,
   type CancelEncryptedBroadcastInput,
   CancelEncryptedBroadcastInputSchema,
   type CancelEncryptedBroadcastOutput,
@@ -413,6 +415,17 @@ export class E2eeHttpRemoteClient implements E2eeRemoteClient, E2eeProxyRemoteCl
       input,
       MarkMessagesReadInputSchema,
       MarkMessagesReadOutputSchema,
+    );
+  }
+
+  public async acknowledgeMessages(
+    input: MarkMessagesReadInput,
+  ): Promise<AcknowledgeEncryptedMessagesOutput> {
+    return await this.call(
+      "acknowledge_encrypted_messages",
+      input,
+      MarkMessagesReadInputSchema,
+      AcknowledgeEncryptedMessagesOutputSchema,
     );
   }
 

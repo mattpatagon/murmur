@@ -24,6 +24,7 @@ import type {
   PublicAgentSigningChainDto,
 } from "../../src/e2ee/wire-contracts.js";
 import type {
+  AcknowledgeEncryptedMessagesOutput,
   CancelEncryptedBroadcastInput,
   CancelEncryptedBroadcastOutput,
   ClaimEncryptionPrekeyInput,
@@ -34,6 +35,7 @@ import type {
   E2eeCapabilityOutput,
   EncryptedInboxOutput,
   EncryptedMessageDto,
+  EncryptedMessageReadReceiptDto,
   GetEncryptedMessagesInput,
   GetInboxSummaryInput,
   GetInboxSummaryOutput,
@@ -49,20 +51,16 @@ import type {
   WaitForEncryptedMessagesOutput,
 } from "../../src/e2ee/wire-tools.js";
 import { requireMemoryMonotonicBundle } from "./e2ee-memory-bundle-validation.js";
-
 const TENANT_ID: string = "00000000-0000-4000-8000-000000000010";
 const NOW: string = "2026-08-10T20:00:00.000Z";
-
 export type CapturedRemoteCall = {
   readonly input: unknown;
   readonly tool: string;
 };
-
 type StoredClaim = {
   readonly input: ClaimEncryptionPrekeyInput;
   readonly output: ClaimEncryptionPrekeyOutput;
 };
-
 function signingChain(bundle: PublicAgentKeyBundleDto): PublicAgentSigningChainDto {
   return {
     agent_certificate: bundle.agent_certificate,
@@ -70,7 +68,6 @@ function signingChain(bundle: PublicAgentKeyBundleDto): PublicAgentSigningChainD
     root_public_key: bundle.root_public_key,
   };
 }
-
 function agent(input: RegisterAgentInput): AgentDto {
   return {
     agent_id: input.agent_id,
@@ -87,7 +84,6 @@ function agent(input: RegisterAgentInput): AgentDto {
     state: "active",
   };
 }
-
 export class MemoryE2eeBackend {
   readonly #agents: Map<string, AgentDto> = new Map<string, AgentDto>();
   readonly #bundles: Map<string, PublicAgentKeyBundleDto> = new Map<
@@ -104,7 +100,6 @@ export class MemoryE2eeBackend {
   public readonly captures: CapturedRemoteCall[] = [];
   #claimCounter: number = 1;
   #sequence: number = 0;
-
   public capability(): E2eeCapabilityOutput {
     return {
       caller_authority: "peer",
@@ -116,7 +111,6 @@ export class MemoryE2eeBackend {
       wire_version: 1,
     };
   }
-
   public register(input: RegisterAgentInput): RegisterAgentOutput {
     const existing: AgentDto | undefined = this.#agents.get(input.agent_id);
     const stored: AgentDto =
@@ -131,7 +125,6 @@ export class MemoryE2eeBackend {
       retention_days: 30,
     };
   }
-
   public list(): ListAgentsOutput {
     return {
       agents: Array.from(this.#agents.values()).sort((left: AgentDto, right: AgentDto): number =>
@@ -140,13 +133,11 @@ export class MemoryE2eeBackend {
       next_cursor: null,
     };
   }
-
   public get(input: GetAgentInput): GetAgentOutput {
     const stored: AgentDto | undefined = this.#agents.get(input.agent_id);
     if (stored === undefined) throw new Error("agent missing");
     return { agent: stored };
   }
-
   public end(input: EndSessionInput): EndSessionOutput {
     const stored: AgentDto | undefined = this.#agents.get(input.agent_id);
     if (stored === undefined || stored.generation !== input.expected_generation) {
@@ -161,7 +152,6 @@ export class MemoryE2eeBackend {
     });
     return { ended, generation: stored.generation };
   }
-
   public closeAgent(input: CloseAgentInput): CloseAgentOutput {
     const stored: AgentDto | undefined = this.#agents.get(input.agent_id);
     if (stored === undefined || stored.generation !== input.expected_generation) {
@@ -187,7 +177,6 @@ export class MemoryE2eeBackend {
       ).length,
     };
   }
-
   public publish(input: PublishAgentKeyBundleInput): PublishAgentKeyBundleOutput {
     const previous: PublicAgentKeyBundleDto | undefined = this.#bundles.get(input.agent_id);
     if (previous !== undefined) requireMemoryMonotonicBundle(previous, input.bundle);
@@ -200,13 +189,11 @@ export class MemoryE2eeBackend {
       root_key_id: input.bundle.root_key_id,
     };
   }
-
   #claimId(): string {
     const suffix: string = this.#claimCounter.toString().padStart(12, "0");
     this.#claimCounter += 1;
     return `00000000-0000-4000-8000-${suffix}`;
   }
-
   public claim(
     input: ClaimEncryptionPrekeyInput,
     provenance: ClaimedProvenanceDto = {
@@ -296,7 +283,7 @@ export class MemoryE2eeBackend {
     return { agent_id: input.agent_id, inbox_version: version, messages };
   }
 
-  public mark(input: MarkMessagesReadInput): MarkMessagesReadOutput {
+  public acknowledge(input: MarkMessagesReadInput): AcknowledgeEncryptedMessagesOutput {
     let updated: number = 0;
     input.message_ids.forEach((messageId: string): void => {
       const index: number = this.#messages.findIndex(
@@ -306,14 +293,31 @@ export class MemoryE2eeBackend {
       );
       if (index < 0) return;
       const current: EncryptedMessageDto | undefined = this.#messages[index];
-      if (current === undefined || current.read_at !== null) return;
+      if (current === undefined) return;
+      updated += 1;
+      if (current.read_at !== null) return;
       const changed: EncryptedMessageDto = { ...current, read_at: NOW };
       this.#messages[index] = changed;
       const key: string = `${changed.envelope.header.sender_id}\u0000${changed.envelope.header.idempotency_key}`;
       this.#idempotentMessages.set(key, changed);
-      updated += 1;
     });
-    return { read_at: NOW, updated };
+    const receipts: AcknowledgeEncryptedMessagesOutput["receipts"] = this.#messages
+      .filter(
+        (message: EncryptedMessageDto): boolean =>
+          message.envelope.header.recipient_id === input.agent_id &&
+          input.message_ids.includes(message.envelope.header.message_id),
+      )
+      .map(
+        (message: EncryptedMessageDto): EncryptedMessageReadReceiptDto => ({
+          message_id: message.envelope.header.message_id,
+          read_at: message.read_at === null ? NOW : message.read_at,
+        }),
+      );
+    return { receipts, updated };
+  }
+
+  public mark(input: MarkMessagesReadInput): MarkMessagesReadOutput {
+    return { read_at: NOW, updated: this.acknowledge(input).updated };
   }
 }
 
@@ -438,6 +442,13 @@ export class MemoryE2eeRemote implements E2eeProxyRemoteClient {
   public async markMessagesRead(input: MarkMessagesReadInput): Promise<MarkMessagesReadOutput> {
     this.#capture("mark_messages_read", input);
     return this.#backend.mark(input);
+  }
+
+  public async acknowledgeMessages(
+    input: MarkMessagesReadInput,
+  ): Promise<AcknowledgeEncryptedMessagesOutput> {
+    this.#capture("acknowledge_encrypted_messages", input);
+    return this.#backend.acknowledge(input);
   }
 
   public async getInboxSummary(input: GetInboxSummaryInput): Promise<GetInboxSummaryOutput> {

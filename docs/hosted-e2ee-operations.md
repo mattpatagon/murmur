@@ -60,9 +60,10 @@ The result reports `state`, `plaintext_writes_blocked`, `unread_plaintext_messag
    organization trust policy without repository access.
    The entitlement must report `unprovisioned_active_agents: 0`. An active agent means the current
    open generation has a live session lease.
-3. Drain or explicitly read every retained plaintext inbox item until
-   `unread_plaintext_messages: 0`. Preserve any required record outside Murmur under the
-   organization's approved data policy before marking it read.
+3. Drain every retained plaintext inbox until `unread_plaintext_messages: 0`. Each successful
+   current-inbox page is marked read as it is returned, so preserve required returned content
+   immediately under the organization's approved data policy. Storage validation failures leave
+   the page unread; transport loss after commit has an indeterminate delivery outcome.
 4. Block new plaintext writes:
 
    ```json

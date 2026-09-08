@@ -48,6 +48,7 @@ import {
 import { logSafeError } from "../safe-errors.js";
 import type { E2eeMessageStore, E2eeMessageStoreProvider } from "./e2ee-message-store.js";
 import type {
+  InboxReadOptions,
   InboxReadResult,
   InboxSubscription,
   InboxUpdateHandler,
@@ -310,7 +311,10 @@ export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvi
     return agent;
   }
 
-  public async getMessages(query: GetMessagesQuery): Promise<readonly Message[]> {
+  public async getMessages(
+    query: GetMessagesQuery,
+    options: InboxReadOptions = { acknowledgement: "none" },
+  ): Promise<readonly Message[]> {
     this.ensureOpen();
     const now: Instant = this.clock.now();
     return await getPostgresMessages(
@@ -319,10 +323,14 @@ export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvi
       query,
       now,
       this.messageTransaction(now),
+      options,
     );
   }
 
-  public async getMessagesWithVersion(query: GetMessagesQuery): Promise<InboxReadResult> {
+  public async getMessagesWithVersion(
+    query: GetMessagesQuery,
+    options: InboxReadOptions = { acknowledgement: "none" },
+  ): Promise<InboxReadResult> {
     this.ensureOpen();
     const now: Instant = this.clock.now();
     return await getPostgresMessagesWithVersion(
@@ -331,6 +339,7 @@ export class PostgresMessageStore implements MessageStore, E2eeMessageStoreProvi
       query,
       now,
       this.messageTransaction(now),
+      options,
     );
   }
 

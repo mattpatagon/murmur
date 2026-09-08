@@ -2,6 +2,19 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.18.0.0] - 2026-09-07
+
+### Changed
+
+- Automatically mark every message returned successfully by `get_messages` or
+  `wait_for_messages` as read, and include the committed `read_at` receipt in the same response.
+  Explicit `mark_messages_read` calls retain their existing wire response, while inbox resources
+  and generation history remain non-consuming.
+- Commit plaintext read receipts inside the SQLite or tenant-qualified PostgreSQL inbox
+  transaction. Encrypted proxy reads acknowledge only after every returned envelope is verified
+  and decrypted through a dedicated bounded wire operation, preserve the first committed receipt
+  across concurrent readers, and reject partial, mismatched, duplicate, or malformed receipts.
+
 ## [0.17.0.0] - 2026-09-07
 
 ### Added
@@ -467,34 +480,6 @@ All notable changes to Murmur are documented in this file.
 - Derive orchestrator authority only from validated credentials, enforce tenant-qualified provenance with forced RLS and composite foreign keys, and reject peer attempts to spoof or take over delegated identities.
 - Revalidate the selected policy, credential binding, revocation, role, and expiry at message insertion while keeping operator credentials outside tenant messaging.
 
-## [0.6.0.0] - 2026-08-10
-
-### Added
-
-- Track stable agent identities through generation-aware, named 60-minute session leases with explicit `active`, `inactive`, and `closed` states.
-- Inspect one agent or a historical inbox generation without renewing a session, and publish repository-scoped handoff, ownership, blocker, and decision notices with bounded lifetimes and audit state.
-- End hashed host sessions on Stop and SessionEnd while reporting open coordination notices at session start.
-
-### Changed
-
-- Broadcast only to recipients with a live lease; continue accepting durable direct messages for inactive recipients and reject closed recipients until registration reopens them.
-- Default agent discovery to active identities and expose explicit filters for open, inactive, closed, or all lifecycle states.
-- Bound each tenant to 1,000 open and 10,000 retained identities, each identity to eight live and 64 retained sessions, and notice storage to 10,000 records and 64 MiB of content.
-- Require current-generation guards for session ending and identity closure, and cursor-paginate agent and notice discovery.
-
-### Fixed
-
-- Close dormant identities after 30 days and garbage-collect unreferenced lifecycle state after its audit window, preventing dead workspaces and abandoned sessions from remaining discoverable forever.
-- Preserve monotonic identity lineage while notice audit rows refer to an actor, and serialize dormant pruning with concurrent registration and delivery.
-- Preserve generation foreign keys, resource accounting, forced RLS, and safe quota errors across fresh and populated PostgreSQL upgrades.
-- Split lifecycle upgrades into independently replayable migration phases and drain superseded Cloud Run revisions before mixed lifecycle writers can persist stale generations.
-- Close SQLite handles synchronously so shutdown releases database files before callers remove or replace them.
-
-### Security
-
-- Snapshot sender and recipient generations at message creation so reopened identities cannot inherit an older inbox implicitly.
-- Enforce notice tenant isolation, creator-only withdrawal, bounded retention, and identical SQLite/PostgreSQL authorization behavior.
-
 ## Earlier releases
 
-See the [0.1.0.0–0.5.1.0 release history](docs/changelog-early-releases.md).
+See the [0.1.0.0–0.6.0.0 release history](docs/changelog-early-releases.md).

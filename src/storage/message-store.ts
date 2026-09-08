@@ -38,6 +38,10 @@ export type InboxReadResult = {
   readonly inboxVersion: Sequence;
 };
 
+export type InboxReadOptions = {
+  readonly acknowledgement: "automatic" | "none";
+};
+
 export type InboxUpdateHandler = (sequence: Sequence) => Promise<void>;
 
 export interface InboxSubscription {
@@ -54,8 +58,11 @@ export interface MessageStore {
   broadcastMessage(command: BroadcastMessageCommand): Awaitable<BroadcastMessageResult>;
   sendMessage(command: SendMessageCommand): Awaitable<SendMessageResult>;
   submitFeedback(command: SubmitFeedbackCommand): Awaitable<SubmitFeedbackResult>;
-  getMessages(query: GetMessagesQuery): Awaitable<readonly Message[]>;
-  getMessagesWithVersion(query: GetMessagesQuery): Awaitable<InboxReadResult>;
+  getMessages(query: GetMessagesQuery, options?: InboxReadOptions): Awaitable<readonly Message[]>;
+  getMessagesWithVersion(
+    query: GetMessagesQuery,
+    options?: InboxReadOptions,
+  ): Awaitable<InboxReadResult>;
   markMessagesRead(command: MarkMessagesReadCommand): Awaitable<MarkMessagesReadResult>;
   postNotice(command: PostNoticeCommand): Awaitable<PostNoticeResult>;
   listNotices(query: ListNoticesQuery): Awaitable<ListNoticesResult>;

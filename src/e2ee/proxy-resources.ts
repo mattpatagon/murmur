@@ -107,12 +107,15 @@ export class E2eeProxyResources {
   private async readResource(request: ReadResourceRequest): Promise<ReadResourceResult> {
     const uri: string = request.params.uri;
     const agentId: string = agentIdFromInboxUri(uri);
-    const inbox: ProxyInboxOutput = await this.#operations.getMessages({
-      after_sequence: 0,
-      agent_id: agentId,
-      limit: 500,
-      unread_only: false,
-    });
+    const inbox: ProxyInboxOutput = await this.#operations.getMessages(
+      {
+        after_sequence: 0,
+        agent_id: agentId,
+        limit: 500,
+        unread_only: false,
+      },
+      { acknowledgement: "none" },
+    );
     return {
       contents: [{ mimeType: "application/json", text: JSON.stringify(inbox, null, 2), uri }],
     };
@@ -128,11 +131,14 @@ export class E2eeProxyResources {
       while (!cancelled && !this.#closed) {
         let result: Awaited<ReturnType<E2eeProxyOperations["waitForMessages"]>>;
         try {
-          result = await this.#operations.waitForMessages({
-            after_sequence: afterSequence,
-            agent_id: agentId,
-            timeout_seconds: SUBSCRIPTION_WAIT_SECONDS,
-          });
+          result = await this.#operations.waitForMessages(
+            {
+              after_sequence: afterSequence,
+              agent_id: agentId,
+              timeout_seconds: SUBSCRIPTION_WAIT_SECONDS,
+            },
+            { acknowledgement: "none" },
+          );
         } catch (error: unknown) {
           if (!cancelled && !this.#closed) {
             logSafeError("Murmur encrypted inbox subscription stopped", error);

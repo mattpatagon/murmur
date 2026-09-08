@@ -50,6 +50,7 @@ import {
 import { logSafeError } from "../safe-errors.js";
 import type { E2eeMessageStore } from "./e2ee-message-store.js";
 import type {
+  InboxReadOptions,
   InboxReadResult,
   InboxSubscription,
   InboxUpdateHandler,
@@ -67,6 +68,7 @@ import { broadcastSqliteMessage } from "./sqlite-broadcast-store.js";
 import { sendSqliteMessage } from "./sqlite-direct-message-store.js";
 import { SqliteE2eeMessageStore } from "./sqlite-e2ee-message-store.js";
 import { submitSqliteFeedback } from "./sqlite-feedback-store.js";
+import { acknowledgeSqliteMessages } from "./sqlite-inbox-acknowledgement.js";
 import { readSqliteInboxPage } from "./sqlite-inbox-page.js";
 import { pruneSqliteLifecycle } from "./sqlite-lifecycle-prune.js";
 import { migrateSqliteDatabase } from "./sqlite-message-migrations.js";
@@ -284,35 +286,56 @@ export class SqliteMessageStore implements MessageStore {
     return submitSqliteFeedback(this.database, command, this.clock.now());
   }
 
-  public getMessages(query: GetMessagesQuery): readonly Message[] {
+  public getMessages(
+    query: GetMessagesQuery,
+    options: InboxReadOptions = { acknowledgement: "none" },
+  ): readonly Message[] {
     this.ensureOpen();
     const now: Instant = this.clock.now();
     this.pruneExpired(now);
-    let agent: Agent = this.requireAgent(query.agentId);
-    if (query.sessionKey != null) {
-      agent = renewSqliteSession(this.database, query.agentId, query.sessionKey, now, false);
-    }
-    const generation: number =
-      query.generation == null ? agent.generation.value : query.generation.value;
-    return this.messagesAt(query, generation, now);
+    const read: () => readonly Message[] = (): readonly Message[] => {
+      let agent: Agent = this.requireAgent(query.agentId);
+      if (query.sessionKey != null) {
+        agent = renewSqliteSession(this.database, query.agentId, query.sessionKey, now, false);
+      }
+      const generation: number =
+        query.generation == null ? agent.generation.value : query.generation.value;
+      const messages: readonly Message[] = this.messagesAt(query, generation, now);
+      return options.acknowledgement === "automatic"
+        ? acknowledgeSqliteMessages(this.database, messages, query.agentId, generation, now)
+        : messages;
+    };
+    return options.acknowledgement === "automatic"
+      ? this.database.transaction(read).immediate()
+      : read();
   }
 
-  public getMessagesWithVersion(query: GetMessagesQuery): InboxReadResult {
+  public getMessagesWithVersion(
+    query: GetMessagesQuery,
+    options: InboxReadOptions = { acknowledgement: "none" },
+  ): InboxReadResult {
     this.ensureOpen();
     const now: Instant = this.clock.now();
     // Lifecycle pruning uses BEGIN IMMEDIATE and must precede the paired read transaction.
     this.pruneExpired(now);
-    return this.database.transaction((): InboxReadResult => {
+    const read: () => InboxReadResult = (): InboxReadResult => {
       const agent: Agent =
         query.sessionKey == null
           ? sqliteAgent(this.database, query.agentId, now)
           : renewSqliteSession(this.database, query.agentId, query.sessionKey, now, false);
       const generation: number =
         query.generation == null ? agent.generation.value : query.generation.value;
-      const messages: readonly Message[] = this.messagesAt(query, generation, now);
+      const readMessages: readonly Message[] = this.messagesAt(query, generation, now);
       const inboxVersion: Sequence = this.inboxVersionAt(query.agentId, generation, now);
+      const messages: readonly Message[] =
+        options.acknowledgement === "automatic"
+          ? acknowledgeSqliteMessages(this.database, readMessages, query.agentId, generation, now)
+          : readMessages;
       return { messages, inboxVersion };
-    })();
+    };
+    return options.acknowledgement === "automatic"
+      ? this.database.transaction(read).immediate()
+      : this.database.transaction(read)();
   }
 
   private messagesAt(

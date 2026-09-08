@@ -141,6 +141,16 @@ export type WaitForEncryptedMessagesOutput = {
   readonly timed_out: boolean;
 };
 
+export type EncryptedMessageReadReceiptDto = {
+  readonly message_id: string;
+  readonly read_at: string;
+};
+
+export type AcknowledgeEncryptedMessagesOutput = {
+  readonly receipts: readonly EncryptedMessageReadReceiptDto[];
+  readonly updated: number;
+};
+
 export type EncryptedBroadcastAudienceDto = {
   readonly machine?: string | undefined;
   readonly repository?: string | undefined;
@@ -331,6 +341,31 @@ export const WaitForEncryptedMessagesOutputSchema: z.ZodType<WaitForEncryptedMes
     messages: z.array(EncryptedMessageDtoSchema).max(500),
     timed_out: z.boolean(),
   });
+export const AcknowledgeEncryptedMessagesOutputSchema: z.ZodType<AcknowledgeEncryptedMessagesOutput> =
+  z
+    .strictObject({
+      receipts: z
+        .array(z.strictObject({ message_id: UuidSchema, read_at: InstantSchema }))
+        .max(500),
+      updated: z.number().int().nonnegative().max(500),
+    })
+    .superRefine(
+      (value: AcknowledgeEncryptedMessagesOutput, context: z.core.$RefinementCtx): void => {
+        if (value.receipts.length !== value.updated) {
+          context.addIssue({ code: "custom", message: "Acknowledgement receipt count mismatch" });
+        }
+        const messageIds: Set<string> = new Set<string>();
+        value.receipts.forEach((receipt: EncryptedMessageReadReceiptDto): void => {
+          if (messageIds.has(receipt.message_id)) {
+            context.addIssue({
+              code: "custom",
+              message: "Acknowledgement receipts must be unique",
+            });
+          }
+          messageIds.add(receipt.message_id);
+        });
+      },
+    );
 export const EncryptedBroadcastAudienceDtoSchema: z.ZodType<EncryptedBroadcastAudienceDto> =
   z.strictObject({
     machine: MachineNameSchema.optional(),

@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
 import type { MarkMessagesReadInput, MarkMessagesReadOutput } from "../src/domain/contracts.js";
 import { type Clock, Instant } from "../src/domain/value-objects.js";
 import {
@@ -34,6 +33,7 @@ import {
 import type { E2eeRemoteClient } from "../src/e2ee/remote-client.js";
 import { envelopeToDto, parseEnvelopeDto, signingChainToDto } from "../src/e2ee/wire-contracts.js";
 import type {
+  AcknowledgeEncryptedMessagesOutput,
   CancelEncryptedBroadcastInput,
   CancelEncryptedBroadcastOutput,
   ClaimEncryptionPrekeyInput,
@@ -43,6 +43,7 @@ import type {
   E2eeCapabilityOutput,
   EncryptedInboxOutput,
   EncryptedMessageDto,
+  EncryptedMessageReadReceiptDto,
   GetEncryptedMessagesInput,
   GetInboxSummaryInput,
   GetInboxSummaryOutput,
@@ -57,16 +58,13 @@ import type {
   WaitForEncryptedMessagesInput,
   WaitForEncryptedMessagesOutput,
 } from "../src/e2ee/wire-tools.js";
-
 const TENANT_ID: string = "11111111-1111-4111-8111-111111111111";
 const NOW: Instant = Instant.parse("2026-08-10T18:00:00.000Z");
-
 class FixedTestClock implements Clock {
   public now(): Instant {
     return NOW;
   }
 }
-
 function bytes(length: number, start: number): Uint8Array {
   const output: Uint8Array = new Uint8Array(length);
   for (let index: number = 0; index < output.byteLength; index += 1) {
@@ -74,26 +72,23 @@ function bytes(length: number, start: number): Uint8Array {
   }
   return output;
 }
-
 class FixedRandom implements EnvelopeRandom {
   readonly #pair: BoxKeyPair;
-
   public constructor(pair: BoxKeyPair) {
     this.#pair = pair;
   }
-
   public boxKeyPair(): BoxKeyPair {
     return { privateKey: this.#pair.privateKey.slice(), publicKey: this.#pair.publicKey.slice() };
   }
-
   public bytes(length: number): Uint8Array {
     return bytes(length, 211);
   }
 }
-
 class ReceiveRemote implements E2eeRemoteClient {
   #inbox: EncryptedInboxOutput = { agent_id: "recipient", inbox_version: 0, messages: [] };
   public markCalls: number = 0;
+  public markFailure: Error | null = null;
+  public markUpdated: number | null = null;
 
   public setMessage(message: EncryptedMessageDto): void {
     this.#inbox = {
@@ -102,11 +97,9 @@ class ReceiveRemote implements E2eeRemoteClient {
       messages: [message],
     };
   }
-
   public setMessages(messages: readonly EncryptedMessageDto[]): void {
     this.#inbox = { agent_id: "recipient", inbox_version: 2, messages };
   }
-
   public async capability(): Promise<E2eeCapabilityOutput> {
     return {
       caller_authority: "peer",
@@ -118,7 +111,6 @@ class ReceiveRemote implements E2eeRemoteClient {
       wire_version: 1,
     };
   }
-
   public async publishAgentKeyBundle(
     input: PublishAgentKeyBundleInput,
   ): Promise<PublishAgentKeyBundleOutput> {
@@ -130,7 +122,6 @@ class ReceiveRemote implements E2eeRemoteClient {
       root_key_id: input.bundle.root_key_id,
     };
   }
-
   public async getEncryptedMessages(
     _input: GetEncryptedMessagesInput,
   ): Promise<EncryptedInboxOutput> {
@@ -158,7 +149,23 @@ class ReceiveRemote implements E2eeRemoteClient {
   }
   public async markMessagesRead(input: MarkMessagesReadInput): Promise<MarkMessagesReadOutput> {
     this.markCalls += 1;
+    if (this.markFailure !== null) throw this.markFailure;
     return { read_at: NOW.toISOString(), updated: input.message_ids.length };
+  }
+  public async acknowledgeMessages(
+    input: MarkMessagesReadInput,
+  ): Promise<AcknowledgeEncryptedMessagesOutput> {
+    this.markCalls += 1;
+    if (this.markFailure !== null) throw this.markFailure;
+    return {
+      receipts: input.message_ids.map(
+        (message_id: string): EncryptedMessageReadReceiptDto => ({
+          message_id,
+          read_at: NOW.toISOString(),
+        }),
+      ),
+      updated: this.markUpdated === null ? input.message_ids.length : this.markUpdated,
+    };
   }
   public async prepareEncryptedBroadcast(
     _input: PrepareEncryptedBroadcastInput,
@@ -248,7 +255,7 @@ async function encryptedMessage(
   };
 }
 
-test("concurrent receivers verify, decrypt, cache, and consume one-time keys atomically", async (): Promise<void> => {
+test("encrypted inbox reads acknowledge only after decrypting and retain replay cache", async (): Promise<void> => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-e2ee-proxy-receive-"));
   const path: string = join(directory, "vault.sqlite");
   const firstVault: LocalE2eeVault = new LocalE2eeVault(path, "linux");
@@ -282,6 +289,30 @@ test("concurrent receivers verify, decrypt, cache, and consume one-time keys ato
       limit: 100,
       unread_only: false,
     };
+    const observed: ReceiveEncryptedMessagesResult = await receiveEncryptedMessages(
+      firstVault,
+      remote,
+      new FixedTestClock(),
+      input,
+      false,
+      { acknowledgement: "none" },
+    );
+    expect(observed.messages[0]).toMatchObject({ wire: { read_at: null } });
+    expect(remote.markCalls).toBe(0);
+    remote.markFailure = new Error("Injected encrypted acknowledgement failure");
+    await expect(
+      receiveEncryptedMessages(firstVault, remote, new FixedTestClock(), input),
+    ).rejects.toThrow("Injected encrypted acknowledgement failure");
+    expect(remote.markCalls).toBe(1);
+    expect(firstVault.getCachedMessage("22222222-2222-4222-8222-222222222222")).not.toBeNull();
+    remote.markFailure = null;
+    remote.markUpdated = 0;
+    await expect(
+      receiveEncryptedMessages(firstVault, remote, new FixedTestClock(), input),
+    ).rejects.toThrow("Acknowledgement receipt count mismatch");
+    expect(remote.markCalls).toBe(2);
+    expect(firstVault.getCachedMessage("22222222-2222-4222-8222-222222222222")).not.toBeNull();
+    remote.markUpdated = null;
     const results: readonly [ReceiveEncryptedMessagesResult, ReceiveEncryptedMessagesResult] =
       await Promise.all([
         receiveEncryptedMessages(firstVault, remote, new FixedTestClock(), input),
@@ -294,6 +325,9 @@ test("concurrent receivers verify, decrypt, cache, and consume one-time keys ato
     }
     expect(firstMessage.content).toBe("received plaintext sentinel");
     expect(secondMessage.content).toBe("received plaintext sentinel");
+    expect(firstMessage.wire.read_at).toBe(NOW.toISOString());
+    expect(secondMessage.wire.read_at).toBe(NOW.toISOString());
+    expect(remote.markCalls).toBe(4);
     expect(firstMessage.proof).toMatchObject({
       contextBinding: "verified",
       recipientPrekeyClass: "one_time",
@@ -316,12 +350,15 @@ test("concurrent receivers verify, decrypt, cache, and consume one-time keys ato
     const waitedMessage: VerifiedDecryptedMessage | undefined = waited.messages[0];
     if (waitedMessage === undefined) throw new Error("Expected waited decrypted message");
     expect(waitedMessage.content).toBe("received plaintext sentinel");
+    expect(waitedMessage.wire.read_at).toBe(NOW.toISOString());
+    expect(remote.markCalls).toBe(5);
+    expect(firstVault.getCachedMessage("22222222-2222-4222-8222-222222222222")).not.toBeNull();
     const marked: MarkMessagesReadOutput = await markEncryptedMessagesRead(firstVault, remote, {
       agent_id: "recipient",
       message_ids: ["22222222-2222-4222-8222-222222222222"],
     });
     expect(marked.updated).toBe(1);
-    expect(remote.markCalls).toBe(1);
+    expect(remote.markCalls).toBe(6);
     expect(firstVault.getCachedMessage("22222222-2222-4222-8222-222222222222")).toBeNull();
   } finally {
     firstVault.close();
@@ -377,6 +414,7 @@ test("rejects signed-envelope context relabeling and public-chain substitution",
     await expect(
       receiveEncryptedMessages(vault, remote, new FixedTestClock(), input),
     ).rejects.toThrow("Encrypted message verification failed");
+    expect(remote.markCalls).toBe(0);
     remote.setMessage({
       ...message,
       sender_chain: { ...message.sender_chain, root_public_key: "A".repeat(43) },
@@ -454,6 +492,7 @@ test("rejects signed-envelope context relabeling and public-chain substitution",
     await expect(
       receiveEncryptedMessages(vault, remote, new FixedTestClock(), input),
     ).rejects.toThrow("invalid encrypted inbox order");
+    expect(remote.markCalls).toBe(1);
   } finally {
     vault.close();
     rmSync(directory, { force: true, recursive: true });

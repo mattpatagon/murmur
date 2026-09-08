@@ -1,4 +1,5 @@
 import type { Database, Statement } from "bun:sqlite";
+import { z } from "zod";
 
 import {
   type MarkMessagesReadInput,
@@ -22,6 +23,9 @@ import {
   ClaimEncryptionPrekeyOutputSchema,
   type EncryptedInboxOutput,
   EncryptedInboxOutputSchema,
+  type AcknowledgeEncryptedMessagesOutput,
+  AcknowledgeEncryptedMessagesOutputSchema,
+  type EncryptedMessageReadReceiptDto,
   type EncryptedMessageDto,
   EncryptedMessageDtoSchema,
   type GetEncryptedMessagesInput,
@@ -320,22 +324,55 @@ export function getSqliteEncryptedMessages(
   });
 }
 
+export function acknowledgeSqliteEncryptedMessages(
+  database: Database,
+  inputValue: unknown,
+  now: Instant,
+): AcknowledgeEncryptedMessagesOutput {
+  const input: MarkMessagesReadInput = MarkMessagesReadInputSchema.parse(inputValue);
+  const generation: number = agentGeneration(database, input.agent_id);
+  if (input.message_ids.length === 0) {
+    return AcknowledgeEncryptedMessagesOutputSchema.parse({ receipts: [], updated: 0 });
+  }
+  const messageIds: string = JSON.stringify(input.message_ids);
+  const mark: () => AcknowledgeEncryptedMessagesOutput = (): AcknowledgeEncryptedMessagesOutput => {
+    database
+      .query<unknown, [string, string, number, string, string]>(`
+        UPDATE e2ee_messages SET read_at = COALESCE(read_at, ?)
+        WHERE recipient_id = ? AND recipient_generation = ?
+          AND message_id IN (SELECT value FROM json_each(?)) AND expires_at > ?
+      `)
+      .run(now.toISOString(), input.agent_id, generation, messageIds, now.toISOString());
+    const raw: unknown[] = database
+      .query<unknown, [string, number, string, string]>(`
+        SELECT message_id, read_at FROM e2ee_messages
+        WHERE recipient_id = ? AND recipient_generation = ?
+          AND message_id IN (SELECT value FROM json_each(?)) AND expires_at > ?
+        ORDER BY message_id ASC
+      `)
+      .all(input.agent_id, generation, messageIds, now.toISOString());
+    const receipts: EncryptedMessageReadReceiptDto[] = z
+      .array(z.strictObject({ message_id: z.string().uuid(), read_at: z.iso.datetime() }))
+      .parse(raw);
+    return AcknowledgeEncryptedMessagesOutputSchema.parse({ receipts, updated: receipts.length });
+  };
+  return database.transaction(mark).immediate();
+}
+
 export function markSqliteEncryptedMessagesRead(
   database: Database,
   inputValue: unknown,
   now: Instant,
 ): MarkMessagesReadOutput {
-  const input: MarkMessagesReadInput = MarkMessagesReadInputSchema.parse(inputValue);
-  const generation: number = agentGeneration(database, input.agent_id);
-  const messageIds: string = JSON.stringify(input.message_ids);
-  const changes: number = database
-    .query<unknown, [string, string, number, string, string]>(`
-      UPDATE e2ee_messages SET read_at = COALESCE(read_at, ?)
-      WHERE recipient_id = ? AND recipient_generation = ?
-        AND message_id IN (SELECT value FROM json_each(?)) AND expires_at > ?
-    `)
-    .run(now.toISOString(), input.agent_id, generation, messageIds, now.toISOString()).changes;
-  return MarkMessagesReadOutputSchema.parse({ read_at: now.toISOString(), updated: changes });
+  const acknowledgement: AcknowledgeEncryptedMessagesOutput = acknowledgeSqliteEncryptedMessages(
+    database,
+    inputValue,
+    now,
+  );
+  return MarkMessagesReadOutputSchema.parse({
+    read_at: now.toISOString(),
+    updated: acknowledgement.updated,
+  });
 }
 
 export function sqliteEncryptedInboxVersion(

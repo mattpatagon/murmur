@@ -24,6 +24,9 @@ import {
   parseSigningChainDto,
 } from "./wire-contracts.js";
 import {
+  type AcknowledgeEncryptedMessagesOutput,
+  AcknowledgeEncryptedMessagesOutputSchema,
+  type EncryptedMessageReadReceiptDto,
   type EncryptedInboxOutput,
   EncryptedInboxOutputSchema,
   type EncryptedMessageDto,
@@ -67,6 +70,10 @@ export type WaitForDecryptedMessagesResult = {
   readonly agentId: string;
   readonly messages: readonly VerifiedDecryptedMessage[];
   readonly timedOut: boolean;
+};
+
+export type EncryptedInboxReadOptions = {
+  readonly acknowledgement: "automatic" | "none";
 };
 
 function validateEnvelopeWindow(envelope: EncryptedEnvelope, now: Instant): void {
@@ -303,12 +310,50 @@ async function decryptMessages(
   return decrypted;
 }
 
+async function acknowledgeDecryptedMessages(
+  remote: E2eeRemoteClient,
+  agentId: string,
+  messages: readonly VerifiedDecryptedMessage[],
+): Promise<readonly VerifiedDecryptedMessage[]> {
+  const unreadMessageIds: string[] = messages
+    .filter((message: VerifiedDecryptedMessage): boolean => message.wire.read_at === null)
+    .map((message: VerifiedDecryptedMessage): string => message.wire.envelope.header.message_id);
+  if (unreadMessageIds.length === 0) return messages;
+  if (remote.acknowledgeMessages === undefined) {
+    throw new Error("Hosted Murmur does not support encrypted message acknowledgement");
+  }
+  const acknowledgement: AcknowledgeEncryptedMessagesOutput =
+    AcknowledgeEncryptedMessagesOutputSchema.parse(
+      await remote.acknowledgeMessages({ agent_id: agentId, message_ids: unreadMessageIds }),
+    );
+  if (acknowledgement.updated !== unreadMessageIds.length) {
+    throw new Error("Encrypted message acknowledgement failed");
+  }
+  const expectedMessageIds: ReadonlySet<string> = new Set(unreadMessageIds);
+  const readAtByMessageId: Map<string, string> = new Map<string, string>();
+  acknowledgement.receipts.forEach((messageReceipt: EncryptedMessageReadReceiptDto): void => {
+    if (!expectedMessageIds.has(messageReceipt.message_id)) {
+      throw new Error("Encrypted message acknowledgement failed");
+    }
+    readAtByMessageId.set(messageReceipt.message_id, messageReceipt.read_at);
+  });
+  return messages.map((message: VerifiedDecryptedMessage): VerifiedDecryptedMessage => {
+    if (message.wire.read_at !== null) return message;
+    const readAt: string | undefined = readAtByMessageId.get(
+      message.wire.envelope.header.message_id,
+    );
+    if (readAt === undefined) throw new Error("Encrypted message acknowledgement failed");
+    return { ...message, wire: { ...message.wire, read_at: readAt } };
+  });
+}
+
 export async function receiveEncryptedMessages(
   vault: LocalE2eeVault,
   remote: E2eeRemoteClient,
   clock: Clock,
   input: GetEncryptedMessagesInput,
   trustOnFirstUse: boolean = false,
+  options: EncryptedInboxReadOptions = { acknowledgement: "automatic" },
 ): Promise<ReceiveEncryptedMessagesResult> {
   const parsedInput: GetEncryptedMessagesInput = GetEncryptedMessagesInputSchema.parse(input);
   const now: Instant = clock.now();
@@ -333,7 +378,7 @@ export async function receiveEncryptedMessages(
   if (output.inbox_version < newestSequence) {
     throw new Error("Hosted Murmur returned an invalid encrypted inbox version");
   }
-  const messages: readonly VerifiedDecryptedMessage[] = await decryptMessages(
+  const decryptedMessages: readonly VerifiedDecryptedMessage[] = await decryptMessages(
     vault,
     output.messages,
     capability.tenant_id,
@@ -342,6 +387,10 @@ export async function receiveEncryptedMessages(
     now,
     trustOnFirstUse,
   );
+  const messages: readonly VerifiedDecryptedMessage[] =
+    options.acknowledgement === "automatic"
+      ? await acknowledgeDecryptedMessages(remote, parsedInput.agent_id, decryptedMessages)
+      : decryptedMessages;
   return { agentId: parsedInput.agent_id, inboxVersion: output.inbox_version, messages };
 }
 
@@ -351,6 +400,7 @@ export async function waitForDecryptedMessages(
   clock: Clock,
   input: WaitForEncryptedMessagesInput,
   trustOnFirstUse: boolean = false,
+  options: EncryptedInboxReadOptions = { acknowledgement: "automatic" },
 ): Promise<WaitForDecryptedMessagesResult> {
   const parsedInput: WaitForEncryptedMessagesInput =
     WaitForEncryptedMessagesInputSchema.parse(input);
@@ -373,7 +423,7 @@ export async function waitForDecryptedMessages(
     throw new Error("Hosted Murmur changed the encrypted wait identity");
   }
   validateSequenceOrder(output.messages, parsedInput.after_sequence);
-  const messages: readonly VerifiedDecryptedMessage[] = await decryptMessages(
+  const decryptedMessages: readonly VerifiedDecryptedMessage[] = await decryptMessages(
     vault,
     output.messages,
     capability.tenant_id,
@@ -382,6 +432,10 @@ export async function waitForDecryptedMessages(
     now,
     trustOnFirstUse,
   );
+  const messages: readonly VerifiedDecryptedMessage[] =
+    options.acknowledgement === "automatic"
+      ? await acknowledgeDecryptedMessages(remote, parsedInput.agent_id, decryptedMessages)
+      : decryptedMessages;
   return { agentId: parsedInput.agent_id, messages, timedOut: output.timed_out };
 }
 
