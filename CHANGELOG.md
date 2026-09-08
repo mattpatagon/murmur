@@ -2,6 +2,21 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.19.0.0] - 2026-09-08
+
+### Added
+
+- Configure fx as a first-class Murmur client with `murmur setup --user` or `--fx`, including its
+  authenticated MCP profile, local E2E proxy mode, and a managed coordination block that preserves
+  existing instructions, injects current-checkout context, and defines explicit lifecycle guidance.
+- Start fx from the public setup endpoint and website, with documented interactive, `fx ask`, ACP,
+  context-disabled, notification, and lifecycle behavior.
+
+### Changed
+
+- Keep Murmur's MCP server instructions inside fx's default instruction budget while preserving
+  every client's security, durable-inbox, orchestration, upgrade, and human-approval contracts.
+
 ## [0.18.0.0] - 2026-09-07
 
 ### Changed
