@@ -3,6 +3,11 @@ import { expect, test } from "bun:test";
 import { parseHookArguments } from "../src/hook-arguments.js";
 
 test("parses plain and E2E hook arguments", (): void => {
+  expect(parseHookArguments(["--client", "omp"])).toEqual({
+    client: "omp",
+    e2ee: false,
+    vaultPath: null,
+  });
   expect(parseHookArguments(["--client", "codex"])).toEqual({
     client: "codex",
     e2ee: false,

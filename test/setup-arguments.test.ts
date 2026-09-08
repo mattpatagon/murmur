@@ -4,7 +4,7 @@ import { parseSetupArguments, setupIncludesPi } from "../src/setup/setup-argumen
 
 test("setup defaults to every supported client and reports the Pi prerequisite", (): void => {
   const parsed: ReturnType<typeof parseSetupArguments> = parseSetupArguments(["--user"]);
-  expect(parsed.clients).toEqual(["claude", "codex", "fx", "opencode", "cursor", "pi"]);
+  expect(parsed.clients).toEqual(["claude", "codex", "fx", "opencode", "cursor", "pi", "omp"]);
   expect(setupIncludesPi(["--user"])).toBe(true);
 });
 
@@ -19,8 +19,10 @@ test("setup accepts and deduplicates every explicit client selector", (): void =
     "--codex",
     "--cursor",
     "--fx",
+    "--omp",
+    "--omp",
   ]);
-  expect(parsed.clients).toEqual(["cursor", "opencode", "pi", "fx", "claude", "codex"]);
+  expect(parsed.clients).toEqual(["cursor", "opencode", "pi", "fx", "claude", "codex", "omp"]);
   expect(setupIncludesPi(["--user", "--cursor"])).toBe(false);
   expect(setupIncludesPi(["--user", "--pi"])).toBe(true);
 });

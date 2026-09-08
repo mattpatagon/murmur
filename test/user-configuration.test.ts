@@ -187,6 +187,8 @@ test("installs both hook clients and a second run changes nothing", (): void => 
     cursorMcp: join(directory, ".cursor", "mcp.json"),
     fxInstructions: join(directory, ".fx", "AGENTS.md"),
     fxMcp: join(directory, ".fx", "mcp.json"),
+    ompExtension: join(directory, ".omp", "agent", "extensions", "murmur.ts"),
+    ompMcp: join(directory, ".omp", "agent", "mcp.json"),
     opencodeConfig: join(directory, ".config", "opencode", "opencode.json"),
     piMcp: join(directory, ".config", "mcp", "mcp.json"),
   };
@@ -324,6 +326,8 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
     cursorMcp: "/users/test/.cursor/mcp.json",
     fxInstructions: "/users/test/.fx/AGENTS.md",
     fxMcp: "/users/test/.fx/mcp.json",
+    ompExtension: "/users/test/.omp/agent/extensions/murmur.ts",
+    ompMcp: "/users/test/.omp/agent/mcp.json",
     opencodeConfig: "/users/test/.config/opencode/opencode.json",
     piMcp: "/users/test/.config/mcp/mcp.json",
   });
@@ -343,6 +347,8 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
     cursorMcp: "C:\\Users\\test\\.cursor\\mcp.json",
     fxInstructions: "C:\\Users\\test\\.fx\\AGENTS.md",
     fxMcp: "C:\\Users\\test\\.fx\\mcp.json",
+    ompExtension: "C:\\Users\\test\\.omp\\agent\\extensions\\murmur.ts",
+    ompMcp: "C:\\Users\\test\\.omp\\agent\\mcp.json",
     opencodeConfig: "C:\\Users\\test\\.config\\opencode\\opencode.json",
     piMcp: "C:\\Users\\test\\.config\\mcp\\mcp.json",
   });
@@ -363,6 +369,8 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
     cursorMcp: "/home/test/.cursor/mcp.json",
     fxInstructions: "/home/test/.fx/AGENTS.md",
     fxMcp: "/home/test/.fx/mcp.json",
+    ompExtension: "/home/test/.omp/agent/extensions/murmur.ts",
+    ompMcp: "/home/test/.omp/agent/mcp.json",
     opencodeConfig: "/home/test/.config/opencode/opencode.json",
     piMcp: "/home/test/.config/mcp/mcp.json",
   });
@@ -378,6 +386,8 @@ test("writes configuration everywhere and preserves POSIX mode contracts", (): v
     cursorMcp: join(directory, ".cursor", "mcp.json"),
     fxInstructions: join(directory, ".fx", "AGENTS.md"),
     fxMcp: join(directory, ".fx", "mcp.json"),
+    ompExtension: join(directory, ".omp", "agent", "extensions", "murmur.ts"),
+    ompMcp: join(directory, ".omp", "agent", "mcp.json"),
     opencodeConfig: join(directory, ".config", "opencode", "opencode.json"),
     piMcp: join(directory, ".config", "mcp", "mcp.json"),
   };
@@ -389,7 +399,7 @@ test("writes configuration everywhere and preserves POSIX mode contracts", (): v
       mode: 0o640,
     });
     installUserConfiguration({
-      clients: ["claude", "codex", "fx", "opencode", "cursor", "pi"],
+      clients: ["claude", "codex", "fx", "opencode", "cursor", "pi", "omp"],
       hookExecutable: "/usr/local/bin/murmur-hook",
       paths,
     });
@@ -420,6 +430,8 @@ test("validates every selected client before writing configuration", (): void =>
     cursorMcp: join(directory, ".cursor", "mcp.json"),
     fxInstructions: join(directory, ".fx", "AGENTS.md"),
     fxMcp: join(directory, ".fx", "mcp.json"),
+    ompExtension: join(directory, ".omp", "agent", "extensions", "murmur.ts"),
+    ompMcp: join(directory, ".omp", "agent", "mcp.json"),
     opencodeConfig: join(directory, ".config", "opencode", "opencode.json"),
     piMcp: join(directory, ".config", "mcp", "mcp.json"),
   };

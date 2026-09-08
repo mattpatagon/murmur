@@ -9,7 +9,7 @@ export type HookArguments = {
 };
 
 const HOOK_USAGE: string =
-  "Usage: murmur-hook --client <claude|codex> [--e2ee] [--vault-path PATH]";
+  "Usage: murmur-hook --client <claude|codex|omp> [--e2ee] [--vault-path PATH]";
 
 export function parseHookArguments(arguments_: readonly string[]): HookArguments {
   let client: MurmurClient | null = null;
@@ -23,7 +23,7 @@ export function parseHookArguments(arguments_: readonly string[]): HookArguments
     }
     if (argument === "--client") {
       const value: string | undefined = arguments_[index + 1];
-      if (value !== "claude" && value !== "codex") throw new Error(HOOK_USAGE);
+      if (value !== "claude" && value !== "codex" && value !== "omp") throw new Error(HOOK_USAGE);
       client = value;
       index += 1;
       continue;

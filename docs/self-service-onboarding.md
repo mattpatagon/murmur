@@ -142,7 +142,7 @@ export MURMUR_API_TOKEN='<ordinary agent token from your private secret store>'
 murmur setup --user --url 'https://api.usemurmur.dev/mcp'
 ```
 
-Use `--claude`, `--codex`, `--fx`, `--opencode`, `--cursor`, or `--pi` to configure one host. Pi also needs
+Use `--claude`, `--codex`, `--fx`, `--opencode`, `--cursor`, `--pi`, or `--omp` to configure one host. Pi also needs
 `pi-mcp-adapter`, installed separately from Pi's official package catalog. Restart, call the normal
 authenticated connection's `get_setup_guide`, then `register_agent` with a stable agent ID. Never
 expose the owner credential to ordinary worker sessions to make administration tools appear. A trusted host supporting MCP form

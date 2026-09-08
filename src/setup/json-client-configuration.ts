@@ -3,7 +3,7 @@ import { MURMUR_TOKEN_ENV, type SetupClient } from "./client-configuration.js";
 
 export type JsonRecord = Record<string, unknown>;
 
-type JsonClient = "cursor" | "fx" | "opencode" | "pi";
+type JsonClient = "cursor" | "fx" | "omp" | "opencode" | "pi";
 
 type JsonClientFormat = {
   readonly client: JsonClient;
@@ -13,6 +13,7 @@ type JsonClientFormat = {
 const CURSOR_FORMAT: JsonClientFormat = { client: "cursor", rootKey: "mcpServers" };
 const FX_FORMAT: JsonClientFormat = { client: "fx", rootKey: "mcp" };
 const OPENCODE_FORMAT: JsonClientFormat = { client: "opencode", rootKey: "mcp" };
+const OMP_FORMAT: JsonClientFormat = { client: "omp", rootKey: "mcpServers" };
 const PI_FORMAT: JsonClientFormat = { client: "pi", rootKey: "mcpServers" };
 
 export function isRecord(value: unknown): value is JsonRecord {
@@ -79,6 +80,17 @@ function remoteServer(format: JsonClientFormat, url: string, existing: unknown):
       url,
     };
   }
+  if (format.client === "omp") {
+    return {
+      headers: {
+        ...headers,
+        Authorization: `Bearer \${${MURMUR_TOKEN_ENV}}`,
+        "X-Murmur-Client": "omp",
+      },
+      type: "http",
+      url,
+    };
+  }
   if (format.client === "fx") {
     return {
       ...fxRemoteOptions(existing),
@@ -100,7 +112,7 @@ function remoteServer(format: JsonClientFormat, url: string, existing: unknown):
 function remoteShapeMatches(format: JsonClientFormat, existing: JsonRecord, url: string): boolean {
   if (existing["url"] !== url || existing["command"] !== undefined) return false;
   if (format.client === "opencode") return existing["type"] === "remote";
-  if (format.client === "fx") return existing["type"] === "http";
+  if (format.client === "fx" || format.client === "omp") return existing["type"] === "http";
   return true;
 }
 
@@ -128,6 +140,7 @@ function displayName(format: JsonClientFormat): string {
   if (format.client === "opencode") return "OpenCode";
   if (format.client === "cursor") return "Cursor";
   if (format.client === "fx") return "fx";
+  if (format.client === "omp") return "Oh My Pi";
   return "Pi";
 }
 
@@ -198,6 +211,14 @@ function localServer(
       env: { [MURMUR_TOKEN_ENV]: `\${env:${MURMUR_TOKEN_ENV}}` },
     };
   }
+  if (format.client === "omp") {
+    return {
+      args: arguments_,
+      command: executable,
+      env: { [MURMUR_TOKEN_ENV]: `\${${MURMUR_TOKEN_ENV}}` },
+      type: "stdio",
+    };
+  }
   return { args: arguments_, command: executable };
 }
 
@@ -231,6 +252,16 @@ function localShapeMatches(
       exactStringArray(existing["args"], arguments_) &&
       isRecord(environment) &&
       environment[MURMUR_TOKEN_ENV] === `\${env:${MURMUR_TOKEN_ENV}}`
+    );
+  }
+  if (format.client === "omp") {
+    const environment: unknown = existing["env"];
+    return (
+      existing["type"] === "stdio" &&
+      existing["command"] === executable &&
+      exactStringArray(existing["args"], arguments_) &&
+      isRecord(environment) &&
+      environment[MURMUR_TOKEN_ENV] === `\${${MURMUR_TOKEN_ENV}}`
     );
   }
   return existing["command"] === executable && exactStringArray(existing["args"], arguments_);
@@ -333,4 +364,22 @@ export function configurePiE2eeMcp(
   vaultPath?: string | undefined,
 ): JsonRecord {
   return configureLocalJsonClient(current, PI_FORMAT, url, executable, replace, vaultPath);
+}
+
+export function configureOmpMcp(
+  current: JsonRecord,
+  url: string,
+  replace: boolean = false,
+): JsonRecord {
+  return configureRemoteJsonClient(current, OMP_FORMAT, url, replace);
+}
+
+export function configureOmpE2eeMcp(
+  current: JsonRecord,
+  url: string,
+  executable: string,
+  replace: boolean = false,
+  vaultPath?: string | undefined,
+): JsonRecord {
+  return configureLocalJsonClient(current, OMP_FORMAT, url, executable, replace, vaultPath);
 }
