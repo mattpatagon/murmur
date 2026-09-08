@@ -1,7 +1,7 @@
 # Configure local encryption through MCP
 
 After `murmur setup --user --e2ee` and restarting the client, call `get_setup_guide` with
-`{"topic":"encryption"}`. Setup can write proxy entries for Claude Code, Codex, OpenCode, Cursor,
+`{"topic":"encryption"}`. Setup can write proxy entries for Claude Code, Codex, fx, OpenCode, Cursor,
 and Pi's separately installed MCP adapter. Claude Code and Codex also receive lifecycle hooks. The
 local proxy exposes the following tools. The hosted service never receives private keys. The
 endpoint vault is bound to the tenant from the validated credential; tool arguments cannot select a

@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import packageMetadata from "../package.json" with { type: "json" };
+import { buildDistribution } from "../scripts/build-distribution.js";
 import {
   distributionDownloadPath,
   distributionPackageVersion,
@@ -74,6 +75,20 @@ test("public download verifies release, digest, size and safe package identity",
   }
 });
 
+test("public distribution advertises native fx setup in its packaged README", async (): Promise<void> => {
+  const directory: string = mkdtempSync(join(tmpdir(), "murmur-distribution-fx-"));
+  try {
+    await buildDistribution(directory, REVISION);
+    const archive: Bun.Archive = new Bun.Archive(readFileSync(join(directory, "murmur.tgz")));
+    const files: Map<string, Blob> = await archive.files();
+    const readme: Blob | undefined = files.get("package/README.md");
+    if (readme === undefined) throw new Error("Public distribution README is missing");
+    expect(await readme.text()).toContain("Claude Code, Codex, fx, OpenCode, Cursor, and Pi");
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
 test("public package routes are unauthenticated, fixed, method-restricted and cache-aware", async (): Promise<void> => {
   const distribution: PublicDistribution = fixture();
   const handler: PublicDownloadHandler = createPublicDownloadHandler(distribution);
@@ -92,7 +107,9 @@ test("public package routes are unauthenticated, fixed, method-restricted and ca
   expect(isPublicDistributionPath("/install")).toBe(true);
   expect(isPublicDistributionPath("/downloads/anything")).toBe(true);
   expect(isPublicDistributionPath("/mcp")).toBe(false);
-  expect(await handler(request("/install")).text()).toContain("get_setup_guide");
+  const installGuide: string = await handler(request("/install")).text();
+  expect(installGuide).toContain("get_setup_guide");
+  expect(installGuide).toContain("fx mcp add --transport http murmur");
   expect(handler(request("/install", "HEAD")).body).toBeNull();
 });
 

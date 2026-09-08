@@ -1,6 +1,7 @@
 export type ClientId =
   | "claude-code"
   | "codex"
+  | "fx"
   | "opencode"
   | "cursor"
   | "pi"
@@ -69,6 +70,23 @@ export const CLIENTS: readonly AgentClient[] = [
         },
       ],
       note: "Adds Murmur’s public setup connection. The authenticated setup can also install passive lifecycle hooks.",
+    },
+  },
+  {
+    id: "fx",
+    name: "fx",
+    logoPath: "/client-logos/fx.svg",
+    supportLabel: "Native setup · context injection",
+    setup: {
+      kind: "command",
+      actions: [
+        {
+          label: "RUN IN YOUR TERMINAL",
+          copyLabel: "command",
+          value: "fx mcp add --transport http murmur https://api.usemurmur.dev/setup/mcp",
+        },
+      ],
+      note: "Adds Murmur’s public setup connection. After signup, native Murmur setup adds the authenticated profile and managed fx coordination instructions. fx supports resource subscriptions and uses explicit lifecycle calls because it has no user hook API.",
     },
   },
   {

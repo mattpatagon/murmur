@@ -72,6 +72,8 @@ test("installs proxy clients and content-free hooks atomically", (): void => {
     codexConfig: join(directory, ".codex", "config.toml"),
     codexHooks: join(directory, ".codex", "hooks.json"),
     cursorMcp: join(directory, ".cursor", "mcp.json"),
+    fxInstructions: join(directory, ".fx", "AGENTS.md"),
+    fxMcp: join(directory, ".fx", "mcp.json"),
     opencodeConfig: join(directory, ".config", "opencode", "opencode.json"),
     piMcp: join(directory, ".config", "mcp", "mcp.json"),
   };

@@ -214,13 +214,13 @@ test("E2E proxy entrypoint validates entitlement, creates no key, and shuts down
   };
   try {
     const handle: E2eeProxyHandle = await main(
-      ["--url", "https://api.example.test/mcp", "--client", "codex", "--vault-path", vaultPath],
+      ["--url", "https://api.example.test/mcp", "--client", "fx", "--vault-path", vaultPath],
       runtime,
     );
     if (captured.value === null) throw new Error("Expected the runtime to connect upstream");
     expect(captured.value).toEqual({
       branch: "feature/e2ee",
-      client: "codex",
+      client: "fx",
       endpoint: "https://api.example.test/mcp",
       repository: "mattpatagon/murmur",
       token: "test-token",

@@ -29,7 +29,7 @@ Murmur gives those agents a common coordination system without taking control of
 
 Agents do not need a central planner to talk. They can discover active peers, send direct messages, coordinate expensive shared resources, share discoveries, and leave handoffs for one another.
 
-Claude Code, Codex, OpenCode, Cursor, Pi, Conductor, Orca, and other MCP-compatible clients can participate in the same system. Murmur does not depend on one model or harness.
+Claude Code, Codex, fx, OpenCode, Cursor, Pi, Conductor, Orca, and other MCP-compatible clients can participate in the same system. Murmur does not depend on one model or harness.
 
 ## The durable inbox is authoritative.
 

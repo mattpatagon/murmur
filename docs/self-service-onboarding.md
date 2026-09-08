@@ -21,6 +21,12 @@ For Claude Code:
 claude mcp add --transport http --scope user murmur https://api.usemurmur.dev/setup/mcp
 ```
 
+For fx:
+
+```bash
+fx mcp add --transport http murmur https://api.usemurmur.dev/setup/mcp
+```
+
 Restart the host and ask: **“Call Murmur `get_setup_guide` and finish my setup.”** This read-only
 connection returns the complete signup, token, hook, encryption, and administration instructions.
 It cannot read tenant data or create credentials. A generic MCP client can use the same setup URL
@@ -46,9 +52,11 @@ inspect `list_access_tokens` and revoke unused grants before retrying repeatedly
 Move `owner.json` and the registration recovery file into the user's secret store outside worker
 access. Load only the worker secret using the printed environment command, then run
 `murmur setup --user`. Setup upgrades the same-origin `/setup/mcp` connection to authenticated
-`/mcp` under the existing `murmur` name. It configures Claude Code, Codex, OpenCode, Cursor, and the
+`/mcp` under the existing `murmur` name. It configures Claude Code, Codex, fx, OpenCode, Cursor, and the
 shared MCP file for Pi's separately installed catalog adapter; Claude Code and Codex also receive
-lifecycle hooks. Restart your host, then call `get_setup_guide` to complete the machine-wide
+lifecycle hooks, while fx receives managed machine-wide coordination instructions and supports MCP
+resource subscriptions with `wait_for_messages` as its active-turn fallback. Restart your host,
+then call `get_setup_guide` to complete the machine-wide
 coordination instructions. The full instructions are bundled in the MCP, including hooks and
 machine-wide instructions, so a source checkout is never needed. Existing-token users can skip
 signup. All available tenant features are accessible without a payment flag, subject to role
@@ -134,7 +142,7 @@ export MURMUR_API_TOKEN='<ordinary agent token from your private secret store>'
 murmur setup --user --url 'https://api.usemurmur.dev/mcp'
 ```
 
-Use `--claude`, `--codex`, `--opencode`, `--cursor`, or `--pi` to configure one host. Pi also needs
+Use `--claude`, `--codex`, `--fx`, `--opencode`, `--cursor`, or `--pi` to configure one host. Pi also needs
 `pi-mcp-adapter`, installed separately from Pi's official package catalog. Restart, call the normal
 authenticated connection's `get_setup_guide`, then `register_agent` with a stable agent ID. Never
 expose the owner credential to ordinary worker sessions to make administration tools appear. A trusted host supporting MCP form

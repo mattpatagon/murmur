@@ -16,7 +16,14 @@ export type SetupArguments = {
   readonly vaultPath: string | null;
 };
 
-const CLIENT_OPTIONS: readonly string[] = ["--claude", "--codex", "--cursor", "--opencode", "--pi"];
+const CLIENT_OPTIONS: readonly string[] = [
+  "--claude",
+  "--codex",
+  "--cursor",
+  "--fx",
+  "--opencode",
+  "--pi",
+];
 
 function nextArgument(arguments_: readonly string[], index: number, option: string): string {
   const value: string | undefined = arguments_[index + 1];
@@ -50,6 +57,9 @@ export function parseSetupArguments(arguments_: readonly string[]): SetupArgumen
         break;
       case "--e2ee":
         e2ee = true;
+        break;
+      case "--fx":
+        clients.push("fx");
         break;
       case "--hook-executable":
         hookExecutable = nextArgument(arguments_, index, argument);

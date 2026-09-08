@@ -1,7 +1,7 @@
 # Murmur
 
-Murmur is a durable coordination layer for AI coding agents. Claude Code, Codex, OpenCode, Cursor,
-Pi, and standards-compatible MCP clients can discover live peers, exchange direct or broadcast
+Murmur is a durable coordination layer for AI coding agents. Claude Code, Codex, fx, OpenCode,
+Cursor, Pi, and standards-compatible MCP clients can discover live peers, exchange direct or broadcast
 messages, publish repository coordination notices, and receive inbox-change signals without
 treating a live notification as the source of truth. In Conductor and Orca, availability follows
 the effective home and environment of the selected agent.
@@ -24,7 +24,7 @@ forced PostgreSQL RLS, bounded resource usage, and operator audit history.
 ## Architecture
 
 ```text
-Claude Code / Codex / OpenCode / Cursor / Pi adapter / MCP client
+Claude Code / Codex / fx / OpenCode / Cursor / Pi adapter / MCP client
                               |
                     MCP tools + resources
                               |
@@ -43,7 +43,7 @@ signal never loses a message.
 ## Requirements
 
 - Bun 1.3.14 or newer for optional local hooks, setup commands, and encryption
-- Claude Code, Codex, OpenCode, Cursor, Pi with its catalog MCP adapter, or another MCP client
+- Claude Code, Codex, fx, OpenCode, Cursor, Pi with its catalog MCP adapter, or another MCP client
 - No account or token is needed for the setup MCP; messaging uses a hosted credential,
   a shared PostgreSQL URL, or a local SQLite path
 
@@ -62,6 +62,12 @@ For Codex:
 
 ```bash
 codex mcp add murmur --url https://api.usemurmur.dev/setup/mcp
+```
+
+For fx:
+
+```bash
+fx mcp add --transport http murmur https://api.usemurmur.dev/setup/mcp
 ```
 
 For Claude Code:
@@ -88,7 +94,7 @@ prints no secrets and shows how to load only the worker token. Move the separate
 and registration recovery file into your private secret store outside worker access, then run
 `murmur setup --user`. Setup replaces the public bootstrap entry with the authenticated connection
 and installs hooks where supported; restart the host to load them. Existing-token users can skip
-signup. Add `--claude`, `--codex`, `--opencode`, `--cursor`, or `--pi` to select hosts and `--url URL`
+signup. Add `--claude`, `--codex`, `--fx`, `--opencode`, `--cursor`, or `--pi` to select hosts and `--url URL`
 for another endpoint. Pi uses the third-party `pi-mcp-adapter` listed in Pi's official package
 catalog. Arbitrary conflicting Murmur entries still require inspection before `--replace`.
 
@@ -165,8 +171,11 @@ across repositories. Restart sessions after changing their instructions.
 
 For Claude Code and Codex, `murmur setup --user` installs passive SessionStart, UserPromptSubmit,
 PostToolUse, Stop, and SessionEnd hooks. Hooks check the durable inbox during active host events;
-they do not wake idle agents. OpenCode, Cursor, Pi, and manually configured clients use the same MCP
-lifecycle tools from their active-session workflow. For encryption, `murmur setup --user --e2ee`
+they do not wake idle agents. fx setup also installs a managed machine-wide coordination contract;
+fx uses native MCP resource subscriptions when an inbox resource is subscribed, explicit lifecycle
+calls, and `wait_for_messages` as its active-turn fallback. OpenCode, Cursor, Pi, and manually
+configured clients use the same MCP lifecycle tools from their active-session workflow. For
+encryption, `murmur setup --user --e2ee`
 configures the local proxy for every selected managed target and configures Claude Code and Codex
 hooks to use the same private vault. Every setup topic is available from the MCP without access to
 this README.
@@ -336,6 +345,17 @@ window unless a pending outbox item still needs the sender key. The local vault 
 revocation tombstones needed by a later registration of the same identity.
 If the exact cached generation is unavailable, the hook makes no destructive lifecycle call and the
 lease expires.
+
+fx has no user hook API. Setup writes native MCP configuration and a managed `~/.fx/AGENTS.md`
+coordination block that injects the lifecycle and provenance contract while preserving user text.
+fx supports subscribed-resource change delivery and reconnect recovery; `register_agent`,
+`end_session`, and `close_agent` provide the explicit lifecycle. A resource signal does not start a
+model turn, so `wait_for_messages` is the bounded fallback for an active workflow.
+
+Interactive fx and `fx ask` inherit this profile. `fx acp` does not inherit profile MCP servers;
+its editor must pass the equivalent `mcpServers` entry or use an approved workspace `.mcp.json`.
+An explicit fx `context: false` setting disables AGENTS.md injection while leaving the MCP tools
+available.
 
 ## MCP tools
 

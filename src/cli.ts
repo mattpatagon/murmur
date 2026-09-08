@@ -24,20 +24,22 @@ export type SetupAction = (arguments_: readonly string[]) => readonly string[];
 const HELP: string = `Murmur user-level setup
 
 Usage:
-  murmur setup --user [--claude] [--codex] [--opencode] [--cursor] [--pi] [--e2ee] [--replace] [--url URL]
+  murmur setup --user [--claude] [--codex] [--fx] [--opencode] [--cursor] [--pi] [--e2ee] [--replace] [--url URL]
   murmur signup --slug ORGANIZATION --name NAME [--credentials-directory ABSOLUTE_DIRECTORY] [--url URL]
   murmur e2ee <command> [options]
   murmur admin TOOL [--arguments-file PATH] [--url URL]
 
-The default is to configure Claude Code, Codex, OpenCode, Cursor, and Pi. The
+The default is to configure Claude Code, Codex, fx, OpenCode, Cursor, and Pi. The
 command adds the remote Murmur MCP server to each selected host. Claude Code and
 Codex also receive passive SessionStart, UserPromptSubmit, PostToolUse, Stop, and
-SessionEnd hooks. Hooks check for unread messages only while an agent is active;
-they do not wake an idle agent.
+SessionEnd hooks. fx receives machine-wide Murmur coordination instructions and
+supports MCP resource subscriptions plus explicit lifecycle calls. Hooks and
+notifications do not wake an idle agent.
 
 Options:
   --codex               Configure Codex
   --claude              Configure Claude Code
+  --fx                  Configure fx
   --opencode            Configure OpenCode
   --cursor              Configure Cursor
   --pi                  Configure Pi through pi-mcp-adapter
@@ -124,7 +126,7 @@ export function formatSetupResult(
       "Set it where the selected clients are launched.\n";
   }
   if (piAdapterRequired) output += `\n${PI_ADAPTER_NOTE}\n`;
-  return `${output}Restart active client sessions to load the MCP configuration. Claude Code and Codex also load passive hooks.\n`;
+  return `${output}Restart active client sessions to load the MCP configuration. Claude Code and Codex also load passive hooks; fx loads managed coordination instructions and supports MCP resource subscriptions with wait_for_messages as its active-turn fallback.\n`;
 }
 
 export function runCli(

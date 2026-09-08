@@ -1,5 +1,13 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, type Stats, statSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  type Stats,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -177,6 +185,8 @@ test("installs both hook clients and a second run changes nothing", (): void => 
     codexConfig: join(directory, ".codex", "config.toml"),
     codexHooks: join(directory, ".codex", "hooks.json"),
     cursorMcp: join(directory, ".cursor", "mcp.json"),
+    fxInstructions: join(directory, ".fx", "AGENTS.md"),
+    fxMcp: join(directory, ".fx", "mcp.json"),
     opencodeConfig: join(directory, ".config", "opencode", "opencode.json"),
     piMcp: join(directory, ".config", "mcp", "mcp.json"),
   };
@@ -312,6 +322,8 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
     codexConfig: "/config/codex/config.toml",
     codexHooks: "/config/codex/hooks.json",
     cursorMcp: "/users/test/.cursor/mcp.json",
+    fxInstructions: "/users/test/.fx/AGENTS.md",
+    fxMcp: "/users/test/.fx/mcp.json",
     opencodeConfig: "/users/test/.config/opencode/opencode.json",
     piMcp: "/users/test/.config/mcp/mcp.json",
   });
@@ -329,6 +341,8 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
     codexConfig: "C:\\Users\\test\\.codex\\config.toml",
     codexHooks: "C:\\Users\\test\\.codex\\hooks.json",
     cursorMcp: "C:\\Users\\test\\.cursor\\mcp.json",
+    fxInstructions: "C:\\Users\\test\\.fx\\AGENTS.md",
+    fxMcp: "C:\\Users\\test\\.fx\\mcp.json",
     opencodeConfig: "C:\\Users\\test\\.config\\opencode\\opencode.json",
     piMcp: "C:\\Users\\test\\.config\\mcp\\mcp.json",
   });
@@ -347,6 +361,8 @@ test("quotes hook paths safely and resolves environment-specific config roots", 
     codexConfig: "/home/test/.codex/config.toml",
     codexHooks: "/home/test/.codex/hooks.json",
     cursorMcp: "/home/test/.cursor/mcp.json",
+    fxInstructions: "/home/test/.fx/AGENTS.md",
+    fxMcp: "/home/test/.fx/mcp.json",
     opencodeConfig: "/home/test/.config/opencode/opencode.json",
     piMcp: "/home/test/.config/mcp/mcp.json",
   });
@@ -360,13 +376,20 @@ test("writes configuration everywhere and preserves POSIX mode contracts", (): v
     codexConfig: join(directory, ".codex", "config.toml"),
     codexHooks: join(directory, ".codex", "hooks.json"),
     cursorMcp: join(directory, ".cursor", "mcp.json"),
+    fxInstructions: join(directory, ".fx", "AGENTS.md"),
+    fxMcp: join(directory, ".fx", "mcp.json"),
     opencodeConfig: join(directory, ".config", "opencode", "opencode.json"),
     piMcp: join(directory, ".config", "mcp", "mcp.json"),
   };
   try {
     writeFileSync(paths.claudeMcp, "{}\n", { encoding: "utf8", mode: 0o640 });
+    mkdirSync(join(directory, ".fx"), { recursive: true });
+    writeFileSync(paths.fxInstructions, "# Existing fx instructions\n", {
+      encoding: "utf8",
+      mode: 0o640,
+    });
     installUserConfiguration({
-      clients: ["claude", "codex", "opencode", "cursor", "pi"],
+      clients: ["claude", "codex", "fx", "opencode", "cursor", "pi"],
       hookExecutable: "/usr/local/bin/murmur-hook",
       paths,
     });
@@ -375,9 +398,13 @@ test("writes configuration everywhere and preserves POSIX mode contracts", (): v
       expect(status.isFile()).toBe(true);
       // Windows protection is ACL-based; the user-profile inheritance contract is documented.
       if (process.platform !== "win32") {
-        expect(status.mode & 0o777).toBe(path === paths.claudeMcp ? 0o640 : 0o600);
+        const existingMode: boolean = path === paths.claudeMcp || path === paths.fxInstructions;
+        expect(status.mode & 0o777).toBe(existingMode ? 0o640 : 0o600);
       }
     }
+    const fxInstructions: string = readFileSync(paths.fxInstructions, "utf8");
+    expect(fxInstructions.startsWith("# Existing fx instructions\n")).toBe(true);
+    expect(fxInstructions).toContain("Murmur coordination for fx");
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }
@@ -391,6 +418,8 @@ test("validates every selected client before writing configuration", (): void =>
     codexConfig: join(directory, ".codex", "config.toml"),
     codexHooks: join(directory, ".codex", "hooks.json"),
     cursorMcp: join(directory, ".cursor", "mcp.json"),
+    fxInstructions: join(directory, ".fx", "AGENTS.md"),
+    fxMcp: join(directory, ".fx", "mcp.json"),
     opencodeConfig: join(directory, ".config", "opencode", "opencode.json"),
     piMcp: join(directory, ".config", "mcp", "mcp.json"),
   };
