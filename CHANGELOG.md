@@ -2,6 +2,13 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.19.1.0] - 2026-09-14
+
+### Fixed
+
+- Keep passive hook inbox checks non-consuming, so agents can retrieve and acknowledge each unread
+  message only when they explicitly call `get_messages`.
+
 ## [0.19.0.0] - 2026-09-08
 
 ### Added
@@ -470,31 +477,6 @@ All notable changes to Murmur are documented in this file.
 
 - Ensure deterministic PostgreSQL race tests release pending requests and database resources when lock acquisition fails.
 
-## [0.7.0.0] - 2026-08-10
-
-### Added
-
-- Grant a named agent human-delegated orchestrator authority with a dedicated, agent-bound credential that ordinary agents cannot self-claim.
-- Route agent questions through organization, repository, personal, or personal-repository policies while keeping the human's delegation instructions private from callers.
-- Let orchestrators inspect the exact delegation behind a routed question and reply through the durable inbox with verified authority provenance.
-- Show verified orchestrator senders in inbox notifications and expose authority on agent discovery, messages, broadcasts, and history.
-
-### Changed
-
-- Give tenant administrators bounded, cursor-paginated controls to create and revoke orchestrator credentials and to set, list, replace, or clear routing policies.
-- Keep local SQLite mode peer-only while accepting retained authority provenance across hook and server deployment skew.
-
-### Fixed
-
-- Serialize routing with policy replacement, clearing, token revocation, and credential expiry so an admitted question cannot be stranded with stale authority.
-- Rotate expired orchestrator credentials without exhausting token capacity, preserve policy-referenced audit rows, and make identical policy retries timestamp-stable.
-- Preserve lifecycle generations on routed messages and keep reserved inactive orchestrator identities discoverable through explicit lifecycle filters.
-
-### Security
-
-- Derive orchestrator authority only from validated credentials, enforce tenant-qualified provenance with forced RLS and composite foreign keys, and reject peer attempts to spoof or take over delegated identities.
-- Revalidate the selected policy, credential binding, revocation, role, and expiry at message insertion while keeping operator credentials outside tenant messaging.
-
 ## Earlier releases
 
-See the [0.1.0.0–0.6.0.0 release history](docs/changelog-early-releases.md).
+See the [0.1.0.0–0.7.0.0 release history](docs/changelog-early-releases.md).
