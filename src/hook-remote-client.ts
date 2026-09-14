@@ -6,7 +6,6 @@ import { type ListNoticesOutput, ListNoticesOutputSchema } from "./domain/notice
 import { type GetInboxSummaryOutput, GetInboxSummaryOutputSchema } from "./e2ee/wire-tools.js";
 import { parseHookRegistration, summarizeHookInbox } from "./hook-message-compatibility.js";
 import { type HookOrchestrationState, hookOrchestrationState } from "./hook-orchestration.js";
-import type { AgentIdentity, InboxSummary, JsonRpcExchange } from "./hook-types.js";
 import {
   isRecord,
   postJsonRpc,
@@ -14,6 +13,7 @@ import {
   requestHeaders,
   rpcResult,
 } from "./hook-protocol.js";
+import type { AgentIdentity, InboxSummary, JsonRpcExchange } from "./hook-types.js";
 
 const HOOK_VERSION: string = packageMetadata.version;
 
@@ -114,12 +114,12 @@ export async function checkRemoteInbox(
                 arguments: { agent_id: identity.agentId, session_key: sessionKey },
               }
             : {
-                name: "get_messages",
+                name: "get_message_history",
                 arguments: {
                   after_sequence: afterSequence,
                   agent_id: identity.agentId,
+                  generation: registered.agent.generation,
                   limit: 100,
-                  session_key: sessionKey,
                   unread_only: true,
                 },
               },
