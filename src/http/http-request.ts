@@ -1,7 +1,7 @@
 import { AgentClient, BranchName, RepositoryName } from "../domain/value-objects.js";
 import { logSafeError } from "../safe-errors.js";
 import { parseBoundedJsonText } from "./bounded-json.js";
-import { SYSTEM_TIME_SOURCE, type TimeSource } from "./http-capacity.js";
+import { type StreamCapacityScope, SYSTEM_TIME_SOURCE, type TimeSource } from "./http-capacity.js";
 
 const BRANCH_HEADER: string = "x-murmur-branch";
 const CLIENT_HEADER: string = "x-murmur-client";
@@ -45,10 +45,13 @@ export function authenticationCapacityResponse(): Response {
   );
 }
 
-export function streamCapacityResponse(): Response {
+export function streamCapacityResponse(scope: StreamCapacityScope): Response {
   return Response.json(
     { error: "MCP stream capacity reached" },
-    { headers: { "cache-control": "no-store", "retry-after": "1" }, status: 503 },
+    {
+      headers: { "cache-control": "no-store", "retry-after": "1" },
+      status: scope === "global" ? 503 : 429,
+    },
   );
 }
 

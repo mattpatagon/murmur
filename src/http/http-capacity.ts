@@ -2,6 +2,11 @@ import type { HttpServerConfig } from "./http-config.js";
 
 const MAX_RATE_WINDOWS: number = 65_536;
 
+export type StreamCapacityScope = "global" | "principal" | "tenant";
+export type StreamCapacityReservation =
+  | { readonly kind: "reserved"; readonly release: () => void }
+  | { readonly kind: "rejected"; readonly scope: StreamCapacityScope };
+
 export type TimeSource = {
   now(): number;
   schedule(milliseconds: number, wake: () => void): () => void;
@@ -121,22 +126,28 @@ export class HttpCapacityController {
     return this.reserveRequest(identity, null);
   }
 
-  public reserveStream(principalIdentity: string, tenantId: string | null): (() => void) | null {
+  public reserveStream(
+    principalIdentity: string,
+    tenantId: string | null,
+  ): StreamCapacityReservation {
     const principalStreams: number = this.activeStreamsByPrincipal.get(principalIdentity) ?? 0;
     const tenantStreams: number =
       tenantId === null ? 0 : (this.activeStreamsByTenant.get(tenantId) ?? 0);
-    if (
-      this.activeStreams >= this.config.maxActiveStreams ||
-      principalStreams >= this.config.maxActiveStreamsPerPrincipal ||
-      (tenantId !== null && tenantStreams >= this.config.maxActiveStreamsPerTenant)
-    ) {
-      return null;
+    // A caller already over its own quota remains throttled even when the process is full.
+    if (principalStreams >= this.config.maxActiveStreamsPerPrincipal) {
+      return { kind: "rejected", scope: "principal" };
+    }
+    if (tenantId !== null && tenantStreams >= this.config.maxActiveStreamsPerTenant) {
+      return { kind: "rejected", scope: "tenant" };
+    }
+    if (this.activeStreams >= this.config.maxActiveStreams) {
+      return { kind: "rejected", scope: "global" };
     }
     this.activeStreams += 1;
     this.activeStreamsByPrincipal.set(principalIdentity, principalStreams + 1);
     if (tenantId !== null) this.activeStreamsByTenant.set(tenantId, tenantStreams + 1);
     let released: boolean = false;
-    return (): void => {
+    const release: () => void = (): void => {
       if (released) return;
       released = true;
       this.activeStreams -= 1;
@@ -150,6 +161,7 @@ export class HttpCapacityController {
         else this.activeStreamsByTenant.set(tenantId, remainingForTenant);
       }
     };
+    return { kind: "reserved", release };
   }
 
   private notifyAuthenticationCapacityChanged(): void {

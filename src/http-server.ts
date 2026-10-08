@@ -25,6 +25,7 @@ import {
 } from "./http/hosted-credential-authentication.js";
 import {
   HttpCapacityController,
+  type StreamCapacityReservation,
   SYSTEM_TIME_SOURCE,
   type TimeSource,
 } from "./http/http-capacity.js";
@@ -224,14 +225,18 @@ export async function startHttpServer(
       const principalIdentity: string = authenticator.identity(principal);
       const tenantId: string | null = principal.kind === "tenant" ? principal.tenantId.value : null;
       const isStandaloneStream: boolean = request.method === "GET";
-      const releaseResponseCapacity: (() => void) | null = isStandaloneStream
+      const streamReservation: StreamCapacityReservation | null = isStandaloneStream
         ? capacity.reserveStream(principalIdentity, tenantId)
-        : capacity.reserveRequest(principalIdentity, tenantId);
+        : null;
+      if (streamReservation !== null && streamReservation.kind === "rejected") {
+        observation.recordStreamCapacity("rejected");
+        return streamCapacityResponse(streamReservation.scope);
+      }
+      const releaseResponseCapacity: (() => void) | null =
+        streamReservation === null
+          ? capacity.reserveRequest(principalIdentity, tenantId)
+          : streamReservation.release;
       if (releaseResponseCapacity === null) {
-        if (isStandaloneStream) {
-          observation.recordStreamCapacity("rejected");
-          return streamCapacityResponse();
-        }
         observation.recordRequestCapacity("rejected");
         return jsonResponse(503, { error: "MCP request capacity reached" });
       }
