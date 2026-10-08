@@ -25,6 +25,17 @@ A `response_finish` field distinguishes completed, cancelled, failed, and bodyle
 A validated client `x-request-id` is retained separately as `client_request_id`; it never replaces
 the server ID.
 Server errors use severity `ERROR`; successful and client-rejected requests use `INFO`.
+Standalone stream admission distinguishes caller quotas from process exhaustion. Exceeding
+`MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL` or `MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT` returns HTTP
+429, logs `stream_capacity: rejected` with `outcome: client_error`, and does not count as an HTTP
+5xx server failure. These quotas take precedence when the global pool is also full. A caller
+within its quotas receives HTTP 503 when `MURMUR_MAX_ACTIVE_STREAMS` is exhausted; that rejection
+remains an `ERROR` with `outcome: server_error`. Both responses retain the fixed
+`MCP stream capacity reached` message, `Cache-Control: no-store`, and `Retry-After: 1`.
+Limits and stream rotation are unchanged. Clients should close unused sessions to release
+their standalone streams; retrying a full quota does not increase its allowance. Diagnose
+repeated quota rejections alongside active client sessions rather than raising the server-error
+alert threshold. Requests and inbox reads remain available within their independent limits.
 
 Completion occurs when the response body closes, errors, or is cancelled, so duration and capacity
 release describe the actual streaming lifecycle. `/health` is logged but not traced.

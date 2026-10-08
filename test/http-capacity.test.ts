@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { HttpCapacityController, type TimeSource } from "../src/http/http-capacity.js";
+import {
+  HttpCapacityController,
+  type StreamCapacityReservation,
+  type TimeSource,
+} from "../src/http/http-capacity.js";
 import { parseHttpServerConfig } from "../src/http/http-config.js";
 
 type Sleeper = {
@@ -54,6 +58,11 @@ function capacity(time: TimeSource, environment: NodeJS.ProcessEnv = {}): HttpCa
 function requiredRelease(reservation: (() => void) | null): () => void {
   if (reservation === null) throw new Error("Expected capacity reservation");
   return reservation;
+}
+
+function requiredStreamRelease(reservation: StreamCapacityReservation): () => void {
+  if (reservation.kind === "rejected") throw new Error("Expected stream capacity reservation");
+  return reservation.release;
 }
 
 describe("HTTP capacity controller", (): void => {
@@ -124,17 +133,42 @@ describe("HTTP capacity controller", (): void => {
       MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL: "1",
       MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT: "2",
     });
-    const releaseA: () => void = requiredRelease(controller.reserveStream("principal-a", "a"));
+    const releaseA: () => void = requiredStreamRelease(
+      controller.reserveStream("principal-a", "a"),
+    );
 
-    expect(controller.reserveStream("principal-a", "b")).toBeNull();
-    const releaseB: () => void = requiredRelease(controller.reserveStream("principal-b", "a"));
-    expect(controller.reserveStream("principal-c", "a")).toBeNull();
-    const releaseC: () => void = requiredRelease(controller.reserveStream("principal-c", null));
-    expect(controller.reserveStream("principal-d", "b")).toBeNull();
+    expect(controller.reserveStream("principal-a", "b")).toEqual({
+      kind: "rejected",
+      scope: "principal",
+    });
+    const releaseB: () => void = requiredStreamRelease(
+      controller.reserveStream("principal-b", "a"),
+    );
+    expect(controller.reserveStream("principal-c", "a")).toEqual({
+      kind: "rejected",
+      scope: "tenant",
+    });
+    const releaseC: () => void = requiredStreamRelease(
+      controller.reserveStream("principal-c", null),
+    );
+    expect(controller.reserveStream("principal-d", "b")).toEqual({
+      kind: "rejected",
+      scope: "global",
+    });
+    expect(controller.reserveStream("principal-a", "a")).toEqual({
+      kind: "rejected",
+      scope: "principal",
+    });
+    expect(controller.reserveStream("principal-d", "a")).toEqual({
+      kind: "rejected",
+      scope: "tenant",
+    });
 
     releaseA();
     releaseA();
-    const releaseD: () => void = requiredRelease(controller.reserveStream("principal-d", "b"));
+    const releaseD: () => void = requiredStreamRelease(
+      controller.reserveStream("principal-d", "b"),
+    );
     releaseB();
     releaseC();
     releaseD();

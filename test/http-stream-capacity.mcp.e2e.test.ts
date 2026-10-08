@@ -12,6 +12,7 @@ import { createHttpObservability } from "../src/observability/request-observatio
 import { type LogOutput, StructuredLogger } from "../src/observability/structured-logger.js";
 import { createTelemetry } from "../src/observability/telemetry.js";
 import {
+  AdmissionTestAuthenticator,
   initializeSession,
   postJson,
   requestHeaders,
@@ -145,7 +146,7 @@ async function openStreamAfterRelease(
     });
     if (response.status === 200) return response;
     const body: string = await response.text();
-    if (response.status !== 503) {
+    if (response.status !== 429 && response.status !== 503) {
       throw new Error(`Unexpected stream recovery status ${response.status}: ${body}`);
     }
   }
@@ -160,8 +161,8 @@ test("remote MCP keeps request capacity available while bounding long-lived stre
     MURMUR_MAX_ACTIVE_REQUESTS_PER_PRINCIPAL: "1",
     MURMUR_MAX_ACTIVE_REQUESTS_PER_TENANT: "1",
     MURMUR_MAX_ACTIVE_STREAMS: "1",
-    MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL: "1",
-    MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT: "1",
+    MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL: "2",
+    MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT: "2",
   });
   const streamAbortController: AbortController = new AbortController();
   const recoveredStreamAbortController: AbortController = new AbortController();
@@ -214,6 +215,78 @@ test("remote MCP keeps request capacity available while bounding long-lived stre
     rmSync(directory, { force: true, recursive: true });
   }
 });
+
+test.each(["principal", "tenant"])(
+  "remote MCP reports %s stream quota exhaustion without a server error",
+  async (scope: string): Promise<void> => {
+    const directory: string = mkdtempSync(join(tmpdir(), "murmur-http-stream-quota-"));
+    const environment: NodeJS.ProcessEnv = {
+      ...testEnvironment(join(directory, "messages.db")),
+      MURMUR_MAX_ACTIVE_STREAMS: "2",
+      MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL: scope === "principal" ? "1" : "2",
+      MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT: scope === "tenant" ? "1" : "2",
+    };
+    const token: string | undefined = environment["MURMUR_API_TOKEN"];
+    if (token === undefined) throw new Error("The stream quota test token is missing");
+    const output: CapturingLogOutput = new CapturingLogOutput();
+    let server: MurmurHttpServer | null = null;
+    const abort: AbortController = new AbortController();
+    const recoveryAbort: AbortController = new AbortController();
+    try {
+      server = await startHttpServer(environment, {
+        authenticator: new AdmissionTestAuthenticator(token),
+        observability: createHttpObservability(
+          new StructuredLogger({ ...environment, MURMUR_LOG_LEVEL: "info" }, output),
+          createTelemetry(environment),
+        ),
+      });
+      const firstSession: string = await initializeSession(server.mcpUrl);
+      const secondSession: string = await initializeSession(server.mcpUrl);
+      const stream: Response = await fetch(server.mcpUrl, {
+        headers: requestHeaders(firstSession),
+        signal: abort.signal,
+      });
+      expect(stream.status).toBe(200);
+      const rejected: Response = await fetch(server.mcpUrl, {
+        headers: requestHeaders(secondSession),
+      });
+      expect(rejected.status).toBe(429);
+      expect(rejected.headers.get("retry-after")).toBe("1");
+      expect(rejected.headers.get("cache-control")).toBe("no-store");
+      expect(await rejected.json()).toEqual({ error: "MCP stream capacity reached" });
+      const tools: Response = await postJson(
+        server.mcpUrl,
+        { id: 2, jsonrpc: "2.0", method: "tools/list", params: {} },
+        secondSession,
+      );
+      expect(tools.status).toBe(200);
+      expect(output.errors).toEqual([]);
+      expect(
+        output.infos.some(
+          (line: string): boolean =>
+            line.includes('"http_status_code":429') &&
+            line.includes('"stream_capacity":"rejected"') &&
+            line.includes('"outcome":"client_error"'),
+        ),
+      ).toBe(true);
+      abort.abort();
+      const recovered: Response = await openStreamAfterRelease(
+        server.mcpUrl,
+        secondSession,
+        recoveryAbort.signal,
+      );
+      expect(recovered.status).toBe(200);
+    } finally {
+      abort.abort();
+      recoveryAbort.abort();
+      try {
+        if (server !== null) await server.stop();
+      } finally {
+        rmSync(directory, { force: true, recursive: true });
+      }
+    }
+  },
+);
 
 test("stream rotation is stable and staggered within the pre-timeout window", (): void => {
   const maximumLifetimeMs: number = 1_000;

@@ -2,6 +2,14 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.19.2.0] - 2026-10-08
+
+### Fixed
+
+- Report exhausted caller stream quotas as HTTP 429, so expected throttling no longer triggers
+  server-error alerts. Global stream exhaustion still returns HTTP 503, with existing capacity
+  limits, stream rotation, and retry headers preserved.
+
 ## [0.19.1.0] - 2026-09-14
 
 ### Fixed
