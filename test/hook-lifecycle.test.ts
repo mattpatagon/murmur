@@ -194,12 +194,18 @@ test("SessionEnd clears its hook cache without a saved generation", async (): Pr
 
 test("more than one thousand sequential automatic identities release open capacity", (): void => {
   const store: SqliteMessageStore = new SqliteMessageStore(":memory:");
+  // This storage-capacity contract must not depend on thousands of Git subprocess launches.
+  const environment: NodeJS.ProcessEnv = {
+    MURMUR_BRANCH: "test/lifecycle",
+    MURMUR_MACHINE_ID: "vm",
+    MURMUR_REPOSITORY: "mattpatagon/murmur",
+  };
   try {
     for (let index: number = 0; index < 1_001; index += 1) {
       const identity: AgentIdentity = deriveAgentIdentity(
         "codex",
         "/work/repo",
-        { MURMUR_MACHINE_ID: "vm" },
+        environment,
         `session-${index}`,
       );
       const registered: ReturnType<SqliteMessageStore["registerAgent"]> = store.registerAgent({
