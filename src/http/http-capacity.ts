@@ -1,4 +1,10 @@
 import type { HttpServerConfig } from "./http-config.js";
+import {
+  admittedGlobalLimit,
+  admittedScopeLimit,
+  isOwnerAuthentication,
+  isOwnerTenant,
+} from "./owner-capacity-policy.js";
 
 const MAX_RATE_WINDOWS: number = 65_536;
 
@@ -65,13 +71,20 @@ export class HttpCapacityController {
   public rateLimitAllows(
     identity: string,
     limit: number = this.config.rateLimitPerMinute,
+    tenantId: string | null = null,
   ): boolean {
     this.pruneRateWindows();
     const now: number = this.time.now();
     const existing: { count: number; startedAt: number } | undefined =
       this.rateWindows.get(identity);
     if (existing === undefined || now - existing.startedAt >= 60_000) {
-      if (existing === undefined && this.rateWindows.size >= MAX_RATE_WINDOWS) return false;
+      const owner: boolean = isOwnerTenant(this.config.ownerPriority, tenantId);
+      if (
+        existing === undefined &&
+        this.rateWindows.size >=
+          admittedGlobalLimit(MAX_RATE_WINDOWS, this.config.ownerPriority, owner)
+      )
+        return false;
       // Reinsert renewed windows so expiry cleanup can stop at the first live entry.
       this.rateWindows.delete(identity);
       this.rateWindows.set(identity, { count: 1, startedAt: now });
@@ -91,13 +104,26 @@ export class HttpCapacityController {
   }
 
   public reserveRequest(principalIdentity: string, tenantId: string | null): (() => void) | null {
+    const owner: boolean = isOwnerTenant(this.config.ownerPriority, tenantId);
     const principalRequests: number = this.activeRequestsByPrincipal.get(principalIdentity) ?? 0;
     const tenantRequests: number =
       tenantId === null ? 0 : (this.activeRequestsByTenant.get(tenantId) ?? 0);
     if (
-      this.activeRequests >= this.config.maxActiveRequests ||
-      principalRequests >= this.config.maxActiveRequestsPerPrincipal ||
-      (tenantId !== null && tenantRequests >= this.config.maxActiveRequestsPerTenant)
+      this.activeRequests >=
+        admittedGlobalLimit(this.config.maxActiveRequests, this.config.ownerPriority, owner) ||
+      principalRequests >=
+        admittedScopeLimit(
+          this.config.maxActiveRequests,
+          this.config.maxActiveRequestsPerPrincipal,
+          owner,
+        ) ||
+      (tenantId !== null &&
+        tenantRequests >=
+          admittedScopeLimit(
+            this.config.maxActiveRequests,
+            this.config.maxActiveRequestsPerTenant,
+            owner,
+          ))
     ) {
       return null;
     }
@@ -130,17 +156,36 @@ export class HttpCapacityController {
     principalIdentity: string,
     tenantId: string | null,
   ): StreamCapacityReservation {
+    const owner: boolean = isOwnerTenant(this.config.ownerPriority, tenantId);
     const principalStreams: number = this.activeStreamsByPrincipal.get(principalIdentity) ?? 0;
     const tenantStreams: number =
       tenantId === null ? 0 : (this.activeStreamsByTenant.get(tenantId) ?? 0);
     // A caller already over its own quota remains throttled even when the process is full.
-    if (principalStreams >= this.config.maxActiveStreamsPerPrincipal) {
+    if (
+      principalStreams >=
+      admittedScopeLimit(
+        this.config.maxActiveStreams,
+        this.config.maxActiveStreamsPerPrincipal,
+        owner,
+      )
+    ) {
       return { kind: "rejected", scope: "principal" };
     }
-    if (tenantId !== null && tenantStreams >= this.config.maxActiveStreamsPerTenant) {
+    if (
+      tenantId !== null &&
+      tenantStreams >=
+        admittedScopeLimit(
+          this.config.maxActiveStreams,
+          this.config.maxActiveStreamsPerTenant,
+          owner,
+        )
+    ) {
       return { kind: "rejected", scope: "tenant" };
     }
-    if (this.activeStreams >= this.config.maxActiveStreams) {
+    if (
+      this.activeStreams >=
+      admittedGlobalLimit(this.config.maxActiveStreams, this.config.ownerPriority, owner)
+    ) {
       return { kind: "rejected", scope: "global" };
     }
     this.activeStreams += 1;
@@ -177,6 +222,11 @@ export class HttpCapacityController {
     admittedTenantKey: string | null,
     knownCredential: boolean,
   ): (() => void) | null {
+    const owner: boolean = isOwnerAuthentication(
+      this.config.ownerPriority,
+      admittedTenantKey,
+      knownCredential,
+    );
     const activeForCredential: number =
       this.activeAuthenticationsByCredential.get(admissionKey) ?? 0;
     const activeForTenant: number =
@@ -185,9 +235,10 @@ export class HttpCapacityController {
         : (this.activeAuthenticationsByTenant.get(admittedTenantKey) ?? 0);
     const unknownLimit: number = Math.max(1, this.config.maxAuthentications - 1);
     if (
-      this.activeAuthentications >= this.config.maxAuthentications ||
+      this.activeAuthentications >=
+        admittedGlobalLimit(this.config.maxAuthentications, this.config.ownerPriority, owner) ||
       activeForCredential >= 1 ||
-      activeForTenant >= 2 ||
+      activeForTenant >= admittedScopeLimit(this.config.maxAuthentications, 2, owner) ||
       (!knownCredential && this.activeAuthentications >= unknownLimit)
     ) {
       return null;
@@ -244,10 +295,25 @@ export class HttpCapacityController {
       admittedTenantKey === null
         ? 0
         : (this.pendingAuthenticationsByTenant.get(admittedTenantKey) ?? 0);
+    const owner: boolean = isOwnerAuthentication(
+      this.config.ownerPriority,
+      admittedTenantKey,
+      knownCredential,
+    );
     if (
-      this.pendingAuthentications >= this.config.maxPendingAuthentications ||
+      this.pendingAuthentications >=
+        admittedGlobalLimit(
+          this.config.maxPendingAuthentications,
+          this.config.ownerPriority,
+          owner,
+        ) ||
       (admittedTenantKey !== null &&
-        pendingForTenant >= this.config.maxPendingAuthenticationsPerTenant)
+        pendingForTenant >=
+          admittedScopeLimit(
+            this.config.maxPendingAuthentications,
+            this.config.maxPendingAuthenticationsPerTenant,
+            owner,
+          ))
     ) {
       return null;
     }

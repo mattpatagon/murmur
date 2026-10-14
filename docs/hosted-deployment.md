@@ -168,7 +168,7 @@ concurrency group. It performs these phases in order:
    verification, test custom-CA TLS, and verify hosted isolation against a
    disposable PostgreSQL 17 service.
 2. Authenticate with workload identity, validate secret permissions and the source
-   compatibility of retained revisions, install the CA, apply pending migrations,
+   compatibility of retained revisions, install the CA, apply migrations, enable [owner capacity](owner-capacity.md),
    and run the shared PostgreSQL suite. Deployment does not invoke global expiry
    pruning; existing retained data and overfull storage ledgers are preserved.
 3. Build an image tagged with the Git commit SHA and push it to Artifact

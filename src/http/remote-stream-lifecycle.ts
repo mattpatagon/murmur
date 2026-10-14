@@ -1,7 +1,7 @@
 import type { RequestObservation } from "../observability/request-observation.js";
 import type { TimeSource } from "./http-capacity.js";
-import type { RemoteSession } from "./remote-session.js";
-import { responseWithDeadline, trackedResponse } from "./response-lifecycle.js";
+import type { RemoteSession, StandaloneStream } from "./remote-session.js";
+import { responseWithDeadline, responseWithFinish, trackedResponse } from "./response-lifecycle.js";
 
 const ROTATION_JITTER_DIVISOR: number = 10;
 
@@ -32,14 +32,20 @@ export function trackSessionResponse(
 ): Response {
   const tracked: Response = trackedResponse(response, session);
   if (!isStandaloneEventStream(response, standalone)) return tracked;
-  return responseWithDeadline(
+  const stream: StandaloneStream = { openedAt: time.now() };
+  session.standaloneStream = stream;
+  const rotating: Response = responseWithDeadline(
     tracked,
     streamRotationDelay(sessionId, maximumLifetimeMs),
     time,
     (): void => {
+      if (session.standaloneStream !== stream) return;
       observation.recordStreamRotation();
       session.lastSeenAt = time.now();
       session.transport.closeStandaloneSSEStream();
     },
   );
+  return responseWithFinish(rotating, (): void => {
+    if (session.standaloneStream === stream) session.standaloneStream = undefined;
+  });
 }

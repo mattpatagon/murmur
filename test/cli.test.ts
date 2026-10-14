@@ -35,10 +35,19 @@ test("prints setup help without changing user configuration", (): void => {
   expect(result.stderr).toBe("");
 });
 
-test("rejects invalid setup arguments and insecure remote URLs", (): void => {
+test("rejects setup without explicit user scope", (): void => {
   expect(runCli(["setup", "--codex"]).stderr).toContain("Rerun with --user");
+});
+
+test("rejects missing setup URL values", (): void => {
   expect(runCli(["setup", "--user", "--url"]).stderr).toContain("--url requires a value");
+});
+
+test("rejects unknown setup options", (): void => {
   expect(runCli(["setup", "--user", "--unknown"]).stderr).toContain("Unknown setup option");
+});
+
+test("rejects vault paths without encryption", (): void => {
   expect(
     runCli([
       "setup",
@@ -49,6 +58,9 @@ test("rejects invalid setup arguments and insecure remote URLs", (): void => {
       hookPath,
     ]).stderr,
   ).toContain("--vault-path requires --e2ee and an absolute path");
+});
+
+test("rejects relative encrypted vault paths", (): void => {
   expect(
     runCli([
       "setup",
@@ -60,6 +72,9 @@ test("rejects invalid setup arguments and insecure remote URLs", (): void => {
       hookPath,
     ]).stderr,
   ).toContain("--vault-path requires --e2ee and an absolute path");
+});
+
+test("rejects insecure remote setup URLs", (): void => {
   expect(
     runCli(["setup", "--user", "--url", "http://remote.example/mcp", "--hook-executable", hookPath])
       .stderr,

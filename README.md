@@ -405,7 +405,9 @@ global, tenant, and credential counters. Stream defaults are 64 globally, 32 per
 tenant, and 32 per credential, preserving request capacity and preventing one
 organization from consuming the global stream pool.
 
-Lifecycle storage is capped at 1,000 open and 10,000 retained identities per tenant, eight live
+Lifecycle storage ordinarily permits 1,000 open and 10,000 retained identities per tenant; the
+hosted founding tenant has [owner quotas](docs/owner-capacity.md) of 10,000 open and 100,000 retained.
+Each stable identity permits eight live
 sessions and 64 retained session records per stable identity. Ended sessions expire after 30 days;
 inactive identities close after 30 days of dormancy, and closed identities become eligible for
 deletion 30 days later when no durable message, broadcast, notice, or feedback reference requires

@@ -3,9 +3,11 @@ import { z } from "zod";
 
 import { PersonalId } from "../domain/orchestration.js";
 import { AgentId, MachineName, RepositoryName, TenantId } from "../domain/value-objects.js";
+import { logSafeError } from "../safe-errors.js";
 import type { CredentialAdmission, HostedPrincipal } from "./control-plane-contracts.js";
 import { type AuthRowV3, AuthRowV3Schema } from "./control-plane-rows.js";
 import { CredentialAdmissionCache } from "./credential-admission-cache.js";
+import { OwnerCredentialAdmissions } from "./owner-credential-admissions.js";
 import {
   credentialAdmissionKey,
   type DatabaseCredentialHint,
@@ -19,14 +21,17 @@ export class HostedAuthenticator {
   private readonly admissions: CredentialAdmissionCache;
   private closed: boolean;
   private readonly database: Sql;
+  private readonly ownerAdmissions: OwnerCredentialAdmissions | null;
 
   public constructor(
     database: Sql,
     admissions: CredentialAdmissionCache = new CredentialAdmissionCache(),
+    ownerAdmissions: OwnerCredentialAdmissions | null = null,
   ) {
     this.admissions = admissions;
     this.closed = false;
     this.database = database;
+    this.ownerAdmissions = ownerAdmissions;
   }
 
   private ensureOpen(): void {
@@ -36,19 +41,28 @@ export class HostedAuthenticator {
   public refresh(): Promise<void> {
     this.ensureOpen();
     // Token management cannot flush unrelated tenants' admission priority.
-    return Promise.resolve();
+    if (this.ownerAdmissions === null) return Promise.resolve();
+    // Token mutations have already committed. Hint maintenance must not hide a minted secret
+    // or turn successful revocation into an apparent failure; polling retries independently.
+    return this.ownerAdmissions.refresh().catch((error: unknown): void => {
+      logSafeError("Murmur owner credential mutation admission refresh failed", error);
+    });
   }
 
   public start(): Promise<void> {
     this.ensureOpen();
-    return Promise.resolve();
+    return this.ownerAdmissions === null ? Promise.resolve() : this.ownerAdmissions.start();
   }
 
   public credentialAdmission(token: string): CredentialAdmission | null {
     if (this.closed) return null;
     const hint: DatabaseCredentialHint | null = databaseCredentialHint(token);
     if (hint === null) return null;
-    return this.admissions.get(credentialAdmissionKey(token));
+    const key: string = credentialAdmissionKey(token);
+    return (
+      this.admissions.get(key) ??
+      (this.ownerAdmissions === null ? null : this.ownerAdmissions.get(key))
+    );
   }
 
   public async authenticate(token: string): Promise<HostedPrincipal | null> {
@@ -60,10 +74,14 @@ export class HostedAuthenticator {
       principal = await this.authenticatePrincipal(credentialHash);
     } catch (error: unknown) {
       this.admissions.forget(key);
+      // A backend failure does not revoke a trusted owner admission hint. Authorization
+      // is still revalidated on the next request; an explicit rejection removes the hint.
       throw error;
     }
-    if (principal === null) this.admissions.forget(key);
-    else if (!this.closed) {
+    if (principal === null) {
+      this.admissions.forget(key);
+      if (this.ownerAdmissions !== null) this.ownerAdmissions.forget(key);
+    } else if (!this.closed) {
       this.admissions.remember({
         key,
         tenantKey:
@@ -130,10 +148,18 @@ export class HostedAuthenticator {
     };
   }
 
-  public close(): Promise<void> {
+  public async close(): Promise<void> {
     if (this.closed) return Promise.resolve();
     this.closed = true;
     this.admissions.clear();
-    return Promise.resolve();
+    if (this.ownerAdmissions !== null) await this.ownerAdmissions.close();
   }
+}
+
+export function createOwnerAwareAuthenticator(database: Sql): HostedAuthenticator {
+  return new HostedAuthenticator(
+    database,
+    new CredentialAdmissionCache(),
+    new OwnerCredentialAdmissions(database),
+  );
 }

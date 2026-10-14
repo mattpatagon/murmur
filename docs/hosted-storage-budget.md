@@ -11,6 +11,8 @@ remain available. This is an admission policy, not a promise that every offered 
 | Feedback | 50,000 rows and 128 MiB accounted bytes | Also consumes retained-data allowance |
 | Administrative audit | 100,000 rows and 64 MiB accounted bytes | Independent hard cap; final quarter reserved for restrictions |
 
+The founding tenant can receive a protected slice through [owner capacity](owner-capacity.md).
+Ownership is measured from retained rows; runtime roles cannot change the reserve or its counters.
 Per-tenant quotas still apply. The global budget can reject a tenant before its individual quota is
 full. The defaults provide about 168 KiB of accounted retained data per account across 25,000
 accounts if usage were evenly distributed. They do not reserve an equal share per account, prevent

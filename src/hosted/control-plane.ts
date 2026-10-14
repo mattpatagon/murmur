@@ -54,7 +54,7 @@ import type {
   E2eeTransitionAction,
   E2eeTransitionResult,
 } from "./e2ee-entitlement.js";
-import { HostedAuthenticator } from "./hosted-authenticator.js";
+import { createOwnerAwareAuthenticator, type HostedAuthenticator } from "./hosted-authenticator.js";
 import {
   changePostgresTenantStatus,
   createPostgresTenant,
@@ -87,7 +87,7 @@ export class PostgresHostedControlPlane implements HostedControlPlane {
   private closed: boolean;
 
   private constructor(database: Sql) {
-    this.authenticator = new HostedAuthenticator(database);
+    this.authenticator = createOwnerAwareAuthenticator(database);
     this.closed = false;
     this.database = database;
   }

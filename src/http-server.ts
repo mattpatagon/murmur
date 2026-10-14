@@ -65,6 +65,8 @@ import {
 import type { HostedApplicationRequest } from "./http/murmur-application-factory.js";
 import { createHostedMurmurApplication } from "./http/murmur-application-factory.js";
 import { type NodeHttpServer, startNodeHttpServer } from "./http/node-http-server.js";
+import { createOwnerAdmissions, type OwnerAdmissions } from "./http/owner-admission.js";
+import { isOwnerTenant } from "./http/owner-capacity-policy.js";
 import { configuredPublicDownloads } from "./http/public-distribution.js";
 import { createPublicSetupHandler } from "./http/public-setup.js";
 import type { RemoteSession } from "./http/remote-session.js";
@@ -72,7 +74,7 @@ import { trackSessionResponse } from "./http/remote-stream-lifecycle.js";
 import { HttpRequestIdAdmission } from "./http/request-id-admission.js";
 import { responseWithFinish } from "./http/response-lifecycle.js";
 import { createTenantRegistrationHandler } from "./http/self-service-registration.js";
-import { type SessionAdmission, SessionAdmissionController } from "./http/session-admission.js";
+import type { SessionAdmission } from "./http/session-admission.js";
 import {
   RemoteSessionInvalidator,
   type SessionAuthorizationEpoch,
@@ -97,8 +99,6 @@ export async function startHttpServer(
   const allowedOrigins: ReadonlySet<string> = config.allowedOrigins;
   const hostname: string = config.hostname;
   const maxRequestBytes: number = config.maxRequestBytes;
-  const requestedPort: number = config.requestedPort;
-  const sessionIdleMs: number = config.sessionIdleMs;
   const tenantRateLimitPerMinute: number = config.tenantRateLimitPerMinute;
   const timeSource: TimeSource = dependencies.timeSource ?? SYSTEM_TIME_SOURCE;
   const capacity: HttpCapacityController = new HttpCapacityController(config, timeSource);
@@ -129,11 +129,14 @@ export async function startHttpServer(
     }
   }
   const sessions: Map<string, RemoteSession> = new Map<string, RemoteSession>();
-  const sessionAdmission: SessionAdmissionController = new SessionAdmissionController(
-    sessions,
-    config,
-  );
   const invalidator: RemoteSessionInvalidator = new RemoteSessionInvalidator(sessions);
+  const ownerAdmissions: OwnerAdmissions = createOwnerAdmissions(
+    capacity,
+    config,
+    sessions,
+    timeSource,
+    invalidator,
+  );
   const registrationControlPlane: HostedControlPlane | null = authenticator.tenantOnboardingEnabled
     ? authenticator.controlPlane
     : null;
@@ -180,14 +183,6 @@ export async function startHttpServer(
     tenantRateLimitPerMinute,
   });
   let stopped: boolean = false;
-  const expireIdleSessions: (now: number) => Promise<void> = async (now: number): Promise<void> => {
-    const expired: [string, RemoteSession][] = Array.from(sessions.entries()).filter(
-      (entry: [string, RemoteSession]): boolean =>
-        entry[1].activeResponses === 0 && now - entry[1].lastSeenAt >= sessionIdleMs,
-    );
-    capacity.pruneRateWindows();
-    await invalidator.close(expired, "Murmur idle-session shutdown failed");
-  };
 
   const handleMcpRequest: (request: Request, observation: RequestObservation) => Promise<Response> =
     async (request: Request, observation: RequestObservation): Promise<Response> => {
@@ -226,7 +221,12 @@ export async function startHttpServer(
       const tenantId: string | null = principal.kind === "tenant" ? principal.tenantId.value : null;
       const isStandaloneStream: boolean = request.method === "GET";
       const streamReservation: StreamCapacityReservation | null = isStandaloneStream
-        ? capacity.reserveStream(principalIdentity, tenantId)
+        ? await ownerAdmissions.streams.reserve(
+            principalIdentity,
+            tenantId,
+            requestSessionId(request),
+            request.signal,
+          )
         : null;
       if (streamReservation !== null && streamReservation.kind === "rejected") {
         observation.recordStreamCapacity("rejected");
@@ -246,8 +246,11 @@ export async function startHttpServer(
       try {
         const response: Response = await (async (): Promise<Response> => {
           const now: number = capacity.now();
-          await expireIdleSessions(now);
-          if (!capacity.rateLimitAllows(principalIdentity)) {
+          await ownerAdmissions.expireIdleSessions(now);
+          const principalRateLimit: number = isOwnerTenant(config.ownerPriority, tenantId)
+            ? tenantRateLimitPerMinute
+            : config.rateLimitPerMinute;
+          if (!capacity.rateLimitAllows(principalIdentity, principalRateLimit, tenantId)) {
             observation.recordPrincipalRateLimit("rejected");
             return new Response(JSON.stringify({ error: "Rate limit exceeded" }), {
               headers: {
@@ -263,7 +266,7 @@ export async function startHttpServer(
             principal.kind === "tenant" ? `tenant-quota:${principal.tenantId.value}` : null;
           if (
             tenantRateIdentity !== null &&
-            !capacity.rateLimitAllows(tenantRateIdentity, tenantRateLimitPerMinute)
+            !capacity.rateLimitAllows(tenantRateIdentity, tenantRateLimitPerMinute, tenantId)
           ) {
             observation.recordTenantRateLimit("rejected");
             return new Response(JSON.stringify({ error: "Tenant rate limit exceeded" }), {
@@ -340,8 +343,14 @@ export async function startHttpServer(
               error: `Invalid Murmur context header: ${message}`,
             });
           }
-          const admission: SessionAdmission = sessionAdmission.reserve(tenantId);
+          const initializationEpoch: SessionAuthorizationEpoch = invalidator.capture(
+            tenantId,
+            principal.tokenId,
+          );
+          const admission: SessionAdmission =
+            await ownerAdmissions.sessions.reserveReplacingOldest(tenantId);
           if (admission.kind === "rejected") {
+            invalidator.release(initializationEpoch);
             observation.recordSessionCapacity("rejected", admission.scope);
             return jsonResponse(503, {
               error:
@@ -353,10 +362,6 @@ export async function startHttpServer(
           observation.recordSessionCapacity(
             "allowed",
             tenantId === null ? "global" : "global_and_tenant",
-          );
-          const initializationEpoch: SessionAuthorizationEpoch = invalidator.capture(
-            tenantId,
-            principal.tokenId,
           );
           try {
             const transport: WebStandardStreamableHTTPServerTransport =
@@ -450,7 +455,7 @@ export async function startHttpServer(
       ),
       hostname,
       maxRequestBytes,
-      port: requestedPort,
+      port: config.requestedPort,
     });
   } catch (error: unknown) {
     capacity.stop();
@@ -477,6 +482,7 @@ export async function startHttpServer(
     stop: async (): Promise<void> => {
       if (stopped) return;
       stopped = true;
+      ownerAdmissions.streams.stop();
       capacity.stop();
       connectorAuthorizationCodes.clear();
       const activeSessions: [string, RemoteSession][] = Array.from(sessions.entries());
