@@ -36,8 +36,9 @@ test.skipIf(!storageBudgetTestsEnabled)(
         ]) {
           const id: string = randomUUID();
           await fixture.admin`
-          INSERT INTO murmur.access_tokens(token_id, tenant_id, key_id, secret_hash, token_role, name, expires_at, revoked_at)
+          INSERT INTO murmur.access_tokens(token_id, tenant_id, key_id, secret_hash, token_role, name, created_at, expires_at, revoked_at)
           VALUES (${id}::uuid, ${item.tenant}::uuid, ${item.token.keyId}, ${item.token.hash}, 'agent', 'Owner admission regression',
+            statement_timestamp() - interval '2 hours',
             CASE WHEN ${item.expired} THEN statement_timestamp() - interval '1 hour' ELSE NULL END,
             CASE WHEN ${item.revoked} THEN statement_timestamp() ELSE NULL END)
         `;

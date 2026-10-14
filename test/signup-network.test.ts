@@ -71,9 +71,9 @@ test(
       const pending: Promise<string> = runSignupCli(argumentsFor(directory, server.endpoint), {
         interactive: true,
         operations,
-        platform: "linux",
+        platform: process.platform,
       });
-      await prompted;
+      await Promise.race([prompted, pending]);
       expect(server.issued()).toBe(0);
       expect(existsSync(join(directory, "owner.json"))).toBe(true);
       expect(existsSync(join(directory, "worker.json"))).toBe(false);
@@ -82,7 +82,9 @@ test(
       const output: string = await pending;
       expect(server.issued()).toBe(1);
       expect(server.registrations()).toBe(1);
-      expect(output).toContain("export MURMUR_API_TOKEN=");
+      expect(output).toContain(
+        process.platform === "win32" ? "$env:MURMUR_API_TOKEN = (" : "export MURMUR_API_TOKEN=",
+      );
       expect(output).toContain("murmur setup --user");
       expect(output).not.toContain(OWNER_SECRET);
       expect(output).not.toContain(WORKER_SECRET);
