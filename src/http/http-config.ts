@@ -43,6 +43,7 @@ export type HttpServerConfig = {
   readonly oauthAuthorizationRateLimitPerMinute: number;
   readonly oauthMaxAuthorizationCodes: number;
   readonly oauthPublicOrigin: string | null;
+  readonly ownerPriority: boolean;
   readonly rateLimitPerMinute: number;
   readonly releaseMetadata: MurmurReleaseMetadata | null;
   readonly registrationRateLimitPerMinute: number;
@@ -81,6 +82,7 @@ const DEFAULTS: HttpDefaults = {
   oauthAuthorizationCodeLifetimeMs: 5 * 60 * 1_000,
   oauthAuthorizationRateLimitPerMinute: 30,
   oauthMaxAuthorizationCodes: 256,
+  ownerPriority: false,
   port: 8080,
   rateLimitPerMinute: 600,
   registrationRateLimitPerMinute: 10,
@@ -289,6 +291,11 @@ export function parseHttpServerConfig(environment: NodeJS.ProcessEnv): HttpServe
       4_096,
     ),
     oauthPublicOrigin: parseOauthPublicOrigin(environment),
+    ownerPriority:
+      environment["MURMUR_OWNER_PRIORITY"] === undefined ||
+      environment["MURMUR_OWNER_PRIORITY"] === ""
+        ? DEFAULTS.ownerPriority
+        : z.enum(["0", "1"]).parse(environment["MURMUR_OWNER_PRIORITY"]) === "1",
     rateLimitPerMinute: positiveIntegerEnvironment(
       environment,
       "MURMUR_RATE_LIMIT_PER_MINUTE",

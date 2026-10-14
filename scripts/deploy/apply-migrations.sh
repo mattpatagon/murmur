@@ -11,6 +11,8 @@ database_url="$(MURMUR_DATABASE_URL_TO_VERIFY="$database_url" \
   bun scripts/require-verified-database-url.ts)"
 echo "::add-mask::$database_url"
 bunx supabase db push --db-url "$database_url" --include-all --yes
+MURMUR_OWNER_ADMIN_DATABASE_URL="$database_url" \
+  bun run scripts/configure-owner-capacity.ts
 MURMUR_BOOTSTRAP_DATABASE_CREDENTIAL="$bootstrap_database_credential" \
   MURMUR_BOOTSTRAP_DATABASE_URL="$database_url" \
   bun run scripts/configure-operator-bootstrap.ts

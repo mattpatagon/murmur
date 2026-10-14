@@ -230,7 +230,9 @@ Hosted configuration sets independent limits for request bytes, authentication c
 queues, active requests, long-lived SSE streams, per-principal and per-tenant work, sessions,
 subscriptions, request rates, agents, tokens, retained messages, stored bytes, message size, and
 broadcast fan-out. Admission returns a safe retryable status before allocating downstream resources
-when a bound is full.
+when a bound is full. The hosted founding tenant has authenticated
+[owner capacity](owner-capacity.md): reserved admission and retained storage, with every physical
+ceiling preserved. SQLite retains ordinary quotas.
 
 [HTTP response and MCP processing capacity](http-processing-capacity.md) are separate: canceling
 a response does not release unfinished handler work. SDK initialization and ping acquire processing
@@ -247,7 +249,8 @@ minute per application process by default, 60 successful creations per minute ac
 and 100,000 retained tenants. The per-process rate is configurable; the database bounds are durable
 and apply across replicas.
 
-Agent lifecycle storage permits 1,000 open and 10,000 retained identities per tenant, eight live
+Agent lifecycle storage permits 1,000 open and 10,000 retained identities per ordinary tenant.
+The hosted founding tenant permits 10,000 open and 100,000 retained identities; every identity permits eight live
 sessions and 64 retained session rows per stable identity. Expired leases become ended sessions and
 are removed after 30 days; inactive identities close after 30 dormant days, and unreferenced closed
 identities become eligible for deletion 30 days later. Destructive lifecycle mutations require an

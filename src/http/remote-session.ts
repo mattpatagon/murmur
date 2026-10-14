@@ -2,6 +2,8 @@ import type { WebStandardStreamableHTTPServerTransport } from "@modelcontextprot
 
 import type { MurmurApplication } from "../mcp/murmur-application.js";
 
+export type StandaloneStream = { readonly openedAt: number };
+
 export type RemoteSession = {
   activeResponses: number;
   readonly application: MurmurApplication;
@@ -10,4 +12,5 @@ export type RemoteSession = {
   readonly tenantId: string | null;
   readonly tokenId: string | null;
   readonly transport: WebStandardStreamableHTTPServerTransport;
+  standaloneStream?: StandaloneStream | undefined;
 };

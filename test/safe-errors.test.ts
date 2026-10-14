@@ -1,11 +1,45 @@
-import { resolve } from "node:path";
-import process from "node:process";
+import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-
-import { expect, test } from "bun:test";
+import { resolve } from "node:path";
+import process from "node:process";
 
 import { safeErrorMessage } from "../src/safe-errors.js";
+
+function childEnvironment(configuration: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {};
+  const runtimeKeys: ReadonlySet<string> = new Set<string>([
+    "PATH",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "HOMEDRIVE",
+    "HOMEPATH",
+  ]);
+  // Keep native runtime paths while excluding ambient application configuration and credentials.
+  for (const [name, value] of Object.entries(process.env)) {
+    if (runtimeKeys.has(name.toUpperCase())) environment[name] = value;
+  }
+  return { ...environment, ...configuration };
+}
+
+async function childResult(
+  child: Bun.Subprocess<"ignore", "pipe", "pipe">,
+): Promise<{ readonly exitCode: number; readonly stderr: string }> {
+  // Drain both Windows pipes while the process runs; exit may wait for pending writes.
+  const [exitCode, stderr]: [number, string, string] = await Promise.all([
+    child.exited,
+    new Response(child.stderr).text(),
+    new Response(child.stdout).text(),
+  ]);
+  return { exitCode, stderr };
+}
 
 function databaseUrl(password: string): string {
   const url: URL = new URL("postgresql://database.example/murmur");
@@ -20,17 +54,16 @@ test("malformed MURMUR_DATABASE_URL never exposes its password", async (): Promi
     [process.execPath, "run", "src/http-server.ts"],
     {
       cwd: resolve("."),
-      env: {
+      env: childEnvironment({
         MURMUR_DATABASE_URL: ["postgresql", "://murmur:", sentinel, "@[invalid"].join(""),
-        PATH: process.env["PATH"] ?? "",
-      },
+      }),
       stderr: "pipe",
       stdin: "ignore",
       stdout: "pipe",
     },
   );
-  const exitCode: number = await child.exited;
-  const stderr: string = await new Response(child.stderr).text();
+  const { exitCode, stderr }: { readonly exitCode: number; readonly stderr: string } =
+    await childResult(child);
   expect(exitCode).not.toBe(0);
   expect(stderr).toContain('"context":"Murmur HTTP startup failed"');
   // biome-ignore lint/security/noSecrets: This is an error class, not credential material.
@@ -45,18 +78,17 @@ test("startup configuration failures emit a specific safe error class", async ()
       [process.execPath, "run", "src/http-server.ts"],
       {
         cwd: resolve("."),
-        env: {
+        env: childEnvironment({
           MURMUR_DB_PATH: resolve(directory, "messages.db"),
           MURMUR_TELEMETRY_ENABLED: "invalid",
-          PATH: process.env["PATH"] ?? "",
-        },
+        }),
         stderr: "pipe",
         stdin: "ignore",
         stdout: "pipe",
       },
     );
-    const exitCode: number = await child.exited;
-    const stderr: string = await new Response(child.stderr).text();
+    const { exitCode, stderr }: { readonly exitCode: number; readonly stderr: string } =
+      await childResult(child);
     expect(exitCode).not.toBe(0);
     expect(stderr).toContain('"context":"Murmur HTTP startup failed"');
     // biome-ignore lint/security/noSecrets: This is a safe error class, not credential material.
@@ -76,17 +108,16 @@ test("safe error logging initializes lazily under unrelated log-level values", a
     ],
     {
       cwd: resolve("."),
-      env: {
+      env: childEnvironment({
         MURMUR_LOG_LEVEL: "warn",
-        PATH: process.env["PATH"] ?? "",
-      },
+      }),
       stderr: "pipe",
       stdin: "ignore",
       stdout: "pipe",
     },
   );
-  const exitCode: number = await child.exited;
-  const stderr: string = await new Response(child.stderr).text();
+  const { exitCode, stderr }: { readonly exitCode: number; readonly stderr: string } =
+    await childResult(child);
   expect(exitCode).toBe(0);
   expect(stderr).toContain('"severity":"ERROR"');
   expect(stderr).toContain('"message":"operation.failed"');

@@ -2,6 +2,15 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.20.0.0] - 2026-10-14
+
+### Added
+
+- Keep the hosted owner's messaging available when ordinary capacity fills, with reserved request,
+  stream, session, and storage capacity, higher bounded identity quotas, and admission priority
+  that survives restarts. At capacity, replace the oldest eligible owner connection while preserving
+  messages; owner clients sharing a credential receive the owner's rate allowance.
+
 ## [0.19.2.0] - 2026-10-08
 
 ### Fixed
