@@ -186,6 +186,19 @@ class StartupRemote implements E2eeProxyRemoteClient {
   }
 }
 
+class FailingCloseRemote extends StartupRemote {
+  public override async close(): Promise<void> {
+    await super.close();
+    throw new Error("upstream cleanup failed");
+  }
+}
+
+class FailingStartupTransport extends NoopTransport {
+  public override async start(): Promise<void> {
+    throw new Error("MCP transport startup failed");
+  }
+}
+
 test("E2E proxy entrypoint validates entitlement, creates no key, and shuts down once", async (): Promise<void> => {
   const directory: string = mkdtempSync(join(tmpdir(), "murmur-e2ee-entry-"));
   const vaultPath: string = join(directory, "vault.sqlite");
@@ -276,4 +289,54 @@ test("E2E proxy rejects incomplete startup before opening a remote connection", 
     ),
   ).rejects.toThrow("MURMUR_API_TOKEN is required");
   expect(connections).toBe(0);
+});
+
+test("E2E proxy releases acquired resources and preserves partial-startup errors", async (): Promise<void> => {
+  const failureStages: readonly string[] = ["tenant binding", "transport startup"];
+  for (const failureStage of failureStages) {
+    const directory: string = mkdtempSync(join(tmpdir(), "murmur-e2ee-startup-failure-"));
+    const vaultPath: string = join(directory, "vault.sqlite");
+    const remote: FailingCloseRemote = new FailingCloseRemote();
+    const vaultHolder: { value: LocalE2eeVault | null } = { value: null };
+    const runtime: E2eeProxyRuntime = {
+      clock: new FixedClock(),
+      connectRemote: async (_config: E2eeHttpRemoteClientConfig): Promise<E2eeProxyRemoteClient> =>
+        remote,
+      createTransport: (): Transport => new FailingStartupTransport(),
+      createVault: (path: string): LocalE2eeVault => {
+        const vault: LocalE2eeVault = new LocalE2eeVault(path, "linux");
+        vaultHolder.value = vault;
+        if (failureStage === "tenant binding") {
+          vault.settings.bindActiveTenant(
+            "00000000-0000-4000-8000-000000000011",
+            "2026-08-10T19:00:00.000Z",
+          );
+        }
+        return vault;
+      },
+      detectBranchName: (): BranchName | null => null,
+      detectRepositoryName: (): RepositoryName | null => null,
+      environment: { MURMUR_API_TOKEN: "test-token" },
+      onSignal: (_signal: NodeJS.Signals, _listener: () => void): void => undefined,
+    };
+    try {
+      await expect(
+        main(
+          ["--url", "https://api.example.test/mcp", "--client", "codex", "--vault-path", vaultPath],
+          runtime,
+        ),
+      ).rejects.toThrow(
+        failureStage === "tenant binding"
+          ? "The local E2E vault is already bound to another tenant; use a separate vault path"
+          : "MCP transport startup failed",
+      );
+      expect(remote.closeCount).toBe(1);
+      const vault: LocalE2eeVault | null = vaultHolder.value;
+      if (vault === null) throw new Error("Expected an acquired local vault");
+      expect((): unknown => vault.getOutbox("cleanup-proof")).toThrow("The E2E vault is closed");
+    } finally {
+      if (vaultHolder.value !== null) vaultHolder.value.close();
+      rmSync(directory, { force: true, recursive: true });
+    }
+  }
 });
