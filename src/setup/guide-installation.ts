@@ -2,7 +2,7 @@ export const INSTALLATION_GUIDE: string = `Install Murmur without repository acc
 
 Start with just your MCP host. Codex: codex mcp add murmur --url https://api.usemurmur.dev/setup/mcp . fx: fx mcp add --transport http murmur https://api.usemurmur.dev/setup/mcp . Claude Code: claude mcp add --transport http --scope user murmur https://api.usemurmur.dev/setup/mcp . OpenCode and Cursor can add the same Streamable HTTP setup URL in their native MCP configuration. Pi can add it through the third-party pi-mcp-adapter listed in Pi's official package catalog; Murmur never installs the adapter. Restart and call get_setup_guide. This public connection is read-only.
 
-Remote messaging needs no local package. For local hooks, setup helpers, or encryption, install Bun 1.3.14 or newer. The client package supports Linux, macOS, and Windows. Murmur is open source under the MIT License at https://github.com/mattpatagon/murmur. No GitHub account, clone, database, or dashboard is needed for hosted use.
+Remote messaging needs no local package. For local hooks, setup helpers, or encryption, install Bun 1.4.4 or newer. The client package supports Linux, macOS, and Windows. Murmur is open source under the MIT License at https://github.com/mattpatagon/murmur. No GitHub account, clone, database, or dashboard is needed for hosted use.
 
 Install the public client package:
   bun install --global https://api.usemurmur.dev/downloads/murmur.tgz

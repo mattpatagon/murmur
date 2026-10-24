@@ -33,8 +33,8 @@ both retained queue bytes and tiny-chunk object counts. Staging does not parse J
 credentials. Web-body delivery uses zero prefetch and begins only on application demand.
 
 The listener activates the public native readable interface synchronously with `read(0)` after
-attaching its byte listener. It does not rely on paused native buffering: Bun 1.3.14 intentionally
-does not pause the Windows socket in that path. Direct cleartext native receive calls are bounded
+attaching its byte listener. It does not rely on paused native buffering: the original Bun 1.3.14
+audit found that the Windows path did not pause its socket. Direct cleartext native receive calls are bounded
 to a shared 512 KiB buffer in the pinned source. Staging owns copies, not views retaining arbitrary
 larger callback backing buffers. The staging budget excludes transient native callbacks and bytes
 already transferred to the separately bounded application reader; it is not an exact RSS cap.
@@ -74,14 +74,16 @@ and protocol headers never determine a trusted origin. OAuth uses `MURMUR_PUBLIC
 
 There are at most 256 active transport tasks and 256 observed connection wrappers. Closed wrappers
 are reaped using their public address state because Bun can omit their close event after a completed
-keep-alive response. These are **not** claims of a 256-socket limit before HTTP headers: Bun emits
-its public connection event only after parsing a request or reporting a parser error.
+keep-alive response. The original Bun 1.3.14 audit observed the public connection event only
+after parsing a request or reporting a parser error. Bun 1.4.4 emits that event on accept, so the
+application observes connections earlier. This is not a bound on the kernel accept backlog.
 
 The native idle timeout is explicitly 60 seconds, compatible with Murmur's one-second SSE
-keep-alives. The pinned native timeout scheduler has coarse granularity; this is not an absolute
-header deadline. Merely assigning Node `headersTimeout`, `requestTimeout`, or socket `setTimeout`
-does not establish enforcement in this Bun revision. Direct self-hosting needs an upstream
-connection/header boundary when exposure to untrusted raw TCP peers matters.
+keep-alives. The original Bun 1.3.14 audit did not establish enforcement of Node header/request
+timeout properties. Bun 1.4.4 implements native header and request timeout checks. Murmur retains
+its explicit application input lifetime and idle timeout; it does not claim an exact header deadline
+from a property assignment. Direct self-hosting still needs a reviewed upstream connection/header
+boundary when exposure to untrusted raw TCP peers matters.
 
 Production is a Cloud Run **service**, not a worker pool with direct TCP ingress. The checked
 deployment workflow configures HTTP concurrency 80, one vCPU, 512 MiB, service and revision maximum
@@ -111,3 +113,22 @@ Every Bun upgrade must recheck the native callback, pause, drain, and disconnect
 the transport regressions and the bounded slow-reader memory gate on the release build. Linux
 native-memory measurements are not Windows execution evidence; the portability matrix remains
 required for the application and HTTP behavior on Linux, macOS, and Windows.
+
+The production-image CI job runs `scripts/verify-native-http-backpressure.ts` inside the release
+image with a 512 MiB memory limit and no external network. Four paused loopback clients each
+request a 64 MiB streaming response. The two-second observation rejects more than 16 MiB of source
+production or 128 MiB of RSS growth, requires every handler to run, and verifies that combined
+disconnect/shutdown teardown cancels all response sources. This bounds native output pressure; it
+does not measure Cloud Run intermediaries or establish Windows memory limits.
+
+The Bun 1.4.4 source review used revision `38afee6c84fcf48c0edb2466aa4b27d287a59c30`.
+The request destructor still clears native abort/data callbacks, so the response-lifetime subclass
+remains required. Native response pause/resume now applies on Windows too. The 512 KiB receive
+buffer and the public readable, drain, and close contracts remain compatible with the adapter.
+The production stream observer accepts native cancellation only when its fetch scope was aborted
+and both cancellation and reader closure report the same terminal `AbortError`. A source cancel
+failure whose reader closes successfully remains a cleanup failure.
+The historical 1.3.14 links above retain their original evidence; current source is in
+[`_http_incoming.ts`](https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/js/node/_http_incoming.ts),
+[`_http_server.ts`](https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/js/node/_http_server.ts), and
+[`NodeHTTPResponse.rs`](https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/runtime/server/NodeHTTPResponse.rs).

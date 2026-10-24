@@ -3,8 +3,10 @@
 The hosted launch review on 2026-09-04 found six registry advisories in the existing production
 dependency tree. Exact overrides update two transitive packages without adding dependencies,
 changing their purpose, or increasing the service's configured resources. The current Bun toolchain
-is pinned to 1.3.14 and `bunfig.toml` retains `minimumReleaseAge = 259200` (72 hours).
-Bun's [1.3.14 release notes](https://bun.com/blog/bun-v1.3.14), published May 13, 2026, report
+is pinned to 1.4.4 and `bunfig.toml` retains `minimumReleaseAge = 259200` (72 hours).
+Bun 1.4.4 fixes the Brotli decoder vulnerability CVE-2026-111497. Both production image stages
+use the reviewed official image digest. The previous Bun upgrade's
+[1.3.14 release notes](https://bun.com/blog/bun-v1.3.14), published May 13, 2026, report
 an HTTP request-smuggling fix. Runtime, container, workflow, and local package requirements move
 together; the earlier dependency audit below retains its original toolchain version.
 
@@ -61,7 +63,7 @@ On 2026-09-04, Bun 1.3.11 regenerated only these two package entries and their o
 The frozen install then passed, installing the two updates, and `bun audit --json` returned `{}`
 with exit status 0. The pre-update audit returned six advisories and exit status 1.
 
-For an intentional dependency change, regenerate the lockfile with pinned Bun 1.3.14, then run
+For an intentional dependency change, regenerate the lockfile with pinned Bun 1.4.4, then run
 `bun install --frozen-lockfile` and `bun audit --json`. A clean audit establishes that the registry
 reports no known vulnerabilities for those locked versions at verification time; it does not prove
 absence of undisclosed defects.
