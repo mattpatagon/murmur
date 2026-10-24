@@ -256,3 +256,113 @@ test("closing a native fetch SSE connection observes terminal abort without fals
     await server.stop(true);
   }
 });
+
+test.each(["request-abort", "unrelated-abort", "other-error"])(
+  "stream cleanup distinguishes its terminal request abort from %s cancellation errors",
+  async (kind: string): Promise<void> => {
+    let signal: AbortSignal | null = null;
+    let cancellations: number = 0;
+    const body: ReadableStream<Uint8Array> = new ReadableStream<Uint8Array>({
+      start: (controller: ReadableStreamDefaultController<Uint8Array>): void => {
+        controller.enqueue(new TextEncoder().encode(": connected\n\n"));
+      },
+      cancel: (): void => {
+        cancellations += 1;
+        if (signal === null) throw new Error("Missing request signal");
+        expect(signal.aborted).toBe(true);
+        if (kind === "request-abort") throw signal.reason;
+        if (kind === "unrelated-abort") throw new DOMException("Unrelated abort", "AbortError");
+        throw new Error("private cancellation detail");
+      },
+    });
+    const bounded: ProductionStreamFetch = new ProductionStreamFetch(
+      URL_,
+      async (_url: string | URL, init?: RequestInit): Promise<Response> => {
+        if (init === undefined || init.signal === undefined || init.signal === null)
+          throw new Error("Missing request signal");
+        signal = init.signal;
+        return new Response(body, { headers: { "content-type": "text/event-stream" } });
+      },
+    );
+    const response: Response = await bounded.fetch(URL_, { method: "GET" });
+    if (response.body === null) throw new Error("Missing test SSE body");
+    const reader: ReadableStreamDefaultReader<Uint8Array> = response.body.getReader();
+    try {
+      expect((await reader.read()).done).toBe(false);
+      if (kind === "request-abort") await bounded.close();
+      else await expect(bounded.close()).rejects.toThrow("Production stream verification failed");
+      await expect(reader.read()).rejects.toThrow("Production stream verification failed");
+      expect(body.locked).toBe(false);
+      expect(cancellations).toBe(1);
+    } finally {
+      reader.releaseLock();
+      await Promise.allSettled([bounded.close()]);
+    }
+  },
+);
+
+test.each(["request-abort", "unrelated-abort", "other-error"])(
+  "rejected response cleanup distinguishes request abort from %s cancellation errors",
+  async (kind: string): Promise<void> => {
+    let signal: AbortSignal | null = null;
+    let cancellations: number = 0;
+    const body: ReadableStream<Uint8Array> = new ReadableStream<Uint8Array>({
+      cancel: (): void => {
+        cancellations += 1;
+        if (signal === null) throw new Error("Missing request signal");
+        expect(signal.aborted).toBe(true);
+        if (kind === "request-abort") throw signal.reason;
+        if (kind === "unrelated-abort") throw new DOMException("Unrelated abort", "AbortError");
+        throw new Error("private cancellation detail");
+      },
+    });
+    const bounded: ProductionStreamFetch = new ProductionStreamFetch(
+      URL_,
+      async (_url: string | URL, init?: RequestInit): Promise<Response> => {
+        if (init === undefined || init.signal === undefined || init.signal === null)
+          throw new Error("Missing request signal");
+        signal = init.signal;
+        return new Response(body, { headers: { "content-type": "text/html" } });
+      },
+      initialized(),
+    );
+    try {
+      await expect(bounded.fetch(URL_, GET)).rejects.toThrow(
+        "Production stream verification failed",
+      );
+      if (kind === "request-abort") await bounded.close();
+      else await expect(bounded.close()).rejects.toThrow("Production stream verification failed");
+      expect(body.locked).toBe(false);
+      expect(cancellations).toBe(1);
+    } finally {
+      await Promise.allSettled([bounded.close()]);
+    }
+  },
+);
+
+test("an un-aborted stream error cannot masquerade as an undefined abort reason", async (): Promise<void> => {
+  let failStream: () => void = (): void => {};
+  const body: ReadableStream<Uint8Array> = new ReadableStream<Uint8Array>({
+    start: (controller: ReadableStreamDefaultController<Uint8Array>): void => {
+      controller.enqueue(new TextEncoder().encode(": connected\n\n"));
+      failStream = (): void => controller.error(undefined);
+    },
+  });
+  const bounded: ProductionStreamFetch = new ProductionStreamFetch(
+    URL_,
+    async (): Promise<Response> => new Response(body),
+  );
+  const response: Response = await bounded.fetch(URL_, { method: "GET" });
+  if (response.body === null) throw new Error("Missing test SSE body");
+  const reader: ReadableStreamDefaultReader<Uint8Array> = response.body.getReader();
+  try {
+    expect((await reader.read()).done).toBe(false);
+    failStream();
+    await expect(reader.read()).rejects.toThrow("Production stream verification failed");
+    await expect(bounded.close()).rejects.toThrow("Production stream verification failed");
+    expect(body.locked).toBe(false);
+  } finally {
+    reader.releaseLock();
+    await Promise.allSettled([bounded.close()]);
+  }
+});

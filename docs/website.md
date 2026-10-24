@@ -35,7 +35,7 @@ dependency gate validates both packages and their workflow pins. Website tooling
 in the API image or public MCP executable distribution.
 The website scripts run Astro with `bun --bun`; development, checking, building, and previewing
 need no separate Node.js installation. Wrangler authentication, project creation, and deployment
-require Node.js 22.22.1, which the publication workflow pins separately. The deploy script invokes
+require Node.js 22.23.4, which the publication workflow pins separately. The deploy script invokes
 Wrangler's JavaScript entry point with Node because authenticated Wrangler commands under Bun were
 observed to exit successfully without returning the expected identity output.
 Run the repository's required [quality gates](../CONTRIBUTING.md) before requesting review.
@@ -93,7 +93,7 @@ Local development and pull request validation need no Cloudflare access.
 The existing Direct Upload Pages project is named `murmur-site`, has production branch `main`,
 and has the assigned hostname `murmur-site-eip.pages.dev`. The GitHub Actions workflow performs
 the build and upload, so a separate Cloudflare Git build is unnecessary. For first project
-creation in a new account, use Node.js 22.22.1 and account-scoped credentials supplied through
+creation in a new account, use Node.js 22.23.4 and account-scoped credentials supplied through
 the local environment:
 
 ```text

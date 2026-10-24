@@ -14,10 +14,10 @@ coverageSkipTestFiles = true
 `;
 
 const VALID_BUN_PIN_SURFACES: BunPinSurfaces = {
-  ciWorkflow: "bun-version: 1.3.14\n",
-  deployWorkflow: "bun-version: 1.3.14\n",
-  dockerfile: "FROM oven/bun:1.3.14\nFROM oven/bun:1.3.14\n",
-  productionSmokeWorkflow: "bun-version: 1.3.14\n",
+  ciWorkflow: "bun-version: 1.4.4\n",
+  deployWorkflow: "bun-version: 1.4.4\n",
+  dockerfile: "FROM oven/bun:1.4.4\nFROM oven/bun:1.4.4\n",
+  productionSmokeWorkflow: "bun-version: 1.4.4\n",
 };
 
 function manifest(overrides: Readonly<Record<string, unknown>> = {}): string {
@@ -26,9 +26,9 @@ function manifest(overrides: Readonly<Record<string, unknown>> = {}): string {
     devDependencies: { typescript: "7.0.2" },
     license: "MIT",
     overrides: { zod: "4.4.3" },
-    packageManager: "bun@1.3.14",
-    engines: { bun: ">=1.3.14" },
-    scripts: { "test:linux": "MURMUR_TEST_DOCKER_IMAGE=oven/bun:1.3.14 bun test" },
+    packageManager: "bun@1.4.4",
+    engines: { bun: ">=1.4.4" },
+    scripts: { "test:linux": "MURMUR_TEST_DOCKER_IMAGE=oven/bun:1.4.4 bun test" },
     ...overrides,
   });
 }
@@ -52,7 +52,7 @@ function websiteManifest(overrides: Readonly<Record<string, unknown>> = {}): str
 function auditWebsite(
   packageJsonText: string = websiteManifest(),
   bunfigText: string = VALID_BUNFIG,
-  workflow: string = "bun-version: 1.3.14\n",
+  workflow: string = "bun-version: 1.4.4\n",
 ): readonly string[] {
   return auditWebsiteDependencyPolicy(manifest(), packageJsonText, bunfigText, workflow);
 }
@@ -139,7 +139,7 @@ describe("dependency policy", (): void => {
     expect(
       audit(
         manifest({
-          scripts: { "test:linux": "MURMUR_TEST_DOCKER_IMAGE=oven/bun:1.3.140 bun test" },
+          scripts: { "test:linux": "MURMUR_TEST_DOCKER_IMAGE=oven/bun:1.4.40 bun test" },
         }),
         VALID_BUNFIG,
       ),
@@ -147,19 +147,19 @@ describe("dependency policy", (): void => {
     expect(
       audit(manifest(), VALID_BUNFIG, {
         ...VALID_BUN_PIN_SURFACES,
-        dockerfile: "FROM oven/bun:1.3.14-alpine\nFROM oven/bun:1.3.14-alpine\n",
+        dockerfile: "FROM oven/bun:1.4.4-alpine\nFROM oven/bun:1.4.4-alpine\n",
       }),
     ).not.toEqual([]);
     expect(
       audit(manifest(), VALID_BUNFIG, {
         ...VALID_BUN_PIN_SURFACES,
-        ciWorkflow: "bun-version: 1.3.14\nbun-version: 1.3.14-canary\n",
+        ciWorkflow: "bun-version: 1.4.4\nbun-version: 1.4.4-canary\n",
       }),
     ).not.toEqual([]);
     expect(
       audit(manifest(), VALID_BUNFIG, {
         ...VALID_BUN_PIN_SURFACES,
-        deployWorkflow: "bun-version: 1.3.141\n",
+        deployWorkflow: "bun-version: 1.4.41\n",
       }),
     ).not.toEqual([]);
   });
@@ -168,7 +168,7 @@ describe("dependency policy", (): void => {
     const invalidWorkflows: readonly string[] = [
       "",
       "bun-version: 1.3.11\n",
-      "bun-version: 1.3.14\nbun-version: 1.3.14-canary\n",
+      "bun-version: 1.4.4\nbun-version: 1.4.4-canary\n",
     ];
     for (const productionSmokeWorkflow of invalidWorkflows) {
       expect(
@@ -177,7 +177,7 @@ describe("dependency policy", (): void => {
           productionSmokeWorkflow,
         }),
       ).toEqual([
-        ".github/workflows/production-smoke.yml must install the pinned Bun release '1.3.14'",
+        ".github/workflows/production-smoke.yml must install the pinned Bun release '1.4.4'",
       ]);
     }
   });
@@ -222,18 +222,18 @@ describe("isolated website dependency policy", (): void => {
     expect(auditWebsite(websiteManifest({ dependencies: undefined }))).not.toEqual([]);
     expect(auditWebsite("{")).toEqual(["website/package.json is not valid JSON"]);
     expect(
-      auditWebsiteDependencyPolicy("{", websiteManifest(), VALID_BUNFIG, "bun-version: 1.3.14\n"),
+      auditWebsiteDependencyPolicy("{", websiteManifest(), VALID_BUNFIG, "bun-version: 1.4.4\n"),
     ).toEqual(["package.json must be valid JSON before validating website toolchain parity"]);
   });
 
   test("rejects website Bun drift and nonexact toolchain references", (): void => {
-    for (const packageManager of ["bun@1.3.13", "bun@1.3.140", "bun@latest", "npm@1.3.14"]) {
+    for (const packageManager of ["bun@1.3.13", "bun@1.4.40", "bun@latest", "npm@1.4.4"]) {
       expect(auditWebsite(websiteManifest({ packageManager }))).toContain(
-        "website/package.json packageManager must match the root pin 'bun@1.3.14'",
+        "website/package.json packageManager must match the root pin 'bun@1.4.4'",
       );
     }
     expect(auditWebsite(websiteManifest({ engines: { bun: ">=1.3.10" } }))).toContain(
-      "website/package.json engines.bun must declare compatibility from '>=1.3.14'",
+      "website/package.json engines.bun must declare compatibility from '>=1.4.4'",
     );
   });
 
@@ -255,7 +255,7 @@ describe("isolated website dependency policy", (): void => {
         manifest({ packageManager: "bun@latest" }),
         websiteManifest(),
         VALID_BUNFIG,
-        "bun-version: 1.3.14\n",
+        "bun-version: 1.4.4\n",
       ),
     ).not.toEqual([]);
   });
@@ -264,14 +264,14 @@ describe("isolated website dependency policy", (): void => {
     for (const workflow of [
       "",
       "bun-version: 1.3.13\n",
-      "bun-version: 1.3.14\nbun-version: 1.3.14-canary\n",
+      "bun-version: 1.4.4\nbun-version: 1.4.4-canary\n",
     ]) {
       expect(auditWebsite(websiteManifest(), VALID_BUNFIG, workflow)).toEqual([
-        ".github/workflows/website.yml must install the pinned Bun release '1.3.14'",
+        ".github/workflows/website.yml must install the pinned Bun release '1.4.4'",
       ]);
     }
     expect(
-      auditWebsite(websiteManifest(), VALID_BUNFIG, "bun-version: '1.3.14' # pinned\n"),
+      auditWebsite(websiteManifest(), VALID_BUNFIG, "bun-version: '1.4.4' # pinned\n"),
     ).toEqual([]);
   });
 
