@@ -21,6 +21,27 @@ const MethodSchema: z.ZodType<{ readonly method?: string | undefined }> = z.obje
   method: z.string().optional(),
 });
 
+async function cancelResponseReader(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal: AbortSignal,
+): Promise<void> {
+  try {
+    await reader.cancel();
+  } catch (error: unknown) {
+    if (!signal.aborted || !(error instanceof DOMException) || error.name !== "AbortError")
+      throw new ProductionStreamFailure();
+    // Bun 1.4.4 rejects cancel on a reader already terminally errored by fetch abort.
+    // A rejected source cancel alone closes the reader successfully and must still fail cleanup.
+    try {
+      await reader.closed;
+    } catch (closedError: unknown) {
+      if (closedError === error) return;
+      throw new ProductionStreamFailure();
+    }
+    throw new ProductionStreamFailure();
+  }
+}
+
 export class ProductionStreamRecorder {
   private originalSession: string | null = null;
   private state: ProductionStreamSnapshot = {
@@ -187,7 +208,7 @@ export class ProductionStreamFetch {
           cancel = (): void => {
             if (done) return;
             completed();
-            this.cancelReader(reader);
+            this.cancelReader(reader, signal);
             controller.error(new ProductionStreamFailure());
           };
           signal.addEventListener("abort", cancel, { once: true });
@@ -215,7 +236,7 @@ export class ProductionStreamFetch {
         cancel: (): void => {
           completed();
           aborter.abort();
-          this.cancelReader(reader);
+          this.cancelReader(reader, signal);
         },
       });
       return new Response(body, {
@@ -229,20 +250,26 @@ export class ProductionStreamFetch {
       finish();
       if (received !== null && received.body !== null && !received.body.locked) {
         const body: ReadableStream<Uint8Array> = received.body;
+        const reader: ReadableStreamDefaultReader<Uint8Array> = body.getReader();
         try {
-          await streamDeadline(async (): Promise<void> => await body.cancel(), 2_000);
+          await streamDeadline(
+            async (): Promise<void> => await cancelResponseReader(reader, aborter.signal),
+            2_000,
+          );
         } catch (_cancelError: unknown) {
           this.cancellationFailed = true;
+        } finally {
+          reader.releaseLock();
         }
       }
       throw new ProductionStreamFailure();
     }
   }
 
-  private cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>): void {
+  private cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>, signal: AbortSignal): void {
     const cancellation: Promise<void> = streamDeadline(async (): Promise<void> => {
       try {
-        await reader.cancel();
+        await cancelResponseReader(reader, signal);
       } finally {
         reader.releaseLock();
       }

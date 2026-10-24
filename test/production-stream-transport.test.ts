@@ -256,3 +256,35 @@ test("closing a native fetch SSE connection observes terminal abort without fals
     await server.stop(true);
   }
 });
+
+test("closing a client still rejects genuine source cancellation failures", async (): Promise<void> => {
+  for (const failure of [
+    new Error("private cancel failure"),
+    new DOMException("private abort failure", "AbortError"),
+  ]) {
+    const bounded: ProductionStreamFetch = new ProductionStreamFetch(
+      URL_,
+      async (): Promise<Response> =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller: ReadableStreamDefaultController<Uint8Array>): void {
+              controller.enqueue(new Uint8Array([1]));
+            },
+            cancel(): void {
+              throw failure;
+            },
+          }),
+        ),
+    );
+    const response: Response = await bounded.fetch(URL_, { method: "GET" });
+    if (response.body === null) throw new Error("Missing cancellation test body");
+    const reader: ReadableStreamDefaultReader<Uint8Array> = response.body.getReader();
+    try {
+      await reader.read();
+      await expect(bounded.close()).rejects.toThrow("Production stream verification failed");
+    } finally {
+      reader.releaseLock();
+      await Promise.allSettled([bounded.close()]);
+    }
+  }
+});

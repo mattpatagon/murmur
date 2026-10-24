@@ -125,6 +125,9 @@ The Bun 1.4.4 source review used revision `38afee6c84fcf48c0edb2466aa4b27d287a59
 The request destructor still clears native abort/data callbacks, so the response-lifetime subclass
 remains required. Native response pause/resume now applies on Windows too. The 512 KiB receive
 buffer and the public readable, drain, and close contracts remain compatible with the adapter.
+The production stream observer accepts native cancellation only when its fetch scope was aborted
+and both cancellation and reader closure report the same terminal `AbortError`. A source cancel
+failure whose reader closes successfully remains a cleanup failure.
 The historical 1.3.14 links above retain their original evidence; current source is in
 [`_http_incoming.ts`](https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/js/node/_http_incoming.ts),
 [`_http_server.ts`](https://github.com/oven-sh/bun/blob/38afee6c84fcf48c0edb2466aa4b27d287a59c30/src/js/node/_http_server.ts), and
