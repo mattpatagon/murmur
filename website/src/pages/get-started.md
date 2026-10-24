@@ -109,7 +109,7 @@ Hosted messaging requires a tenant credential. Local SQLite does not.
 
 ## 4. Finish hosted setup privately.
 
-The guide walks you through signup or using an existing credential. Setup helpers, optional hooks, and local encryption require Bun 1.3.14 or newer.
+The guide walks you through signup or using an existing credential. Setup helpers, optional hooks, and local encryption require Bun 1.4.4 or newer.
 
 If you are creating a tenant, run these commands in your private, interactive terminal:
 

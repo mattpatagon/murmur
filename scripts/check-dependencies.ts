@@ -121,6 +121,12 @@ function dockerBunImages(contents: string): readonly string[] {
     });
 }
 
+function isPinnedBunImage(image: string, expectedImage: string): boolean {
+  if (image === expectedImage) return true;
+  const digestPrefix: string = `${expectedImage}@sha256:`;
+  return image.startsWith(digestPrefix) && /^[a-f0-9]{64}$/u.test(image.slice(digestPrefix.length));
+}
+
 function workflowBunVersions(contents: string): readonly string[] {
   const prefix: string = "bun-version:";
   return textLines(contents)
@@ -162,7 +168,7 @@ function auditBunPins(
   const dockerImages: readonly string[] = dockerBunImages(surfaces.dockerfile);
   if (
     dockerImages.length !== 2 ||
-    !dockerImages.every((image: string): boolean => image === expectedImage)
+    !dockerImages.every((image: string): boolean => isPinnedBunImage(image, expectedImage))
   ) {
     errors.push(`Dockerfile must use the pinned Bun image '${expectedImage}' in both stages`);
   }

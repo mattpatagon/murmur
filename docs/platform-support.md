@@ -1,6 +1,6 @@
 # Platform support
 
-Murmur supports current GitHub-hosted Linux/Ubuntu, macOS, and Windows environments with Bun 1.3.14
+Murmur supports current GitHub-hosted Linux/Ubuntu, macOS, and Windows environments with Bun 1.4.4
 or newer. The portable surface includes package installation, strict verification, local SQLite,
 configuration for Claude Code, Codex, fx, OpenCode, Cursor, and Pi's MCP adapter, stdio package entry
 points, HTTP logic, and production builds.

@@ -63,7 +63,7 @@ Provision these dependencies before enabling the workflow:
 - a separate Cloud Run runtime service account;
 - a Supabase PostgreSQL project and its verified Server root certificate;
 - a GitHub `production` environment with protected deployment approvals;
-- Bun 1.3.14 for manual verification and recovery work.
+- Bun 1.4.4 for manual verification and recovery work.
 
 Restrict the GitHub `production` environment's deployment branches to `main`, and restrict the
 Google workload-identity provider to this repository and `assertion.ref == 'refs/heads/main'`.

@@ -55,6 +55,23 @@ jobs:
               --env "MURMUR_IMAGE_EXPECTED_REVISION=$GITHUB_SHA" \
               --entrypoint bun "$image_tag" /app/scripts/verify-production-image.ts
 
+      - name: Verify slow-reader backpressure in the release runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_name="murmur-slow-reader-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          cleanup_slow_reader() {
+            timeout --signal=TERM --kill-after=5s 10s \
+              docker rm --force "$container_name" >/dev/null 2>&1 || true
+          }
+          trap cleanup_slow_reader EXIT
+          timeout --signal=TERM --kill-after=5s 30s \
+            docker run --rm --name "$container_name" --network none --read-only \
+              --cap-drop ALL --security-opt no-new-privileges \
+              --memory 512m --cpus 2 --pids-limit 128 \
+              --mount "type=bind,src=$GITHUB_WORKSPACE/scripts/verify-native-http-backpressure.ts,dst=/app/scripts/verify-native-http-backpressure.ts,readonly" \
+              --entrypoint bun "murmur-production-ci:$GITHUB_SHA" /app/scripts/verify-native-http-backpressure.ts
+
   portability:
     name: Portability (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -74,7 +91,7 @@ jobs:
       - name: Install Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: Install dependencies from the reviewed lockfile
         run: bun install --frozen-lockfile
@@ -121,7 +138,7 @@ jobs:
       - name: Install Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.4
 
       - name: Install dependencies from the reviewed lockfile
         run: bun install --frozen-lockfile

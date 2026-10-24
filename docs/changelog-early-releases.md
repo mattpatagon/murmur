@@ -2,6 +2,16 @@
 
 Historical entries are preserved below. See the [current changelog](../CHANGELOG.md) for newer releases.
 
+## [0.7.1.0] - 2026-08-10
+
+### Changed
+
+- Harden orchestrator-authority release verification for cross-tenant personal policies, conflicting request retries, concurrent policy replacement, and retained provenance after hybrid rollback.
+
+### Fixed
+
+- Ensure deterministic PostgreSQL race tests release pending requests and database resources when lock acquisition fails.
+
 ## [0.7.0.0] - 2026-08-10
 
 ### Added
