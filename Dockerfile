@@ -1,4 +1,4 @@
-FROM oven/bun:1.3.14 AS dependencies
+FROM oven/bun:1.4.4 AS dependencies
 
 WORKDIR /app
 COPY package.json bun.lock bunfig.toml ./
@@ -11,7 +11,7 @@ COPY LICENSE ./LICENSE
 ARG MURMUR_RELEASE_REVISION=0000000000000000000000000000000000000000
 RUN MURMUR_RELEASE_REVISION="$MURMUR_RELEASE_REVISION" bun run scripts/build-distribution.ts
 
-FROM oven/bun:1.3.14
+FROM oven/bun:1.4.4
 
 WORKDIR /app
 ENV NODE_ENV=production

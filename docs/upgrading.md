@@ -106,6 +106,10 @@ A runtime-only upgrade should not change dependency selections; preserve both lo
 the new runtime requires a reviewed format update. Existing `@types/bun` versions need no change
 when they already match the runtime.
 
+The current minimum is Bun 1.4.4 for the Brotli decoder fix in CVE-2026-111497. Website
+publication also requires Node.js 22.23.4 on the Node 22 line. Follow the
+[Brotli rollout checklist](brotli-security.md) when replacing running services and local clients.
+
 Then verify install, typecheck, lint, formatting, portable tests, SQLite migrations, PostgreSQL
 integration, bundled stdio/HTTP entry points, the Linux container test, and a clean package install.
 Do not claim a platform is supported until its CI job passes with the new runtime.

@@ -145,6 +145,7 @@ export class ProductionStreamFetch {
     this.active.add(aborter);
     const signals: AbortSignal[] = [aborter.signal];
     if (init.signal !== undefined && init.signal !== null) signals.push(init.signal);
+    const signal: AbortSignal = AbortSignal.any(signals);
     const timer: ReturnType<typeof setTimeout> = setTimeout(
       (): void => aborter.abort(),
       init.method === "GET" ? 65 * 60_000 : this.requestTimeoutMs,
@@ -161,7 +162,7 @@ export class ProductionStreamFetch {
           await this.fetch_(url, {
             ...init,
             redirect: "error",
-            signal: AbortSignal.any([...signals, deadline]),
+            signal: AbortSignal.any([signal, deadline]),
           }),
         this.requestTimeoutMs,
       );
@@ -173,7 +174,6 @@ export class ProductionStreamFetch {
         return response;
       }
       const reader: ReadableStreamDefaultReader<Uint8Array> = response.body.getReader();
-      const signal: AbortSignal = AbortSignal.any(signals);
       let done: boolean = false;
       let bytes: number = 0;
       let cancel: () => void = (): void => {};
@@ -187,7 +187,7 @@ export class ProductionStreamFetch {
           cancel = (): void => {
             if (done) return;
             completed();
-            this.cancelReader(reader);
+            this.cancelReader(reader, signal);
             controller.error(new ProductionStreamFailure());
           };
           signal.addEventListener("abort", cancel, { once: true });
@@ -215,7 +215,7 @@ export class ProductionStreamFetch {
         cancel: (): void => {
           completed();
           aborter.abort();
-          this.cancelReader(reader);
+          this.cancelReader(reader, signal);
         },
       });
       return new Response(body, {
@@ -230,7 +230,13 @@ export class ProductionStreamFetch {
       if (received !== null && received.body !== null && !received.body.locked) {
         const body: ReadableStream<Uint8Array> = received.body;
         try {
-          await streamDeadline(async (): Promise<void> => await body.cancel(), 2_000);
+          await streamDeadline(async (): Promise<void> => {
+            try {
+              await body.cancel();
+            } catch (error: unknown) {
+              if (!signal.aborted || error !== signal.reason) throw new ProductionStreamFailure();
+            }
+          }, 2_000);
         } catch (_cancelError: unknown) {
           this.cancellationFailed = true;
         }
@@ -239,10 +245,13 @@ export class ProductionStreamFetch {
     }
   }
 
-  private cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>): void {
+  private cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>, signal: AbortSignal): void {
     const cancellation: Promise<void> = streamDeadline(async (): Promise<void> => {
       try {
         await reader.cancel();
+      } catch (error: unknown) {
+        // Native fetch can already be terminal with this request's exact abort reason.
+        if (!signal.aborted || error !== signal.reason) throw new ProductionStreamFailure();
       } finally {
         reader.releaseLock();
       }

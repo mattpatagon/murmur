@@ -1,6 +1,6 @@
 # Platform support
 
-Murmur supports current GitHub-hosted Linux/Ubuntu, macOS, and Windows environments with Bun 1.3.14
+Murmur supports current GitHub-hosted Linux/Ubuntu, macOS, and Windows environments with Bun 1.4.4
 or newer. The portable surface includes package installation, strict verification, local SQLite,
 configuration for Claude Code, Codex, fx, OpenCode, Cursor, and Pi's MCP adapter, stdio package entry
 points, HTTP logic, and production builds.
@@ -132,7 +132,7 @@ and frozen lockfile. Its check/build commands use Bun and portable platform APIs
 operating systems. The repository verification gate includes Astro and frontend source checks.
 The dedicated Ubuntu website workflow builds static pages, validates links and assets, and deploys
 verified pushes to `main` automatically to Cloudflare Pages. The MCP service remains on Cloud Run.
-Only Wrangler authentication, project creation, and deployment require Node.js 22.22.1; the
+Only Wrangler authentication, project creation, and deployment require Node.js 22.23.4; the
 publication workflow installs that exact version before checking the authenticated account and
 uploading. Astro development and verification remain Bun-only. The canonical website target is
 `https://usemurmur.dev`; the existing Pages project hostname is `murmur-site-eip.pages.dev`.

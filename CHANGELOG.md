@@ -2,6 +2,16 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.20.1.0] - 2026-10-24
+
+### Fixed
+
+- Protect hosted services and local clients from the Brotli decoder vulnerability
+  CVE-2026-111497 by requiring Bun 1.4.4. Update website publication to Node.js 22.23.4
+  and rebuild deployments with the patched runtimes.
+- Keep production stream verification successful when the patched runtime reports a completed
+  request abort during SSE cleanup, while retaining failures for unrelated cancellation errors.
+
 ## [0.20.0.0] - 2026-10-14
 
 ### Added
@@ -484,16 +494,6 @@ All notable changes to Murmur are documented in this file.
 - Serialize hosted E2E writes with entitlement transitions and credential or tenant revocation so in-flight work cannot survive a completed security-state change or restore plaintext tools.
 - Enforce strict peer verification and encrypted-tool autodetection with no plaintext downgrade when encryption, trust, server capability, or independent validation fails.
 
-## [0.7.1.0] - 2026-08-10
-
-### Changed
-
-- Harden orchestrator-authority release verification for cross-tenant personal policies, conflicting request retries, concurrent policy replacement, and retained provenance after hybrid rollback.
-
-### Fixed
-
-- Ensure deterministic PostgreSQL race tests release pending requests and database resources when lock acquisition fails.
-
 ## Earlier releases
 
-See the [0.1.0.0–0.7.0.0 release history](docs/changelog-early-releases.md).
+See the [0.1.0.0–0.7.1.0 release history](docs/changelog-early-releases.md).
