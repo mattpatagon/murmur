@@ -61,6 +61,10 @@ supplies it through a disposable PostgreSQL service, then runs the Linux-contain
 same service. The Ubuntu portability job also runs the environment-independent `bun run test` suite. Environment-backed tests may skip in `bun run test`; that does not replace either
 required CI result.
 
+The direct encrypted-message RLS probe validates tenant UUIDs and selects a context distinct
+from the ciphertext owner. It fails if no distinct context is available, while retaining
+own-tenant visibility and zero-row checks for missing and foreign tenant contexts.
+
 The Linux gate sets `MURMUR_TEST_DEPLOY_REVISIONS=1` for synthetic deployment-preservation
 tests. Without that explicit flag they do not launch shell tools; enabling it on another platform
 fails instead of reporting a skipped Linux gate. No cloud credentials are used by these tests.

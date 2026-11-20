@@ -6,17 +6,12 @@ import type {
   ConnectorAuthorizationGrant,
 } from "./connector-authorization-code-store.js";
 import {
-  authenticateHostedCredential,
-  type HostedAuthenticationResult,
-} from "./hosted-credential-authentication.js";
-import type { HttpCapacityController } from "./http-capacity.js";
-import {
   appendAuthorizationError,
   appendAuthorizationResult,
   authorizationServerMetadata,
-  connectorAuthorizationIssueRateLimit,
   CONNECTOR_CLIENT_ID,
   CONNECTOR_SCOPE,
+  connectorAuthorizationIssueRateLimit,
   issuerForRequest,
   mcpResource,
   methodNotAllowed,
@@ -24,6 +19,11 @@ import {
   oauthRateLimitError,
   protectedResourceMetadata,
 } from "./connector-oauth-protocol.js";
+import {
+  authenticateHostedCredential,
+  type HostedAuthenticationResult,
+} from "./hosted-credential-authentication.js";
+import type { HttpCapacityController } from "./http-capacity.js";
 import {
   OAUTH_AUTHORIZATION_PATH,
   OAUTH_PROTECTED_RESOURCE_PATH,
@@ -39,6 +39,7 @@ import {
 } from "./http-request.js";
 
 export { connectorProtectedResourceMetadataUrl } from "./connector-oauth-protocol.js";
+
 const MAXIMUM_FORM_BYTES: number = 8_192;
 const MAXIMUM_SECRET_CHARACTERS: number = 2_048;
 const CODE_CHALLENGE_PATTERN: RegExp = /^[A-Za-z0-9_-]{43}$/u;
@@ -273,13 +274,15 @@ async function formParameters(request: Request): Promise<URLSearchParams> {
 function authenticationFailure(result: HostedAuthenticationResult): Response {
   if (result.kind === "capacity") {
     const response: Response = oauthError(
-      503,
+      result.scope === "global" ? 503 : 429,
       "temporarily_unavailable",
       "Authentication service is busy",
     );
     response.headers.set("retry-after", "1");
     return response;
   }
+  if (result.kind === "cancelled")
+    return oauthError(408, "invalid_request", "HTTP request cancelled");
   if (result.kind === "unavailable") {
     return oauthError(503, "temporarily_unavailable", "Authentication service is unavailable");
   }
@@ -306,6 +309,7 @@ async function handleToken(
       dependencies.authenticator,
       dependencies.capacity,
       observation,
+      request.signal,
     );
     if (authentication.kind !== "authenticated") return authenticationFailure(authentication);
     const principal: HostedPrincipal = authentication.principal;

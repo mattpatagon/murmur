@@ -7,15 +7,15 @@ import {
   AGENT_GC_DAYS,
   NOTICE_AUDIT_DAYS,
 } from "../src/domain/lifecycle-values.js";
-import type { SendMessageResult } from "../src/domain/models.js";
-import { Instant, TenantId } from "../src/domain/value-objects.js";
+import type { SendMessageCommand, SendMessageResult } from "../src/domain/models.js";
+import { AgentId, Instant, TenantId } from "../src/domain/value-objects.js";
 import { POSTGRES_RUNTIME_CONNECTION } from "../src/postgres-runtime.js";
 import { postgresSslOptions } from "../src/postgres-tls.js";
 import type { MessageStore } from "../src/storage/message-store.js";
 import { prunePostgresE2ee } from "../src/storage/postgres-e2ee-prune.js";
 import {
-  postgresHasPruneCandidates,
   type PostgresExpiryQuery,
+  postgresHasPruneCandidates,
   queryPostgresE2eePruneCandidates,
   queryPostgresPruneCandidates,
 } from "../src/storage/postgres-expiry-preflight.js";
@@ -71,6 +71,8 @@ type Fixture = {
   readonly app: Sql;
   readonly clock: MutableClock;
   readonly other: TenantId;
+  readonly recipient: AgentId;
+  readonly sender: AgentId;
   readonly statements: string[];
   readonly store: MessageStore;
   readonly tenant: TenantId;
@@ -81,6 +83,8 @@ async function withFixture(run: (fixture: Fixture) => Promise<void>): Promise<vo
     throw new Error("Hosted PostgreSQL URLs are required");
   const tenant: TenantId = TenantId.generate();
   const other: TenantId = TenantId.generate();
+  const sender: AgentId = AgentId.parse(`expiry-alice:${tenant.value}`);
+  const recipient: AgentId = AgentId.parse(`expiry-bob:${tenant.value}`);
   const statements: string[] = [];
   const admin: Sql = postgres(adminDatabaseUrl, {
     connection: POSTGRES_RUNTIME_CONNECTION,
@@ -100,7 +104,8 @@ async function withFixture(run: (fixture: Fixture) => Promise<void>): Promise<vo
   try {
     for (const id of [tenant, other]) {
       await admin`INSERT INTO murmur.tenants(tenant_id, slug, display_name) VALUES (${id.value}::uuid, ${`expiry-${id.value}`}, 'Expiry preflight test')`;
-      for (const agent of ["alice", "bob"]) {
+      // Bootstrap finalizes tenant-qualified agent keys later in the populated upgrade suite.
+      for (const agent of [`expiry-alice:${id.value}`, `expiry-bob:${id.value}`]) {
         await admin`INSERT INTO murmur.agents(tenant_id, agent_id, display_name, created_at, last_seen_at)
           VALUES (${id.value}::uuid, ${agent}, ${agent}, ${NOW.toISOString()}::timestamptz, ${NOW.toISOString()}::timestamptz)`;
       }
@@ -109,7 +114,17 @@ async function withFixture(run: (fixture: Fixture) => Promise<void>): Promise<vo
       await app`SELECT current_user AS name, rolsuper, rolbypassrls FROM pg_catalog.pg_roles WHERE rolname = current_user`;
     expect(role).toEqual([{ name: "murmur_app", rolbypassrls: false, rolsuper: false }]);
     root = await PostgresMessageStore.connect(databaseUrl, testTlsConfiguration, clock);
-    await run({ admin, app, clock, other, statements, store: root.scope(tenant), tenant });
+    await run({
+      admin,
+      app,
+      clock,
+      other,
+      recipient,
+      sender,
+      statements,
+      store: root.scope(tenant),
+      tenant,
+    });
   } finally {
     try {
       if (root !== null) await root.close();
@@ -187,7 +202,12 @@ test.skipIf(!postgresConfigured)(
   async (): Promise<void> => {
     await withFixture(async (fixture: Fixture): Promise<void> => {
       fixture.clock.set(NOW.addDays(-30));
-      const sent: SendMessageResult = await fixture.store.sendMessage(baseMessageCommand());
+      const command: SendMessageCommand = {
+        ...baseMessageCommand(),
+        recipientId: fixture.recipient,
+        senderId: fixture.sender,
+      };
+      const sent: SendMessageResult = await fixture.store.sendMessage(command);
       await fixture.admin`DELETE FROM murmur.agent_sessions WHERE tenant_id = ${fixture.tenant.value}::uuid`;
       await fixture.admin`UPDATE murmur.agents SET last_seen_at = ${NOW.toISOString()}::timestamptz WHERE tenant_id = ${fixture.tenant.value}::uuid`;
       await expectPlaintextBoundary(fixture);
@@ -200,7 +220,7 @@ test.skipIf(!postgresConfigured)(
         await fixture.admin`SELECT message_id FROM murmur.messages WHERE tenant_id = ${fixture.tenant.value}::uuid`;
       expect(remaining).toEqual([]);
       fixture.clock.set(NOW);
-      const reused: SendMessageResult = await fixture.store.sendMessage(baseMessageCommand());
+      const reused: SendMessageResult = await fixture.store.sendMessage(command);
       expect(reused.duplicate).toBe(false);
       expect(reused.message.messageId.value).not.toBe(sent.message.messageId.value);
     });
@@ -233,25 +253,25 @@ async function seedPlaintextCandidate(fixture: Fixture, kind: PlaintextCase): Pr
   const audit: string = NOW.addDays(-NOTICE_AUDIT_DAYS).toISOString();
   if (kind === "broadcast") {
     await fixture.admin`INSERT INTO murmur.broadcasts(tenant_id, broadcast_id, thread_id, sender_id, content, repository_name, branch_name, client_name, created_at, expires_at)
-      VALUES (${id}::uuid, ${randomUUID()}::uuid, 'expiry-thread', 'alice', 'Synthetic expiry', 'murmur/expiry', 'test', 'codex', ${NOW.addDays(-30).toISOString()}::timestamptz, ${NOW.toISOString()}::timestamptz)`;
+      VALUES (${id}::uuid, ${randomUUID()}::uuid, 'expiry-thread', ${fixture.sender.value}, 'Synthetic expiry', 'murmur/expiry', 'test', 'codex', ${NOW.addDays(-30).toISOString()}::timestamptz, ${NOW.toISOString()}::timestamptz)`;
   } else if (
     kind === "notice_expiry" ||
     kind === "notice_resolved" ||
     kind === "notice_withdrawn"
   ) {
     await fixture.admin`INSERT INTO murmur.notices(tenant_id, notice_id, kind, creator_id, creator_generation, repository_name, content, created_at, expires_at, resolved_at, resolved_by_id, resolved_by_generation, withdrawn_at, withdrawn_by_id, withdrawn_by_generation)
-      VALUES (${id}::uuid, ${randomUUID()}::uuid, 'handoff', 'alice', 1, 'murmur/expiry', 'Synthetic notice', ${NOW.addDays(-NOTICE_AUDIT_DAYS - 1).toISOString()}::timestamptz,
+      VALUES (${id}::uuid, ${randomUUID()}::uuid, 'handoff', ${fixture.sender.value}, 1, 'murmur/expiry', 'Synthetic notice', ${NOW.addDays(-NOTICE_AUDIT_DAYS - 1).toISOString()}::timestamptz,
         ${kind === "notice_expiry" ? audit : NOW.addDays(1).toISOString()}::timestamptz,
-        ${kind === "notice_resolved" ? audit : null}::timestamptz, ${kind === "notice_resolved" ? "bob" : null}, ${kind === "notice_resolved" ? 1 : null},
-        ${kind === "notice_withdrawn" ? audit : null}::timestamptz, ${kind === "notice_withdrawn" ? "alice" : null}, ${kind === "notice_withdrawn" ? 1 : null})`;
+        ${kind === "notice_resolved" ? audit : null}::timestamptz, ${kind === "notice_resolved" ? fixture.recipient.value : null}, ${kind === "notice_resolved" ? 1 : null},
+        ${kind === "notice_withdrawn" ? audit : null}::timestamptz, ${kind === "notice_withdrawn" ? fixture.sender.value : null}, ${kind === "notice_withdrawn" ? 1 : null})`;
   } else if (kind === "live_lease" || kind === "ended_lease") {
     await fixture.admin`INSERT INTO murmur.agent_sessions(tenant_id, agent_id, generation, session_key, started_at, last_renewed_at, lease_expires_at, ended_at, end_reason)
-      VALUES (${id}::uuid, 'alice', 1, 'expiry', ${NOW.addDays(-40).toISOString()}::timestamptz, ${NOW.addDays(-1).toISOString()}::timestamptz, ${NOW.toISOString()}::timestamptz,
+      VALUES (${id}::uuid, ${fixture.sender.value}, 1, 'expiry', ${NOW.addDays(-40).toISOString()}::timestamptz, ${NOW.addDays(-1).toISOString()}::timestamptz, ${NOW.toISOString()}::timestamptz,
         ${kind === "ended_lease" ? NOW.addDays(-AGENT_GC_DAYS).toISOString() : null}::timestamptz, ${kind === "ended_lease" ? "stop" : null})`;
   } else if (kind === "dormant_agent") {
-    await fixture.admin`UPDATE murmur.agents SET last_seen_at = ${NOW.addDays(-AGENT_DORMANCY_DAYS).toISOString()}::timestamptz WHERE tenant_id = ${id}::uuid AND agent_id = 'alice'`;
+    await fixture.admin`UPDATE murmur.agents SET last_seen_at = ${NOW.addDays(-AGENT_DORMANCY_DAYS).toISOString()}::timestamptz WHERE tenant_id = ${id}::uuid AND agent_id = ${fixture.sender.value}`;
   } else {
-    await fixture.admin`UPDATE murmur.agents SET closed_at = ${NOW.addDays(-AGENT_GC_DAYS).toISOString()}::timestamptz, close_reason = 'manual' WHERE tenant_id = ${id}::uuid AND agent_id = 'alice'`;
+    await fixture.admin`UPDATE murmur.agents SET closed_at = ${NOW.addDays(-AGENT_GC_DAYS).toISOString()}::timestamptz, close_reason = 'manual' WHERE tenant_id = ${id}::uuid AND agent_id = ${fixture.sender.value}`;
   }
 }
 
@@ -273,9 +293,9 @@ for (const kind of plaintextCases) {
 const PREKEY: string = `mpk_${"a".repeat(43)}`;
 async function seedPrekey(fixture: Fixture, expires: Instant): Promise<void> {
   await fixture.admin`INSERT INTO murmur.e2ee_key_bundles(tenant_id, agent_id, agent_generation, root_key_id, agent_key_id, bundle_json, published_at)
-    VALUES (${fixture.tenant.value}::uuid, 'bob', 1, ${`mrk_${"a".repeat(43)}`}, ${`mak_${"b".repeat(43)}`}, '{}', ${NOW.addDays(-1).toISOString()}::timestamptz)`;
+    VALUES (${fixture.tenant.value}::uuid, ${fixture.recipient.value}, 1, ${`mrk_${"a".repeat(43)}`}, ${`mak_${"b".repeat(43)}`}, '{}', ${NOW.addDays(-1).toISOString()}::timestamptz)`;
   await fixture.admin`INSERT INTO murmur.e2ee_prekeys(tenant_id, prekey_id, agent_id, agent_generation, prekey_class, certificate_json, published_at, expires_at)
-    VALUES (${fixture.tenant.value}::uuid, ${PREKEY}, 'bob', 1, 'one_time', '{}', ${NOW.addDays(-1).toISOString()}::timestamptz, ${expires.toISOString()}::timestamptz)`;
+    VALUES (${fixture.tenant.value}::uuid, ${PREKEY}, ${fixture.recipient.value}, 1, 'one_time', '{}', ${NOW.addDays(-1).toISOString()}::timestamptz, ${expires.toISOString()}::timestamptz)`;
   await fixture.admin`UPDATE murmur.tenant_e2ee_usage SET public_prekey_count = 1 WHERE tenant_id = ${fixture.tenant.value}::uuid`;
 }
 
@@ -301,12 +321,12 @@ async function seedEncryptedCandidate(fixture: Fixture, kind: EncryptedCase): Pr
   const id: string = fixture.tenant.value;
   if (kind === "message") {
     await fixture.admin`INSERT INTO murmur.e2ee_messages(tenant_id, tenant_sequence, message_id, thread_id, sender_id, sender_generation, sender_authority, message_kind, recipient_id, recipient_generation, idempotency_key, pair_counter, envelope_json, sender_chain_json, ciphertext_bytes, created_at, expires_at)
-      VALUES (${id}::uuid, 1, ${randomUUID()}::uuid, 'expiry', 'alice', 1, 'peer', 'message', 'bob', 1, 'expiry', 1, '{}', '{}', 17, ${NOW.addDays(-1).toISOString()}::timestamptz, ${NOW.toISOString()}::timestamptz)`;
+      VALUES (${id}::uuid, 1, ${randomUUID()}::uuid, 'expiry', ${fixture.sender.value}, 1, 'peer', 'message', ${fixture.recipient.value}, 1, 'expiry', 1, '{}', '{}', 17, ${NOW.addDays(-1).toISOString()}::timestamptz, ${NOW.toISOString()}::timestamptz)`;
     await fixture.admin`UPDATE murmur.tenant_e2ee_usage SET retained_message_count = 1, retained_ciphertext_bytes = 17 WHERE tenant_id = ${id}::uuid`;
   } else if (kind === "direct_claim" || kind === "consumed_claim") {
     await seedPrekey(fixture, NOW.addDays(1));
     await fixture.admin`INSERT INTO murmur.e2ee_claims(tenant_id, claim_id, sender_id, sender_generation, recipient_id, recipient_generation, prekey_id, message_kind, sender_authority, request_json, claim_json, created_at, expires_at, consumed_at)
-      VALUES (${id}::uuid, ${randomUUID()}::uuid, 'alice', 1, 'bob', 1, ${PREKEY}, 'message', 'peer', '{}', '{}', ${NOW.addDays(-1).toISOString()}::timestamptz, ${NOW.toISOString()}::timestamptz, ${kind === "consumed_claim" ? BEFORE.toISOString() : null}::timestamptz)`;
+      VALUES (${id}::uuid, ${randomUUID()}::uuid, ${fixture.sender.value}, 1, ${fixture.recipient.value}, 1, ${PREKEY}, 'message', 'peer', '{}', '{}', ${NOW.addDays(-1).toISOString()}::timestamptz, ${NOW.toISOString()}::timestamptz, ${kind === "consumed_claim" ? BEFORE.toISOString() : null}::timestamptz)`;
     await fixture.admin`UPDATE murmur.e2ee_prekeys SET claimed_at = ${BEFORE.toISOString()}::timestamptz WHERE tenant_id = ${id}::uuid`;
     await fixture.admin`UPDATE murmur.tenant_e2ee_usage SET public_prekey_count = 0, claim_count = ${kind === "direct_claim" ? 1 : 0} WHERE tenant_id = ${id}::uuid`;
   } else if (kind === "public_prekey") {
@@ -319,7 +339,7 @@ async function seedEncryptedCandidate(fixture: Fixture, kind: EncryptedCase): Pr
           ? "committed"
           : "cancelled";
     await fixture.admin`INSERT INTO murmur.e2ee_broadcasts(tenant_id, broadcast_id, sender_id, sender_generation, sender_authority, thread_id, request_json, recipient_count, state, created_at, expires_at)
-      VALUES (${id}::uuid, ${randomUUID()}::uuid, 'alice', 1, 'peer', 'expiry', '{}', 0, ${state}, ${NOW.addDays(-1).toISOString()}::timestamptz, ${NOW.toISOString()}::timestamptz)`;
+      VALUES (${id}::uuid, ${randomUUID()}::uuid, ${fixture.sender.value}, 1, 'peer', 'expiry', '{}', 0, ${state}, ${NOW.addDays(-1).toISOString()}::timestamptz, ${NOW.toISOString()}::timestamptz)`;
     await fixture.admin`UPDATE murmur.tenant_e2ee_usage SET pending_broadcast_count = ${state === "pending" ? 1 : 0} WHERE tenant_id = ${id}::uuid`;
   }
 }

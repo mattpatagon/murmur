@@ -25,6 +25,13 @@ A `response_finish` field distinguishes completed, cancelled, failed, and bodyle
 A validated client `x-request-id` is retained separately as `client_request_id`; it never replaces
 the server ID.
 Server errors use severity `ERROR`; successful and client-rejected requests use `INFO`.
+Authentication admission records `authentication_capacity_scope` as `credential`, `tenant`, or
+`global` for capacity rejections and null otherwise. Credential and tenant throttling returns HTTP
+429 with `outcome: client_error` at `INFO`; global exhaustion remains HTTP 503 with
+`outcome: server_error` at `ERROR`. Both retain `authentication_capacity: rejected` and
+`Retry-After: 1`. This applies to MCP and OAuth token authentication. The scope is a closed set;
+no credential or tenant admission key is logged. See [credential admission](credential-admission.md)
+for queue, cancellation, and retry behavior.
 Standalone stream admission distinguishes caller quotas from process exhaustion. Exceeding
 `MURMUR_MAX_ACTIVE_STREAMS_PER_PRINCIPAL` or `MURMUR_MAX_ACTIVE_STREAMS_PER_TENANT` returns HTTP
 429, logs `stream_capacity: rejected` with `outcome: client_error`, and does not count as an HTTP

@@ -18,7 +18,10 @@ import {
   generateTokenSecret,
   type HostedTokenSecret,
 } from "../src/hosted/token-secret.js";
-import { HttpCapacityController } from "../src/http/http-capacity.js";
+import {
+  type AuthenticationCapacityReservation,
+  HttpCapacityController,
+} from "../src/http/http-capacity.js";
 import { parseHttpServerConfig } from "../src/http/http-config.js";
 import { POSTGRES_RUNTIME_STATEMENT_TIMEOUT_MS } from "../src/postgres-runtime.js";
 
@@ -113,9 +116,9 @@ function ownerAuthentication(token: HostedTokenSecret): unknown {
   ];
 }
 
-function release(reservation: (() => void) | null): () => void {
-  if (reservation === null) throw new Error("Expected owner authentication reservation");
-  return reservation;
+function release(reservation: AuthenticationCapacityReservation): () => void {
+  if (reservation.kind !== "reserved") throw new Error("Expected owner authentication reservation");
+  return reservation.release;
 }
 
 test("startup owner hints survive ordinary TTL and admit a cold owner under ordinary saturation", async (): Promise<void> => {

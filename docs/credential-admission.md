@@ -27,3 +27,19 @@ clients should retry with backoff. After successful authentication, subsequent r
 known-credential priority on that process. This cache bounds admission memory independently of
 retained tenant count; it does not promise availability for every new credential under saturated
 network or authentication capacity.
+
+Authentication still runs at most once at a time per credential. Known credentials may wait in the
+bounded pending queue until the absolute authentication deadline. A disconnected queued request
+immediately releases its queue slot and never starts a database lookup. A lookup already running
+keeps its capacity reservation until it settles, even after disconnection.
+
+Caller authentication limits return HTTP 429 with `Retry-After: 1`: credential serialization or
+tenant concurrency, including a burst that fills the pending queue while already constrained by
+its credential or tenant gate. The pending tenant limit also returns 429. A distinct caller within
+its own limits receives HTTP 503 when global authentication or pending capacity is exhausted.
+Caller gates take precedence when global capacity is also full. Wait expiry reports the gate
+blocking that caller at the deadline; shutdown and backend unavailability remain 503. All capacity
+responses retain `Cache-Control: no-store`; MCP retains `Authentication capacity reached`, while
+the OAuth token route retains `temporarily_unavailable`. Queue sizes, database concurrency, owner
+reserves, and authentication deadlines are unchanged. Clients should honor bounded retry backoff
+and avoid sending concurrent close requests for already-closed sessions.

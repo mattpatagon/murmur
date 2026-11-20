@@ -437,7 +437,7 @@ test("connector token authentication saturation is bounded and retryable", async
     first = exchange(server, firstGrant);
     await authenticator.waitUntilEntered();
     const saturated: Response = await exchange(server, secondGrant);
-    expect(saturated.status).toBe(503);
+    expect(saturated.status).toBe(429);
     expect(saturated.headers.get("retry-after")).toBe("1");
     expect(saturated.headers.get("cache-control")).toBe("no-store");
     expect(await saturated.json()).toEqual({

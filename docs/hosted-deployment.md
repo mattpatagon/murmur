@@ -384,7 +384,8 @@ Confirm liveness without exposing credentials:
 curl --fail --silent --show-error "$PRODUCTION_URL/health"
 ```
 
-After every production change, run the operator-authenticated isolation canary:
+After every production change, run the operator-authenticated isolation canary. It retries fixed
+authentication-capacity errors on HTTP 429 or 503 within the existing six-attempt backoff:
 
 ```bash
 gh workflow run production-smoke.yml --ref main
@@ -410,12 +411,12 @@ The bounded lookup reads only Artifact Registry tag metadata, without requiring 
 It requires successful same-session stream reconnection, a new notification and durable
 inbox delivery, then checks the corresponding server completion events and platform failures.
 The platform-failure query stops at observation end. Later adversarial cleanup is independently
-verified and may exercise a bounded 503 retry. Application-row lookup retains narrow timestamp slack
+verified and may exercise a bounded 429 or 503 retry. Application-row lookup retains narrow timestamp slack
 and bounded ingestion polling. The fixed 55-minute window and 70-minute job bound include setup,
 targeted credential revocation, tenant suspension, and log-ingestion waits.
 The observer binds its worker to its own tenant's existing personal identity, verifies revoked credentials
 return 401, and suspends only its derived tenant; retained rows are not deleted. Session DELETEs retry
-503 at most twice with one-second waits inside the 20-second deadline; only 200, 401, or 404 confirms
+429 or 503 at most twice with one-second waits inside the 20-second deadline; only 200, 401, or 404 confirms
 closure. Hosted PostgreSQL CI exercises setup and cleanup. Cloud authentication is refreshed before
 reading final logs. Missing log-read or registry metadata permission fails closed; it never grants
 IAM access automatically.

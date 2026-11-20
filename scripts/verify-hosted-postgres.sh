@@ -123,6 +123,7 @@ else
     MURMUR_TEST_DATABASE_TLS_INSECURE=1 \
     bun test test/hosted.mcp.e2e.test.ts test/postgres-runtime-locks.test.ts \
       test/postgres-expiry-preflight.test.ts test/agent-page-budget.postgres.test.ts \
+      test/verification-tenant-rls.postgres.test.ts \
       test/inbox-page-postgres.test.ts test/e2ee-postgres-broadcast-finalize-bounds.test.ts \
       test/orchestration-policy-page.postgres.test.ts test/notice-page-postgres.test.ts \
       test/postgres-inbox-transactions.test.ts test/postgres-send-transactions.test.ts \
@@ -248,8 +249,10 @@ if [ "$e2ee_visible_rows" != "$e2ee_expected_rows" ]; then
   echo "E2E RLS probe expected $e2ee_expected_rows rows, found $e2ee_visible_rows" >&2
   exit 1
 fi
+e2ee_cross_tenant_id="$(bun scripts/select-verification-tenant.ts \
+  "$e2ee_tenant_id" "$founding_tenant_id" "$second_tenant_id")"
 e2ee_cross_rows="$(psql "$app_url" --tuples-only --no-align --quiet \
-  --command "begin; set local murmur.tenant_id = '$second_tenant_id'; select count(*) from murmur.e2ee_messages where tenant_id = '$e2ee_tenant_id'::uuid; rollback;")"
+  --command "begin; set local murmur.tenant_id = '$e2ee_cross_tenant_id'; select count(*) from murmur.e2ee_messages where tenant_id = '$e2ee_tenant_id'::uuid; rollback;")"
 if [ "$e2ee_cross_rows" != '0' ]; then
   echo 'E2E RLS probe exposed ciphertext across tenants' >&2
   exit 1
@@ -389,6 +392,7 @@ if psql "$app_url" --set ON_ERROR_STOP=1 \
 fi
 unset founding_tenant_id second_tenant_id tenant_table tenant_tables expected_rows visible_rows
 unset no_context_rows e2ee_tenant_id e2ee_expected_rows e2ee_visible_rows e2ee_cross_rows
+unset e2ee_cross_tenant_id
 unset plaintext_rows plaintext_fields public_role
 unset provenance_tenant_id
 

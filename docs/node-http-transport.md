@@ -57,9 +57,10 @@ timeout on legitimate long polls or SSE streams.
 Malformed metadata or framing returns fixed HTTP 400; excessive bodies return 413 (OAuth token
 forms preserve their existing HTTP 400 `invalid_request` contract); staging or
 transport-task saturation returns retryable 503 (`Retry-After: 1`); the outer input deadline
-returns 408. A request canceled during authentication returns fixed HTTP 408 after authentication
-actually settles, without subsequently parsing its body. The already-sent transport rejection
-remains authoritative. Early errors close the connection after bounded delivery (one second),
+returns 408. Cancellation while authentication is queued promptly releases the pending slot and
+returns fixed HTTP 408 without starting a database lookup. If authentication is already running,
+its reservation remains charged until the lookup settles, then the request returns fixed HTTP 408
+without subsequently parsing its body. The already-sent transport rejection remains authoritative. Early errors close the connection after bounded delivery (one second),
 without waiting for the remaining upload. Response-reader and forced-server cleanup use two seconds.
 
 MCP authentication and request admission still precede application body parsing. OAuth's bounded
