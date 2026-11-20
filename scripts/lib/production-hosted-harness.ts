@@ -79,7 +79,8 @@ async function responsePayload(response: Response): Promise<unknown> {
     try {
       const parsed: Record<string, unknown> = recordValue(JSON.parse(body), "error response");
       capacityReached =
-        response.status === 503 && parsed["error"] === "Authentication capacity reached";
+        (response.status === 429 || response.status === 503) &&
+        parsed["error"] === "Authentication capacity reached";
     } catch (_error: unknown) {
       capacityReached = false;
     }
