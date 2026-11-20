@@ -2,6 +2,13 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.20.2.1] - 2026-11-20
+
+### Fixed
+
+- Serialize and verify production-canary session cleanup so revoked credentials do not create
+  an authentication burst during verification. Failed cleanup remains visible to operators.
+
 ## [0.20.2.0] - 2026-11-20
 
 ### Fixed
