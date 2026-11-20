@@ -11,6 +11,8 @@ All notable changes to Murmur are documented in this file.
   with safe rejection scopes recorded for MCP and OAuth requests.
 - Release authentication queue slots when clients disconnect, preventing abandoned requests from
   starting database lookups while keeping running authentication charged until it finishes.
+- Retry throttled session closes during production stream verification within the existing attempt
+  and deadline bounds, while continuing to fail incomplete cleanup.
 
 ## [0.20.1.0] - 2026-10-24
 

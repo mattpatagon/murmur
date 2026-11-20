@@ -213,7 +213,7 @@ export class ProductionStreamClient {
                 signal,
               });
               if (response.body !== null) await response.body.cancel();
-              if (response.status === 503 && attempt < 2) {
+              if ((response.status === 429 || response.status === 503) && attempt < 2) {
                 // Revoked credentials lose queued admission; concurrent closes can hit its bound.
                 await this.runtime.clock.sleep(1_000, signal);
                 continue;

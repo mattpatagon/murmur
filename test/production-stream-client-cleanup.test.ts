@@ -98,58 +98,69 @@ async function withClient(
   }
 }
 
-test("cleanup retries transient admission failure on the same session and observes every cancellation", async (): Promise<void> => {
-  await withClient({ statuses: [503, 401] }, async (harness: CleanupHarness): Promise<void> => {
-    const closing: Promise<void> = harness.client.close();
-    expect(harness.client.close()).toBe(closing);
-    await closing;
-    expect(harness.deletes).toHaveLength(2);
-    expect(harness.sleeps).toEqual([1_000]);
-    expect(harness.events).toEqual([
-      "stream-canceled",
-      "delete-503",
-      "body-canceled-503",
-      "sleep",
-      "delete-401",
-      "body-canceled-401",
-    ]);
-    for (const request of harness.deletes) {
-      expect(request.url).toBe(ENDPOINT.href);
-      expect(request.headers.get("mcp-session-id")).toBe(SESSION);
-      expect(request.headers.get("mcp-protocol-version")).toBe(LATEST_PROTOCOL_VERSION);
-      expect(request.headers.get("authorization")).toBe("Bearer private-test-credential");
-      expect(request.redirect).toBe("error");
-    }
-    await harness.client.close();
-    expect(harness.deletes).toHaveLength(2);
-  });
-});
-
-test("cleanup exhausts exactly three unavailable responses and never accepts 503 as deletion", async (): Promise<void> => {
-  await withClient(
-    { statuses: [503, 503, 503, 401] },
-    async (harness: CleanupHarness): Promise<void> => {
-      await expect(harness.client.close()).rejects.toThrow(FAILURE);
-      expect(harness.deletes).toHaveLength(3);
-      expect(harness.sleeps).toEqual([1_000, 1_000]);
-      expect(harness.events).toEqual([
-        "stream-canceled",
-        "delete-503",
-        "body-canceled-503",
-        "sleep",
-        "delete-503",
-        "body-canceled-503",
-        "sleep",
-        "delete-503",
-        "body-canceled-503",
-      ]);
-      await expect(harness.client.close()).rejects.toThrow(FAILURE);
-      expect(harness.deletes).toHaveLength(3);
+for (const retryStatus of [429, 503]) {
+  test.each([401, 404])(
+    `cleanup retries HTTP ${retryStatus} on the same session before terminal HTTP %i`,
+    async (terminalStatus: number): Promise<void> => {
+      await withClient(
+        { statuses: [retryStatus, terminalStatus] },
+        async (harness: CleanupHarness): Promise<void> => {
+          const closing: Promise<void> = harness.client.close();
+          expect(harness.client.close()).toBe(closing);
+          await closing;
+          expect(harness.deletes).toHaveLength(2);
+          expect(harness.sleeps).toEqual([1_000]);
+          expect(harness.events).toEqual([
+            "stream-canceled",
+            `delete-${retryStatus}`,
+            `body-canceled-${retryStatus}`,
+            "sleep",
+            `delete-${terminalStatus}`,
+            `body-canceled-${terminalStatus}`,
+          ]);
+          for (const request of harness.deletes) {
+            expect(request.url).toBe(ENDPOINT.href);
+            expect(request.headers.get("mcp-session-id")).toBe(SESSION);
+            expect(request.headers.get("mcp-protocol-version")).toBe(LATEST_PROTOCOL_VERSION);
+            expect(request.headers.get("authorization")).toBe("Bearer private-test-credential");
+            expect(request.redirect).toBe("error");
+          }
+          await harness.client.close();
+          expect(harness.deletes).toHaveLength(2);
+        },
+      );
     },
   );
-});
+}
 
-test.each([403, 429, 500])(
+test.each([429, 503])(
+  "cleanup exhausts exactly three HTTP %i responses without accepting deletion",
+  async (status: number): Promise<void> => {
+    await withClient(
+      { statuses: [status, status, status, 401] },
+      async (harness: CleanupHarness): Promise<void> => {
+        await expect(harness.client.close()).rejects.toThrow(FAILURE);
+        expect(harness.deletes).toHaveLength(3);
+        expect(harness.sleeps).toEqual([1_000, 1_000]);
+        expect(harness.events).toEqual([
+          "stream-canceled",
+          `delete-${status}`,
+          `body-canceled-${status}`,
+          "sleep",
+          `delete-${status}`,
+          `body-canceled-${status}`,
+          "sleep",
+          `delete-${status}`,
+          `body-canceled-${status}`,
+        ]);
+        await expect(harness.client.close()).rejects.toThrow(FAILURE);
+        expect(harness.deletes).toHaveLength(3);
+      },
+    );
+  },
+);
+
+test.each([403, 500])(
   "cleanup does not retry nonretryable HTTP %i",
   async (status: number): Promise<void> => {
     await withClient(
@@ -168,40 +179,50 @@ test.each([403, 429, 500])(
   },
 );
 
-test("cleanup cannot retry or succeed when response cancellation fails", async (): Promise<void> => {
-  await withClient(
-    { statuses: [503, 401], cancellationFails: true },
-    async (harness: CleanupHarness): Promise<void> => {
-      await expect(harness.client.close()).rejects.toThrow(FAILURE);
-      expect(harness.deletes).toHaveLength(1);
-      expect(harness.sleeps).toEqual([]);
-      expect(harness.events).toEqual(["stream-canceled", "delete-503", "body-canceled-503"]);
-    },
-  );
-});
-
-test("caller abort during retry delay prevents another DELETE after local streams are closed", async (): Promise<void> => {
-  const controller: AbortController = new AbortController();
-  let sleepAborted: boolean = false;
-  await withClient(
-    {
-      statuses: [503, 401],
-      onSleep: (signal: AbortSignal): void => {
-        controller.abort();
-        sleepAborted = signal.aborted;
+test.each([429, 503])(
+  "cleanup cannot retry HTTP %i or succeed when response cancellation fails",
+  async (status: number): Promise<void> => {
+    await withClient(
+      { statuses: [status, 401], cancellationFails: true },
+      async (harness: CleanupHarness): Promise<void> => {
+        await expect(harness.client.close()).rejects.toThrow(FAILURE);
+        expect(harness.deletes).toHaveLength(1);
+        expect(harness.sleeps).toEqual([]);
+        expect(harness.events).toEqual([
+          "stream-canceled",
+          `delete-${status}`,
+          `body-canceled-${status}`,
+        ]);
       },
-    },
-    async (harness: CleanupHarness): Promise<void> => {
-      await expect(harness.client.close(controller.signal)).rejects.toThrow(FAILURE);
-      expect(sleepAborted).toBe(true);
-      expect(harness.deletes).toHaveLength(1);
-      expect(harness.sleeps).toEqual([1_000]);
-      expect(harness.events).toEqual([
-        "stream-canceled",
-        "delete-503",
-        "body-canceled-503",
-        "sleep",
-      ]);
-    },
-  );
-});
+    );
+  },
+);
+
+test.each([429, 503])(
+  "caller abort during HTTP %i retry delay prevents another DELETE after local streams are closed",
+  async (status: number): Promise<void> => {
+    const controller: AbortController = new AbortController();
+    let sleepAborted: boolean = false;
+    await withClient(
+      {
+        statuses: [status, 401],
+        onSleep: (signal: AbortSignal): void => {
+          controller.abort();
+          sleepAborted = signal.aborted;
+        },
+      },
+      async (harness: CleanupHarness): Promise<void> => {
+        await expect(harness.client.close(controller.signal)).rejects.toThrow(FAILURE);
+        expect(sleepAborted).toBe(true);
+        expect(harness.deletes).toHaveLength(1);
+        expect(harness.sleeps).toEqual([1_000]);
+        expect(harness.events).toEqual([
+          "stream-canceled",
+          `delete-${status}`,
+          `body-canceled-${status}`,
+          "sleep",
+        ]);
+      },
+    );
+  },
+);
