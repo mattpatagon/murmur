@@ -384,8 +384,8 @@ Confirm liveness without exposing credentials:
 curl --fail --silent --show-error "$PRODUCTION_URL/health"
 ```
 
-After every production change, run the operator-authenticated isolation canary. It retries fixed
-authentication-capacity errors on HTTP 429 or 503 within the existing six-attempt backoff:
+After every production change, run the operator-authenticated isolation canary. Session cleanup is serial;
+one 20-second deadline covers all closes, only 200/401/404 confirms closure, and fixed authentication 429/503 uses at most six attempts:
 
 ```bash
 gh workflow run production-smoke.yml --ref main

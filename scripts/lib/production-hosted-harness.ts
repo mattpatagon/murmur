@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import process from "node:process";
+import { setTimeout } from "node:timers/promises";
 
 import {
   CallToolResultSchema,
@@ -37,15 +38,19 @@ export function assertCondition(condition: unknown, message: string): asserts co
   if (!condition) throw new Error(message);
 }
 
-async function retry<T>(operation: () => Promise<T>): Promise<T> {
+async function retry<T>(
+  operation: () => Promise<T>,
+  signal: AbortSignal | undefined = undefined,
+): Promise<T> {
   let lastError: unknown;
   for (let attempt: number = 1; attempt <= 6; attempt += 1) {
     try {
+      if (signal !== undefined) signal.throwIfAborted();
       return await operation();
     } catch (error: unknown) {
       lastError = error;
       if (!(error instanceof AuthenticationCapacityError) || attempt === 6) throw error;
-      await Bun.sleep(attempt * 250);
+      await setTimeout(attempt * 250, undefined, { signal });
     }
   }
   throw lastError;
@@ -267,19 +272,44 @@ export function stringField(value: Record<string, unknown>, name: string): strin
 export async function closeProductionHarnesses(
   harnesses: readonly ProductionHarness[],
 ): Promise<void> {
-  await Promise.allSettled(
-    harnesses.map(async (harness: ProductionHarness): Promise<void> => {
-      await fetch(harness.url, {
-        headers: headers(
-          harness.token,
-          harness.sessionId,
-          harness.clientName,
-          harness.repositoryName,
+  const signal: AbortSignal = AbortSignal.timeout(20_000);
+  const failures: Error[] = [];
+  for (const harness of harnesses) {
+    try {
+      await retry(async (): Promise<void> => {
+        const response: Response = await fetch(harness.url, {
+          headers: headers(
+            harness.token,
+            harness.sessionId,
+            harness.clientName,
+            harness.repositoryName,
+          ),
+          method: "DELETE",
+          redirect: "error",
+          signal,
+        });
+        if (response.status === 200 || response.status === 401 || response.status === 404) {
+          const body: ReadableStream<Uint8Array<ArrayBuffer>> | null = response.body;
+          if (body !== null) await body.cancel();
+          return;
+        }
+        await responsePayload(response);
+        throw new Error(`Murmur returned HTTP ${String(response.status)}`);
+      }, signal);
+    } catch (_error: unknown) {
+      failures.push(
+        new Error(
+          signal.aborted
+            ? "Production MCP session cleanup deadline exceeded"
+            : "Production MCP session cleanup request failed",
         ),
-        method: "DELETE",
-      });
-    }),
-  );
+      );
+      if (signal.aborted) break;
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "Production MCP session cleanup failed");
+  }
 }
 
 export async function findTenantBySlug(
