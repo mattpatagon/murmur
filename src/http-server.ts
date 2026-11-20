@@ -39,7 +39,7 @@ import {
 import { HttpMaterializationBudget } from "./http/http-materialization-budget.js";
 import { runHttpProcess } from "./http/http-process.js";
 import {
-  authenticationCapacityResponse,
+  authenticationFailureResponse,
   bearerToken,
   branchFromRequest,
   clientFromRequest,
@@ -204,14 +204,14 @@ export async function startHttpServer(
         authenticator,
         capacity,
         observation,
+        request.signal,
       );
-      if (request.signal.aborted) return jsonResponse(408, { error: "HTTP request cancelled" });
-      if (authentication.kind === "capacity") return authenticationCapacityResponse();
-      if (authentication.kind === "unavailable") {
-        return jsonResponse(503, { error: "Authentication service unavailable" });
+      if (request.signal.aborted || authentication.kind === "cancelled") {
+        return jsonResponse(408, { error: "HTTP request cancelled" });
       }
-      if (authentication.kind === "invalid") {
-        return unauthorizedResponse(
+      if (authentication.kind !== "authenticated") {
+        return authenticationFailureResponse(
+          authentication,
           connectorProtectedResourceMetadataUrl(request, config.oauthPublicOrigin),
         );
       }

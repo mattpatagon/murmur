@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { HostedPrincipal } from "../hosted/control-plane.js";
+import type { AuthenticationCapacityScope } from "../http/http-capacity.js";
 import {
   HEALTH_PATH,
   MCP_PATH,
@@ -71,6 +72,7 @@ export class RequestObservation {
   public readonly id: string;
   private authentication: AuthenticationOutcome;
   private authenticationCapacity: GateOutcome;
+  private authenticationCapacityScope: AuthenticationCapacityScope | null;
   private readonly clientRequestId: string | null;
   private credential: CredentialOutcome;
   private errorType: string | null;
@@ -105,6 +107,7 @@ export class RequestObservation {
   ) {
     this.authentication = "not_checked";
     this.authenticationCapacity = "not_checked";
+    this.authenticationCapacityScope = null;
     this.clientRequestId = clientRequestId(request);
     this.credential = "not_checked";
     this.errorType = null;
@@ -139,6 +142,10 @@ export class RequestObservation {
 
   public recordAuthenticationCapacity(outcome: GateOutcome): void {
     this.authenticationCapacity = outcome;
+  }
+
+  public recordAuthenticationCapacityScope(scope: AuthenticationCapacityScope): void {
+    this.authenticationCapacityScope = scope;
   }
 
   public recordError(error: unknown): void {
@@ -208,6 +215,7 @@ export class RequestObservation {
     const fields: LogFields = {
       authentication: this.authentication,
       authentication_capacity: this.authenticationCapacity,
+      authentication_capacity_scope: this.authenticationCapacityScope,
       client_request_id: this.clientRequestId,
       credential: this.credential,
       duration_ms: Math.max(0, this.time.now() - this.startedAt),

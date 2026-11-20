@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  type AuthenticationCapacityReservation,
   HttpCapacityController,
   type StreamCapacityReservation,
   type TimeSource,
@@ -60,12 +61,40 @@ function requiredRelease(reservation: (() => void) | null): () => void {
   return reservation;
 }
 
+function requiredAuthenticationRelease(reservation: AuthenticationCapacityReservation): () => void {
+  if (reservation.kind !== "reserved")
+    throw new Error("Expected authentication capacity reservation");
+  return reservation.release;
+}
+
 function requiredStreamRelease(reservation: StreamCapacityReservation): () => void {
   if (reservation.kind === "rejected") throw new Error("Expected stream capacity reservation");
   return reservation.release;
 }
 
 describe("HTTP capacity controller", (): void => {
+  test("authentication rejection keeps caller scope ahead of global saturation", async (): Promise<void> => {
+    const controller: HttpCapacityController = capacity(new FakeTimeSource(), {
+      MURMUR_MAX_CONCURRENT_AUTHENTICATIONS: "1",
+    });
+    const release: () => void = requiredAuthenticationRelease(
+      await controller.reserveAuthentication("credential-a", "tenant-a", false),
+    );
+    try {
+      expect(await controller.reserveAuthentication("credential-a", "tenant-a", false)).toEqual({
+        kind: "rejected",
+        scope: "credential",
+      });
+      expect(await controller.reserveAuthentication("credential-b", "tenant-b", false)).toEqual({
+        kind: "rejected",
+        scope: "global",
+      });
+    } finally {
+      controller.stop();
+      release();
+    }
+  });
+
   test("rate windows roll over deterministically", (): void => {
     const time: FakeTimeSource = new FakeTimeSource();
     const controller: HttpCapacityController = capacity(time, {
@@ -179,17 +208,17 @@ describe("HTTP capacity controller", (): void => {
     const controller: HttpCapacityController = capacity(time, {
       MURMUR_MAX_CONCURRENT_AUTHENTICATIONS: "1",
     });
-    const releaseFirst: () => void = requiredRelease(
+    const releaseFirst: () => void = requiredAuthenticationRelease(
       await controller.reserveAuthentication("credential-a", "tenant-a", true),
     );
-    const waiting: Promise<(() => void) | null> = controller.reserveAuthentication(
+    const waiting: Promise<AuthenticationCapacityReservation> = controller.reserveAuthentication(
       "credential-b",
       "tenant-b",
       true,
     );
 
     releaseFirst();
-    const releaseSecond: () => void = requiredRelease(await waiting);
+    const releaseSecond: () => void = requiredAuthenticationRelease(await waiting);
     expect(time.pendingSleeps()).toBe(0);
     releaseSecond();
   });
@@ -198,11 +227,14 @@ describe("HTTP capacity controller", (): void => {
     const controller: HttpCapacityController = capacity(new FakeTimeSource(), {
       MURMUR_MAX_CONCURRENT_AUTHENTICATIONS: "2",
     });
-    const releaseKnown: () => void = requiredRelease(
+    const releaseKnown: () => void = requiredAuthenticationRelease(
       await controller.reserveAuthentication("credential-a", "tenant-a", true),
     );
 
-    expect(await controller.reserveAuthentication("forged", null, false)).toBeNull();
+    expect(await controller.reserveAuthentication("forged", null, false)).toEqual({
+      kind: "rejected",
+      scope: "global",
+    });
     releaseKnown();
   });
 
@@ -212,19 +244,25 @@ describe("HTTP capacity controller", (): void => {
       MURMUR_MAX_PENDING_AUTHENTICATIONS: "1",
       MURMUR_MAX_PENDING_AUTHENTICATIONS_PER_TENANT: "1",
     });
-    const releaseActive: () => void = requiredRelease(
+    const releaseActive: () => void = requiredAuthenticationRelease(
       await controller.reserveAuthentication("credential-a", "tenant-a", true),
     );
-    const waiting: Promise<(() => void) | null> = controller.reserveAuthentication(
+    const waiting: Promise<AuthenticationCapacityReservation> = controller.reserveAuthentication(
       "credential-b",
       "tenant-b",
       true,
     );
 
-    expect(await controller.reserveAuthentication("credential-c", "tenant-b", true)).toBeNull();
+    expect(await controller.reserveAuthentication("credential-c", "tenant-b", true)).toEqual({
+      kind: "rejected",
+      scope: "tenant",
+    });
     controller.stop();
-    expect(await waiting).toBeNull();
-    expect(await controller.reserveAuthentication("credential-d", "tenant-d", true)).toBeNull();
+    expect(await waiting).toEqual({ kind: "rejected", scope: "global" });
+    expect(await controller.reserveAuthentication("credential-d", "tenant-d", true)).toEqual({
+      kind: "rejected",
+      scope: "global",
+    });
     releaseActive();
   });
 
@@ -234,17 +272,148 @@ describe("HTTP capacity controller", (): void => {
       MURMUR_AUTHENTICATION_WAIT_MS: "10",
       MURMUR_MAX_CONCURRENT_AUTHENTICATIONS: "1",
     });
-    const releaseActive: () => void = requiredRelease(
+    const releaseActive: () => void = requiredAuthenticationRelease(
       await controller.reserveAuthentication("credential-a", "tenant-a", true),
     );
-    const waiting: Promise<(() => void) | null> = controller.reserveAuthentication(
+    const waiting: Promise<AuthenticationCapacityReservation> = controller.reserveAuthentication(
       "credential-b",
       "tenant-b",
       true,
     );
 
     time.advance(10);
-    expect(await waiting).toBeNull();
+    expect(await waiting).toEqual({ kind: "rejected", scope: "global" });
     releaseActive();
+  });
+
+  test("a full queue preserves credential and independent global rejection scopes", async (): Promise<void> => {
+    const time: FakeTimeSource = new FakeTimeSource();
+    const controller: HttpCapacityController = capacity(time, {
+      MURMUR_MAX_CONCURRENT_AUTHENTICATIONS: "1",
+      MURMUR_MAX_PENDING_AUTHENTICATIONS: "1",
+    });
+    const release: () => void = requiredAuthenticationRelease(
+      await controller.reserveAuthentication("credential-a", "tenant-a", true),
+    );
+    const waiting: Promise<AuthenticationCapacityReservation> = controller.reserveAuthentication(
+      "credential-a",
+      "tenant-a",
+      true,
+    );
+    try {
+      expect(await controller.reserveAuthentication("credential-a", "tenant-a", true)).toEqual({
+        kind: "rejected",
+        scope: "credential",
+      });
+      expect(await controller.reserveAuthentication("credential-b", "tenant-b", true)).toEqual({
+        kind: "rejected",
+        scope: "global",
+      });
+    } finally {
+      controller.stop();
+      release();
+      expect(await waiting).toEqual({ kind: "rejected", scope: "global" });
+      expect(time.pendingSleeps()).toBe(0);
+    }
+  });
+
+  test("authentication deadlines retain actual credential, tenant and global blockers", async (): Promise<void> => {
+    const time: FakeTimeSource = new FakeTimeSource();
+    const controller: HttpCapacityController = capacity(time, {
+      MURMUR_AUTHENTICATION_WAIT_MS: "10",
+      MURMUR_MAX_CONCURRENT_AUTHENTICATIONS: "4",
+    });
+    const releases: (() => void)[] = [];
+    const identities: readonly (readonly [string, string])[] = [
+      ["credential-a", "tenant-a"],
+      ["credential-b", "tenant-a"],
+      ["credential-c", "tenant-b"],
+      ["credential-d", "tenant-c"],
+    ];
+    try {
+      for (const [credential, tenant] of identities) {
+        releases.push(
+          requiredAuthenticationRelease(
+            await controller.reserveAuthentication(credential, tenant, true),
+          ),
+        );
+      }
+      const credential: Promise<AuthenticationCapacityReservation> =
+        controller.reserveAuthentication("credential-a", "tenant-a", true);
+      const tenant: Promise<AuthenticationCapacityReservation> = controller.reserveAuthentication(
+        "credential-e",
+        "tenant-a",
+        true,
+      );
+      const global: Promise<AuthenticationCapacityReservation> = controller.reserveAuthentication(
+        "credential-f",
+        "tenant-d",
+        true,
+      );
+      time.advance(10);
+      expect(await credential).toEqual({ kind: "rejected", scope: "credential" });
+      expect(await tenant).toEqual({ kind: "rejected", scope: "tenant" });
+      expect(await global).toEqual({ kind: "rejected", scope: "global" });
+      expect(time.pendingSleeps()).toBe(0);
+    } finally {
+      controller.stop();
+      releases.forEach((release: () => void): void => {
+        release();
+      });
+    }
+  });
+
+  test("aborting queued authentication frees pending capacity without releasing active work", async (): Promise<void> => {
+    const time: FakeTimeSource = new FakeTimeSource();
+    const controller: HttpCapacityController = capacity(time, {
+      MURMUR_MAX_CONCURRENT_AUTHENTICATIONS: "1",
+      MURMUR_MAX_PENDING_AUTHENTICATIONS: "1",
+    });
+    const activeAbort: AbortController = new AbortController();
+    const queuedAbort: AbortController = new AbortController();
+    const release: () => void = requiredAuthenticationRelease(
+      await controller.reserveAuthentication("credential-a", "tenant-a", true, activeAbort.signal),
+    );
+    try {
+      const waiting: Promise<AuthenticationCapacityReservation> = controller.reserveAuthentication(
+        "credential-a",
+        "tenant-a",
+        true,
+        queuedAbort.signal,
+      );
+      queuedAbort.abort();
+      expect(await waiting).toEqual({ kind: "cancelled" });
+      expect(time.pendingSleeps()).toBe(0);
+      activeAbort.abort();
+      expect(await controller.reserveAuthentication("credential-a", "tenant-a", false)).toEqual({
+        kind: "rejected",
+        scope: "credential",
+      });
+      const replacement: Promise<AuthenticationCapacityReservation> =
+        controller.reserveAuthentication("credential-b", "tenant-b", true);
+      expect(time.pendingSleeps()).toBe(1);
+      release();
+      requiredAuthenticationRelease(await replacement)();
+      expect(time.pendingSleeps()).toBe(0);
+    } finally {
+      controller.stop();
+      release();
+    }
+  });
+
+  test("already aborted authentication never consumes active or pending capacity", async (): Promise<void> => {
+    const time: FakeTimeSource = new FakeTimeSource();
+    const controller: HttpCapacityController = capacity(time, {
+      MURMUR_MAX_CONCURRENT_AUTHENTICATIONS: "1",
+    });
+    const abort: AbortController = new AbortController();
+    abort.abort();
+    expect(
+      await controller.reserveAuthentication("credential-a", "tenant-a", true, abort.signal),
+    ).toEqual({ kind: "cancelled" });
+    expect(time.pendingSleeps()).toBe(0);
+    requiredAuthenticationRelease(
+      await controller.reserveAuthentication("credential-a", "tenant-a", true),
+    )();
   });
 });

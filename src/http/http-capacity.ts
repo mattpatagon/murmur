@@ -12,6 +12,11 @@ export type StreamCapacityScope = "global" | "principal" | "tenant";
 export type StreamCapacityReservation =
   | { readonly kind: "reserved"; readonly release: () => void }
   | { readonly kind: "rejected"; readonly scope: StreamCapacityScope };
+export type AuthenticationCapacityScope = "credential" | "tenant" | "global";
+export type AuthenticationCapacityReservation =
+  | { readonly kind: "reserved"; readonly release: () => void }
+  | { readonly kind: "rejected"; readonly scope: AuthenticationCapacityScope }
+  | { readonly kind: "cancelled" };
 
 export type TimeSource = {
   now(): number;
@@ -217,11 +222,11 @@ export class HttpCapacityController {
     });
   }
 
-  private tryReserveAuthentication(
+  private authenticationRejectionScope(
     admissionKey: string,
     admittedTenantKey: string | null,
     knownCredential: boolean,
-  ): (() => void) | null {
+  ): AuthenticationCapacityScope | null {
     const owner: boolean = isOwnerAuthentication(
       this.config.ownerPriority,
       admittedTenantKey,
@@ -234,22 +239,42 @@ export class HttpCapacityController {
         ? 0
         : (this.activeAuthenticationsByTenant.get(admittedTenantKey) ?? 0);
     const unknownLimit: number = Math.max(1, this.config.maxAuthentications - 1);
+    if (activeForCredential >= 1) return "credential";
+    if (activeForTenant >= admittedScopeLimit(this.config.maxAuthentications, 2, owner))
+      return "tenant";
     if (
       this.activeAuthentications >=
         admittedGlobalLimit(this.config.maxAuthentications, this.config.ownerPriority, owner) ||
-      activeForCredential >= 1 ||
-      activeForTenant >= admittedScopeLimit(this.config.maxAuthentications, 2, owner) ||
       (!knownCredential && this.activeAuthentications >= unknownLimit)
-    ) {
-      return null;
-    }
+    )
+      return "global";
+    return null;
+  }
+
+  private tryReserveAuthentication(
+    admissionKey: string,
+    admittedTenantKey: string | null,
+    knownCredential: boolean,
+  ): AuthenticationCapacityReservation {
+    const scope: AuthenticationCapacityScope | null = this.authenticationRejectionScope(
+      admissionKey,
+      admittedTenantKey,
+      knownCredential,
+    );
+    if (scope !== null) return { kind: "rejected", scope };
+    const activeForCredential: number =
+      this.activeAuthenticationsByCredential.get(admissionKey) ?? 0;
+    const activeForTenant: number =
+      admittedTenantKey === null
+        ? 0
+        : (this.activeAuthenticationsByTenant.get(admittedTenantKey) ?? 0);
     this.activeAuthentications += 1;
     this.activeAuthenticationsByCredential.set(admissionKey, activeForCredential + 1);
     if (admittedTenantKey !== null) {
       this.activeAuthenticationsByTenant.set(admittedTenantKey, activeForTenant + 1);
     }
     let released: boolean = false;
-    return (): void => {
+    const release: () => void = (): void => {
       if (released) return;
       released = true;
       this.activeAuthentications -= 1;
@@ -262,9 +287,13 @@ export class HttpCapacityController {
       }
       this.notifyAuthenticationCapacityChanged();
     };
+    return { kind: "reserved", release };
   }
 
-  private async waitForAuthenticationCapacity(timeoutMs: number): Promise<void> {
+  private async waitForAuthenticationCapacity(
+    timeoutMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
     let wake: (() => void) | null = null;
     let cancelTimeout: () => void = (): void => {};
     const capacityChanged: Promise<void> = new Promise((resolve: () => void): void => {
@@ -274,23 +303,36 @@ export class HttpCapacityController {
     const elapsed: Promise<void> = new Promise((resolve: () => void): void => {
       cancelTimeout = this.time.schedule(timeoutMs, resolve);
     });
-    await Promise.race([capacityChanged, elapsed]);
-    cancelTimeout();
-    if (wake !== null) this.authenticationWaiters.delete(wake);
+    const cancelWait: () => void = (): void => {
+      if (wake !== null) wake();
+    };
+    if (signal !== undefined) {
+      signal.addEventListener("abort", cancelWait, { once: true });
+      if (signal.aborted) cancelWait();
+    }
+    try {
+      await Promise.race([capacityChanged, elapsed]);
+    } finally {
+      cancelTimeout();
+      if (signal !== undefined) signal.removeEventListener("abort", cancelWait);
+      if (wake !== null) this.authenticationWaiters.delete(wake);
+    }
   }
 
   public async reserveAuthentication(
     admissionKey: string,
     admittedTenantKey: string | null,
     knownCredential: boolean,
-  ): Promise<(() => void) | null> {
-    if (this.stopped) return null;
-    const immediate: (() => void) | null = this.tryReserveAuthentication(
+    signal?: AbortSignal,
+  ): Promise<AuthenticationCapacityReservation> {
+    if (signal !== undefined && signal.aborted) return { kind: "cancelled" };
+    if (this.stopped) return { kind: "rejected", scope: "global" };
+    const immediate: AuthenticationCapacityReservation = this.tryReserveAuthentication(
       admissionKey,
       admittedTenantKey,
       knownCredential,
     );
-    if (immediate !== null || !knownCredential) return immediate;
+    if (immediate.kind !== "rejected" || !knownCredential) return immediate;
     const pendingForTenant: number =
       admittedTenantKey === null
         ? 0
@@ -301,22 +343,20 @@ export class HttpCapacityController {
       knownCredential,
     );
     if (
-      this.pendingAuthentications >=
-        admittedGlobalLimit(
+      admittedTenantKey !== null &&
+      pendingForTenant >=
+        admittedScopeLimit(
           this.config.maxPendingAuthentications,
-          this.config.ownerPriority,
+          this.config.maxPendingAuthenticationsPerTenant,
           owner,
-        ) ||
-      (admittedTenantKey !== null &&
-        pendingForTenant >=
-          admittedScopeLimit(
-            this.config.maxPendingAuthentications,
-            this.config.maxPendingAuthenticationsPerTenant,
-            owner,
-          ))
-    ) {
-      return null;
-    }
+        )
+    )
+      return immediate.scope === "credential" ? immediate : { kind: "rejected", scope: "tenant" };
+    if (
+      this.pendingAuthentications >=
+      admittedGlobalLimit(this.config.maxPendingAuthentications, this.config.ownerPriority, owner)
+    )
+      return immediate;
     this.pendingAuthentications += 1;
     if (admittedTenantKey !== null) {
       this.pendingAuthenticationsByTenant.set(admittedTenantKey, pendingForTenant + 1);
@@ -324,16 +364,24 @@ export class HttpCapacityController {
     const deadline: number = this.time.now() + this.config.authenticationWaitMs;
     try {
       while (!this.stopped && this.time.now() < deadline) {
-        const reservation: (() => void) | null = this.tryReserveAuthentication(
+        if (signal !== undefined && signal.aborted) return { kind: "cancelled" };
+        const reservation: AuthenticationCapacityReservation = this.tryReserveAuthentication(
           admissionKey,
           admittedTenantKey,
           knownCredential,
         );
-        if (reservation !== null) return reservation;
+        if (reservation.kind !== "rejected") return reservation;
         const remainingMs: number = deadline - this.time.now();
-        if (remainingMs > 0) await this.waitForAuthenticationCapacity(remainingMs);
+        if (remainingMs > 0) await this.waitForAuthenticationCapacity(remainingMs, signal);
       }
-      return null;
+      if (signal !== undefined && signal.aborted) return { kind: "cancelled" };
+      return {
+        kind: "rejected",
+        scope: this.stopped
+          ? "global"
+          : (this.authenticationRejectionScope(admissionKey, admittedTenantKey, knownCredential) ??
+            "global"),
+      };
     } finally {
       this.pendingAuthentications -= 1;
       if (admittedTenantKey !== null) {

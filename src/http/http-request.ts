@@ -1,7 +1,13 @@
 import { AgentClient, BranchName, RepositoryName } from "../domain/value-objects.js";
 import { logSafeError } from "../safe-errors.js";
 import { parseBoundedJsonText } from "./bounded-json.js";
-import { type StreamCapacityScope, SYSTEM_TIME_SOURCE, type TimeSource } from "./http-capacity.js";
+import type { HostedAuthenticationResult } from "./hosted-credential-authentication.js";
+import {
+  type AuthenticationCapacityScope,
+  type StreamCapacityScope,
+  SYSTEM_TIME_SOURCE,
+  type TimeSource,
+} from "./http-capacity.js";
 
 const BRANCH_HEADER: string = "x-murmur-branch";
 const CLIENT_HEADER: string = "x-murmur-client";
@@ -38,11 +44,26 @@ export function jsonResponse(status: number, body: Record<string, unknown>): Res
   return Response.json(body, { headers: { "cache-control": "no-store" }, status });
 }
 
-export function authenticationCapacityResponse(): Response {
+export function authenticationCapacityResponse(scope: AuthenticationCapacityScope): Response {
   return Response.json(
     { error: "Authentication capacity reached" },
-    { headers: { "cache-control": "no-store", "retry-after": "1" }, status: 503 },
+    {
+      headers: { "cache-control": "no-store", "retry-after": "1" },
+      status: scope === "global" ? 503 : 429,
+    },
   );
+}
+
+export function authenticationFailureResponse(
+  result: Exclude<HostedAuthenticationResult, { readonly kind: "authenticated" }>,
+  resourceMetadataUrl: string | null,
+): Response {
+  if (result.kind === "capacity") return authenticationCapacityResponse(result.scope);
+  if (result.kind === "cancelled") return jsonResponse(408, { error: "HTTP request cancelled" });
+  if (result.kind === "unavailable") {
+    return jsonResponse(503, { error: "Authentication service unavailable" });
+  }
+  return unauthorizedResponse(resourceMetadataUrl);
 }
 
 export function streamCapacityResponse(scope: StreamCapacityScope): Response {

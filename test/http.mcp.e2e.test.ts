@@ -179,7 +179,7 @@ test("remote MCP releases recognized authentication queue capacity after timeout
       initializeRequest(122, "timeout-waiter"),
       validTokens[2] ?? "",
     );
-    expect(timedOut.status).toBe(503);
+    expect(timedOut.status).toBe(429);
     expect(timedOut.headers.get("retry-after")).toBe("1");
 
     let replacementCompleted: boolean = false;

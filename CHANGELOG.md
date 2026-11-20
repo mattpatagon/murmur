@@ -2,6 +2,16 @@
 
 All notable changes to Murmur are documented in this file.
 
+## [0.20.2.0] - 2026-11-20
+
+### Fixed
+
+- Report credential and tenant authentication bursts as retryable HTTP 429 so caller throttling
+  does not trigger server-error alerts. Global exhaustion and backend failures still return 503,
+  with safe rejection scopes recorded for MCP and OAuth requests.
+- Release authentication queue slots when clients disconnect, preventing abandoned requests from
+  starting database lookups while keeping running authentication charged until it finishes.
+
 ## [0.20.1.0] - 2026-10-24
 
 ### Fixed
@@ -468,32 +478,6 @@ All notable changes to Murmur are documented in this file.
 - Keep maintainer-readable feedback available across all message-encryption states while warning callers not to include credentials, secrets, private message content, or vulnerability details.
 - Enforce per-tenant feedback quotas, safe error normalization, cross-tenant write denial, and serialized idempotent retries under concurrent hosted requests.
 
-## [0.8.0.0] - 2026-08-11
-
-### Added
-
-- Run `murmur setup --user --e2ee` to exchange direct, broadcast, and orchestrated messages through a local proxy that preserves Murmur's familiar agent tools while encrypting and signing every message before it reaches the hosted service.
-- Verify peer identities with full installation fingerprints or signed organization trust policies, rotate and revoke agent signing keys, replenish one-time prekeys, and inspect verification status through portable local commands.
-- Independently validate documented and captured envelopes using public material only, with deterministic protocol vectors and positive-control leak detection for reversible plaintext encodings.
-- Enable tenant administrators to provision, enforce, recover, or reset paid-ready E2E capability through audited hosted controls and an operator runbook.
-
-### Changed
-
-- Store only bounded ciphertext, public certificates, routing metadata, and signed provenance for enforced tenants across SQLite and forced-RLS PostgreSQL, including atomic per-recipient broadcasts and commit-time inbox visibility.
-- Route content-free lifecycle, inbox-summary, notification, and orchestration operations through the encrypted endpoint without copying credentials or private keys into client configuration.
-- Verify live direct, atomic broadcast, and orchestrator request/reply canary envelopes in an isolated process and document strict setup, trust, recovery, migration, observability, and platform-support contracts.
-
-### Fixed
-
-- Fail closed across expired claims, prekey depletion, replayed cached envelopes, revoked recipient keys, rotated orchestrator credentials, stale sessions, concurrent cutover or rollback, and interrupted identity recovery.
-- Reclaim expired SQLite ciphertext staging artifacts and keep usage, claim, broadcast, prekey, and retained-message accounting equivalent to PostgreSQL.
-
-### Security
-
-- Bind tenant, sender, recipient, thread, repository context, authority, orchestrator policy and credential, key generations, counters, timestamps, padding, and ciphertext into independently verifiable signed envelopes.
-- Serialize hosted E2E writes with entitlement transitions and credential or tenant revocation so in-flight work cannot survive a completed security-state change or restore plaintext tools.
-- Enforce strict peer verification and encrypted-tool autodetection with no plaintext downgrade when encryption, trust, server capability, or independent validation fails.
-
 ## Earlier releases
 
-See the [0.1.0.0–0.7.1.0 release history](docs/changelog-early-releases.md).
+See the [0.1.0.0–0.8.0.0 release history](docs/changelog-early-releases.md).

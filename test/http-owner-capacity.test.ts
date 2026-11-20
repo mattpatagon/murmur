@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import { FOUNDING_TENANT_ID } from "../src/domain/value-objects.js";
 import { credentialAdmissionKey } from "../src/hosted/token-secret.js";
 import {
+  type AuthenticationCapacityReservation,
   HttpCapacityController,
   type StreamCapacityReservation,
   type TimeSource,
@@ -21,6 +22,12 @@ function ownerConfig(environment: NodeJS.ProcessEnv = {}): HttpServerConfig {
 function releaseRequest(reservation: (() => void) | null): () => void {
   if (reservation === null) throw new Error("Expected admitted owner capacity");
   return reservation;
+}
+
+function releaseAuthentication(reservation: AuthenticationCapacityReservation): () => void {
+  if (reservation.kind !== "reserved")
+    throw new Error("Expected authentication capacity reservation");
+  return reservation.release;
 }
 
 function releaseStream(reservation: StreamCapacityReservation): () => void {
@@ -156,33 +163,39 @@ test("known owner authentication remains serialized and cannot be claimed by an 
   try {
     for (let index: number = 0; index < 3; index += 1) {
       reservations.push(
-        releaseRequest(
+        releaseAuthentication(
           await controller.reserveAuthentication(`ordinary-${index}`, `tenant-${index}`, true),
         ),
       );
     }
-    expect(await controller.reserveAuthentication("spoof", tenantKey, false)).toBeNull();
-    const owner: () => void = releaseRequest(
+    expect(await controller.reserveAuthentication("spoof", tenantKey, false)).toEqual({
+      kind: "rejected",
+      scope: "global",
+    });
+    const owner: () => void = releaseAuthentication(
       await controller.reserveAuthentication("owner", tenantKey, true),
     );
     reservations.push(owner);
-    const serialized: Promise<(() => void) | null> = controller.reserveAuthentication(
+    const serialized: Promise<AuthenticationCapacityReservation> = controller.reserveAuthentication(
       "owner",
       tenantKey,
       true,
     );
     owner();
     owner();
-    const nextOwner: () => void = releaseRequest(await serialized);
+    const nextOwner: () => void = releaseAuthentication(await serialized);
     reservations.push(nextOwner);
-    const saturated: Promise<(() => void) | null> = controller.reserveAuthentication(
+    const saturated: Promise<AuthenticationCapacityReservation> = controller.reserveAuthentication(
       "owner-extra",
       tenantKey,
       true,
     );
     controller.stop();
-    expect(await saturated).toBeNull();
-    expect(await controller.reserveAuthentication("owner-after-stop", tenantKey, true)).toBeNull();
+    expect(await saturated).toEqual({ kind: "rejected", scope: "global" });
+    expect(await controller.reserveAuthentication("owner-after-stop", tenantKey, true)).toEqual({
+      kind: "rejected",
+      scope: "global",
+    });
   } finally {
     controller.stop();
     reservations.forEach((release: () => void): void => {
@@ -201,17 +214,17 @@ test("ordinary authentication waiters leave owner queue headroom and stop cancel
   );
   const tenantKey: string = credentialAdmissionKey(FOUNDING_TENANT_ID);
   const reservations: (() => void)[] = [];
-  const pending: Promise<(() => void) | null>[] = [];
+  const pending: Promise<AuthenticationCapacityReservation>[] = [];
   try {
     for (let index: number = 0; index < 3; index += 1) {
       reservations.push(
-        releaseRequest(
+        releaseAuthentication(
           await controller.reserveAuthentication(`active-${index}`, `active-tenant-${index}`, true),
         ),
       );
     }
     reservations.push(
-      releaseRequest(await controller.reserveAuthentication("owner", tenantKey, true)),
+      releaseAuthentication(await controller.reserveAuthentication("owner", tenantKey, true)),
     );
     for (let index: number = 0; index < 3; index += 1) {
       pending.push(
@@ -220,11 +233,22 @@ test("ordinary authentication waiters leave owner queue headroom and stop cancel
     }
     expect(
       await controller.reserveAuthentication("ordinary-overflow", "ordinary-overflow", true),
-    ).toBeNull();
+    ).toEqual({ kind: "rejected", scope: "global" });
     pending.push(controller.reserveAuthentication("owner", tenantKey, true));
-    expect(await controller.reserveAuthentication("owner-overflow", tenantKey, true)).toBeNull();
+    expect(await controller.reserveAuthentication("owner-overflow", tenantKey, true)).toEqual({
+      kind: "rejected",
+      scope: "global",
+    });
     controller.stop();
-    expect(await Promise.all(pending)).toEqual([null, null, null, null]);
+    expect(await Promise.all(pending)).toEqual(
+      Array.from(
+        { length: 4 },
+        (): AuthenticationCapacityReservation => ({
+          kind: "rejected",
+          scope: "global",
+        }),
+      ),
+    );
   } finally {
     controller.stop();
     reservations.forEach((release: () => void): void => {
@@ -294,16 +318,18 @@ test("owner tenant authentication can use the physical budget while each credent
   try {
     for (let index: number = 0; index < 4; index += 1) {
       reservations.push(
-        releaseRequest(await controller.reserveAuthentication(`owner-${index}`, tenantKey, true)),
+        releaseAuthentication(
+          await controller.reserveAuthentication(`owner-${index}`, tenantKey, true),
+        ),
       );
     }
-    const exhausted: Promise<(() => void) | null> = controller.reserveAuthentication(
+    const exhausted: Promise<AuthenticationCapacityReservation> = controller.reserveAuthentication(
       "owner-extra",
       tenantKey,
       true,
     );
     controller.stop();
-    expect(await exhausted).toBeNull();
+    expect(await exhausted).toEqual({ kind: "rejected", scope: "global" });
   } finally {
     controller.stop();
     reservations.forEach((release: () => void): void => {
