@@ -13,6 +13,8 @@ All notable changes to Murmur are documented in this file.
   starting database lookups while keeping running authentication charged until it finishes.
 - Honor authentication throttling during production canaries and session cleanup within existing
   attempt and deadline bounds, while continuing to fail incomplete cleanup.
+- Select a validated, distinct tenant for encrypted-message isolation probes so fixture ordering
+  cannot mistake permitted own-tenant reads for cross-tenant access.
 
 ## [0.20.1.0] - 2026-10-24
 
